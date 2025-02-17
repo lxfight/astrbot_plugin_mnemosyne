@@ -1,0 +1,55 @@
+{
+    "address":{
+        "description":"milvus数据库地址",
+        "type":"string",
+        "hint":"支持支持格式如:http://localhost:19530，https://localhost:19530，localhost:19530",
+        "obvious_hint":true,
+        "default":"http://localhost:19530"
+    },
+    "embedding_dim":{
+        "description":"向量模型输出的维度",
+        "type":"int",
+        "hint":"注意！这个维度大小最好不要随意变动，如果一定要改变向量维度，请使用/memory 相关指令清除旧数据",
+        "obvious_hint":true,
+        "default":1024
+    },
+    "max_history_memory":{
+        "description":"最大聊天历史长度",
+        "type":"int",
+        "hint":"该配置是插件独立的历史对话管理器，并非AstrBot相关的历史对话长度设置,值越小记忆总结的越频繁，但需要满足> 2倍的记忆总结的对话轮次",
+        "obvious_hint":true,
+        "default":20
+    },
+    "num_pairs":{
+        "description":"记忆总结的对话轮次",
+        "type":"int",
+        "hint":"每次历史对话总结时，总结的对话轮次数量，一问一答为一轮",
+        "obvious_hint":false,
+        "default":5
+    },
+    "embedding_key":{
+        "description":"embedding模型服务的apikey",
+        "type":"string",
+        "obvious_hint":false
+    },
+    "embedding_url":{
+        "description":"embedding模型服务的端点url",
+        "type":"string",
+        "hint":"目前只针对于OpenAI兼容的接口，填写到V1即可",
+        "obvious_hint":true
+    },
+    "embedding_model":{
+        "description":"embedding模型模型名称",
+        "type":"string"
+    },
+    "top_k":{
+        "description":"返回的长期记忆的数量",
+        "type":"int",
+        "default":3
+    },
+    "long_memory_prompt":{
+        "description":"对话总结提示词",
+        "type":"string",
+        "default":"请基于以下对话内容生成一段连贯的总结性文字，要求：1. 使用单段自然语言表述，不加序号或分点；2. 聚焦提取核心要素，包括但不限于参与者身份（姓名/角色）、核心事件、关键时间节点、特殊需求、争议点及解决方案；3. 保留涉及金额/数量/规格等量化信息；4. 突出异常状况或重要转折；5. 用简洁书面语整合信息，确保信息完整准确。注意：避免添加解释性内容，仅客观呈现对话要素的整合结果。6.以AI的第一人称视角记录信息"
+    }
+}
