@@ -6,26 +6,30 @@
         "obvious_hint":true,
         "default":"http://localhost:19530"
     },
-    "embedding_dim":{
-        "description":"向量模型输出的维度",
-        "type":"int",
-        "hint":"注意！这个维度大小最好不要随意变动，如果一定要改变向量维度，请使用/memory 相关指令清除旧数据",
+    "collection_name":{
+        "description":"向量数据库的集合名称",
+        "type":"string",
+        "hint":"长期记忆存储在向量数据库的哪个集合中,请使用英文命名",
         "obvious_hint":true,
-        "default":1024
+        "default":"default"
+    },
+    "use_personality_filtering":{
+        "description":"记忆查询时是否使用人格过滤",
+        "type":"bool",
+        "default":true
     },
     "max_history_memory":{
-        "description":"最大聊天历史长度",
+        "description":"最大聊天历史长度,为未来拓展的设计",
         "type":"int",
-        "hint":"该配置是插件独立的历史对话管理器，并非AstrBot相关的历史对话长度设置,值越小记忆总结的越频繁，但需要满足> 2倍的记忆总结的对话轮次",
-        "obvious_hint":true,
+        "hint":"该配置目前保持 > num_pairs 参数即可,暂无实际用途,为未来拓展的设计",
         "default":20
     },
     "num_pairs":{
-        "description":"记忆总结的对话轮次",
+        "description":"记忆总结的对话长度",
         "type":"int",
-        "hint":"每次历史对话总结时，总结的对话轮次数量，一问一答为一轮",
+        "hint":"一问一答长度为2，对话长度达到这个阈值时会进行记忆总结",
         "obvious_hint":false,
-        "default":5
+        "default":10
     },
     "embedding_key":{
         "description":"embedding模型服务的apikey",
@@ -41,6 +45,13 @@
     "embedding_model":{
         "description":"embedding模型模型名称",
         "type":"string"
+    },
+    "embedding_dim":{
+        "description":"向量模型输出的维度",
+        "type":"int",
+        "hint":"注意！这个维度大小最好不要随意变动，如果一定要改变向量维度，请修改collection_name",
+        "obvious_hint":true,
+        "default":1024
     },
     "top_k":{
         "description":"返回的长期记忆的数量",

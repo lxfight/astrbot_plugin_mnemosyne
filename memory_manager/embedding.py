@@ -1,0 +1,46 @@
+import openai
+from typing import List, Union
+import os
+
+class OpenAIEmbeddingAPI:
+    """
+    OpenAI 兼容的 Embedding 服务封装类
+    功能：支持通过环境变量或参数指定 API 密钥
+    """
+
+    def __init__(self, 
+                 model: str = "text-embedding-3-small",
+                 api_key: str = None,
+                 base_url: str = None):
+        """
+        :param model: 使用的嵌入模型名称
+        :param api_key: 可选 API 密钥（优先于环境变量）
+        :param base_url: 自定义 API 端点（用于兼容本地部署）
+        """
+        self.model = model
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = base_url or "https://api.openai.com/v1"
+
+        if not self.api_key:
+            raise ValueError("必须提供 OpenAI API 密钥或设置 OPENAI_API_KEY 环境变量")
+
+    def get_embeddings(self, texts: Union[str, List[str]]) -> List[List[float]]:
+        """
+        获取文本嵌入向量
+        :param texts: 输入文本（单条字符串或字符串列表）
+        :return: 嵌入向量列表
+        """
+        client = openai.OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url
+        )
+        
+        if isinstance(texts, str):
+            texts = [texts]
+
+        response = client.embeddings.create(
+            input=texts,
+            model=self.model
+        )
+        
+        return [data.embedding for data in response.data]
