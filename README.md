@@ -66,7 +66,7 @@ pip install pypinyin pymilvus
 
 ## 更新日志
 
-详见：[更新日志](docs\update_log.md)
+详见：[更新日志](docs/update_log.md)
 
 ## 🙏 致谢
 - AstrBot核心开发团队的技术支持
