@@ -35,6 +35,7 @@ pip install pypinyin pymilvus
 
 > 在Windows系统使用Docker安装详见[Windows安装教程](https://milvus.io/docs/zh/install_standalone-windows.md)
 
+
 ### API获取
 
 > 这里推荐一个平台：[阿里云百炼](https://bailian.console.aliyun.com/)
@@ -43,15 +44,6 @@ pip install pypinyin pymilvus
 >
 > 此外阿里不定期新推出的大模型在该平台也有免费额度可以使用
 
-## 指令
-
-目前可以使用的指令如下，都是针对Milvus数据库的操作,请在聊天中使用：
-
-- /memory list 列出当前数据库中的所有集合名称
-- /memory delete < Milvus 集合名称 > 删除指定的集合
-- /memory delete  当不输入Milvus集合名称时，默认清除所有的集合
-
-注意：目前删除操作没有设计二次确认，请谨慎操作
 
 > **⚠️ 警告：** 在配置中设置向量维度应与向量模型输出的维度相同。当换用别的向量模型后，切记注意是否与原向量模型输出维度相同，如果不相同，需要执行`/memory delete`指令删除之前的数据
 
@@ -74,20 +66,7 @@ pip install pypinyin pymilvus
 
 ## 更新日志
 
-### 🚀 v0.2.0
-**发布日期**：2025-02-23
-- **完全重构**:重构项目代码，提高代码的可拓展性
-- **资源管理**:对Milvus数据库连接进行合理的管理，但目前方案不是最优
-
-#### ⚠️ 升级注意
-1. **不向下兼容**：由于架构重构，Milvus数据库中格式会发生改变，建议使用配置中的`collection_name`切换新的数据库，暂时无法实现长期记忆的迁移
-2. **指令更改**：由于代码重构，指令也有变化，具体请使用/memory 查询使用
-
-### 🌱 v0.1.0
-**发布日期**：2025-02-20  
-- 实现基础记忆存储/检索功能  
-- 支持Milvus向量数据库基础操作
-- 构建对话总结核心算法框架
+详见：[更新日志](docs\update_log.md)
 
 ## 🙏 致谢
 - AstrBot核心开发团队的技术支持
@@ -97,3 +76,6 @@ pip install pypinyin pymilvus
 如果您有任何好的意见和想法，或者发现了bug，请随时提ISSUE，非常欢迎您的反馈和建议。我会认真阅读每一条反馈，并努力改进项目，提供更好的用户体验。
 
 感谢您的支持与关注，期待与您共同进步！
+
+**Star趋势**：  
+[![Star History Chart](https://api.star-history.com/svg?repos=lxfight/astrbot_plugin_mnemosyne)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
