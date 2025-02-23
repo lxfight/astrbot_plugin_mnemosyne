@@ -79,3 +79,4 @@ pip install pypinyin pymilvus
 
 **Star趋势**：  
 [![Star History Chart](https://api.star-history.com/svg?repos=lxfight/astrbot_plugin_mnemosyne)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
+_每一个star都是我们前进的动力！_
