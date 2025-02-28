@@ -57,9 +57,31 @@ class MilvusDatabase(VectorDatabase):
             self.collections.clear()  # 清空原有缓存
             
             for col_name in existing_collections:
-                col = Collection(col_name)
-                self.collections[col_name] = col
-                # self.logger.debug(f"已加载集合 '{col_name}' 到缓存中.")
+                try:
+                    # 确保集合存在
+                    if not utility.has_collection(col_name, using=self.connection_alias):
+                        self.logger.debug(f"集合 '{col_name}' 不存在")
+                        continue
+
+                    # 获取集合对象
+                    col = Collection(col_name)
+
+                    # 检查集合是否有索引
+                    if not col.indexes:
+                        self.logger.warning(f"集合 '{col_name}' 没有索引，跳过加载")
+                        continue
+
+                    # 加载集合到内存
+                    col.load()
+                    self.logger.debug(f"集合 '{col_name}' 已成功加载到内存")
+
+                    # 缓存集合对象
+                    self.collections[col_name] = col
+
+                except Exception as e:
+                    self.logger.error(f"加载集合 '{col_name}' 失败: {e}")
+                    continue  # 如果某个集合加载失败，继续处理下一个集合
+                
         except Exception as e:
             self.logger.error(f"连接 Milvus 数据库失败: {e}")
             raise
@@ -243,18 +265,25 @@ class MilvusDatabase(VectorDatabase):
     def get_latest_memory(self, collection_name: str, limit: int) -> Dict[str, Any]:
         """获取最新插入的记忆"""
         try:
-            collection = self.collections.get(collection_name)
-            if not collection:
-                raise ValueError(f"Collection '{collection_name}' does not exist.")
+            # 使用 _get_collection 方法确保集合已加载到内存
+            collection = self._get_collection(collection_name)
             
-            # 按时间戳降序获取最新记录
+            # 按时间戳降序获取最新记录（修正排序参数格式）
             results = collection.query(
                 expr="", 
                 output_fields=["*"],
-                sort_by_field=("create_time", "desc"),
+                sort_by=("create_time", "desc"),
                 limit=limit
             )
+            
+            # 安全处理空结果
             return results[0] if results else {}
+        except ValueError as ve:
+            self.logger.error(f"集合不存在: {ve}")
+            return {}
+        except IndexError:
+            self.logger.warning(f"集合 '{collection_name}' 中没有数据")
+            return {}
         except Exception as e:
             self.logger.error(f"获取最新的记忆失败: {e}")
             return {}

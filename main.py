@@ -180,7 +180,7 @@ class Mnemosyne(Star):
             yield event.plain_result(response)
         except Exception as e:
             self.logger.error(f"获取集合列表失败: {str(e)}")
-            yield event.plain_result("⚠️ 获取集合列表失败")
+            yield event.plain_result(f"⚠️ 获取集合列表失败{str(e)}")
     
 
     @permission_type(PermissionType.ADMIN)
@@ -250,7 +250,7 @@ class Mnemosyne(Star):
             
         except Exception as e:
             self.logger.error(f"查询记录失败: {str(e)}")
-            yield event.plain_result("⚠️ 查询记忆记录失败")
+            yield event.plain_result(f"⚠️ 查询记忆记录失败:{str(e)}")
 
 
 
