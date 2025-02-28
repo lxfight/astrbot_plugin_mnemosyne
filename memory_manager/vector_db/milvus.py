@@ -280,12 +280,15 @@ class MilvusDatabase(VectorDatabase):
             return results[0] if results else {}
         except ValueError as ve:
             self.logger.error(f"集合不存在: {ve}")
+            self.logger.debug(f"集合不存在: {ve}")
             return {}
         except IndexError:
             self.logger.warning(f"集合 '{collection_name}' 中没有数据")
+            self.logger.debug(f"集合 '{collection_name}' 中没有数据")
             return {}
         except Exception as e:
             self.logger.error(f"获取最新的记忆失败: {e}")
+            self.logger.debug(f"获取最新的记忆失败: {e}")
             return {}
         
     def delete(self, collection_name: str, expr: str):
@@ -300,6 +303,7 @@ class MilvusDatabase(VectorDatabase):
             self.logger.info(f"删除匹配记录: {expr}")
         except Exception as e:
             self.logger.error(f"删除失败: {e}")
+            self.logger.debug(f"删除失败: {e}")
 
     def drop_collection(self, collection_name: str) -> None:
         """
@@ -326,3 +330,4 @@ class MilvusDatabase(VectorDatabase):
             self.logger.info(f"成功删除集合 '{collection_name}' 及其下的所有数据.")
         except Exception as e:
             self.logger.error(f"删除集合时发生错误: {e}")
+            self.logger.debug(f"删除集合时发生错误: {e}")
