@@ -9,7 +9,7 @@ from astrbot.api.provider import ProviderRequest
 
 from pymilvus import DataType
 import time
-
+from datetime import datetime
 
 from .memory_manager.context_manager import ConversationContextManager
 from .memory_manager.vector_db.milvus import MilvusDatabase
@@ -18,7 +18,7 @@ from .memory_manager.embedding import OpenAIEmbeddingAPI
 from typing import List, Dict, Optional
 from .tools import parse_address
 
-@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.1", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
+@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.0", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
 class Mnemosyne(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -233,14 +233,17 @@ class Mnemosyne(Star):
                 collection_name = self.config["collection_name"]
             with self.memory_db:
                 records = self.memory_db.get_latest_memory(collection_name, limit)
-            
+                # self.logger.debug(f"查询到的记录: {records}")
+
             if not records:
                 yield event.plain_result("该集合暂无记忆记录")
                 return
                 
             response = [f"📝 集合 {collection_name} 的最新 {limit} 条记忆："]
             for i, record in enumerate(records, 1):
-                time_str = record["create_time"].strftime("%Y-%m-%d %H:%M")
+                # self.logger.debug(f'{record['create_time']},{record['content']},{record['session_id']}')
+                create_time = datetime.fromtimestamp(record['create_time'])
+                time_str = create_time.strftime("%Y-%m-%d %H:%M")
                 response.append(
                     f"{i}. [{time_str}] {record['content']}..."
                     f"\n   SessionID: {record['session_id']}"

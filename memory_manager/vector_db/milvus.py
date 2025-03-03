@@ -262,7 +262,7 @@ class MilvusDatabase(VectorDatabase):
                 loaded.append(name)
         return loaded
     
-    def get_latest_memory(self, collection_name: str, limit: int) -> Dict[str, Any]:
+    def get_latest_memory(self, collection_name: str, limit: int) -> List[Dict[str, Any]]:
         """获取最新插入的记忆"""
         try:
             # 使用 _get_collection 方法确保集合已加载到内存
@@ -277,19 +277,19 @@ class MilvusDatabase(VectorDatabase):
             )
             
             # 安全处理空结果
-            return results[0] if results else {}
+            return results if results else []
+        
         except ValueError as ve:
             self.logger.error(f"集合不存在: {ve}")
-            self.logger.debug(f"集合不存在: {ve}")
-            return {}
+            return []
+        
         except IndexError:
             self.logger.warning(f"集合 '{collection_name}' 中没有数据")
-            self.logger.debug(f"集合 '{collection_name}' 中没有数据")
-            return {}
+            return []
+        
         except Exception as e:
             self.logger.error(f"获取最新的记忆失败: {e}")
-            self.logger.debug(f"获取最新的记忆失败: {e}")
-            return {}
+            return []
         
     def delete(self, collection_name: str, expr: str):
         """根据条件删除记忆"""
@@ -303,7 +303,6 @@ class MilvusDatabase(VectorDatabase):
             self.logger.info(f"删除匹配记录: {expr}")
         except Exception as e:
             self.logger.error(f"删除失败: {e}")
-            self.logger.debug(f"删除失败: {e}")
 
     def drop_collection(self, collection_name: str) -> None:
         """
@@ -330,4 +329,3 @@ class MilvusDatabase(VectorDatabase):
             self.logger.info(f"成功删除集合 '{collection_name}' 及其下的所有数据.")
         except Exception as e:
             self.logger.error(f"删除集合时发生错误: {e}")
-            self.logger.debug(f"删除集合时发生错误: {e}")
