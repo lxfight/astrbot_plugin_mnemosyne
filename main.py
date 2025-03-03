@@ -18,7 +18,7 @@ from .memory_manager.embedding import OpenAIEmbeddingAPI
 from typing import List, Dict, Optional
 from .tools import parse_address
 
-@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.0", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
+@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.2", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
 class Mnemosyne(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
