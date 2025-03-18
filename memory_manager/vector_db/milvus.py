@@ -204,14 +204,13 @@ class MilvusDatabase(VectorDatabase):
                 raise ValueError(f"集合 '{collection_name}' 不存在.")
 
             collection.load()
-                
 
             results = collection.query(expr=filters, output_fields=output_fields)
-            return results
+            return results  # 直接返回查询结果，query 结果通常是可迭代的
         except Exception as e:
             self.logger.error(f"条件查询失败: {e}")
             return []
-        
+
     def search(self, collection_name: str, query_vector: List[float], top_k: int, filters: str = None) -> List[Dict[str, Any]]:
         """
         执行相似性搜索
@@ -229,7 +228,6 @@ class MilvusDatabase(VectorDatabase):
 
             collection.load()
 
-
             search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
             results = collection.search(
                 data=[query_vector],
@@ -238,7 +236,28 @@ class MilvusDatabase(VectorDatabase):
                 limit=top_k,
                 expr=filters
             )
-            return results
+            result_list = []
+            for hits in results:  # 遍历每个查询向量的搜索结果
+                for hit in hits:
+                    # 替换此处开始
+                    # 增强类型检查和错误处理
+                    if not all(hasattr(hit, attr) for attr in ['id', 'distance', 'entity']):
+                        self.logger.warning(f"无效的搜索结果对象类型: {type(hit)} | 内容: {hit}")
+                        continue
+                    
+                    try:
+                        entity_dict = hit.entity.to_dict() if hasattr(hit.entity, 'to_dict') else dict(hit.entity)
+                        result_list.append({
+                            "id": hit.id,
+                            "distance": hit.distance,
+                            "entity": entity_dict
+                        })
+                    except AttributeError as ae:
+                        self.logger.error(f"实体解析失败 - 缺少属性: {ae} | 数据: {hit}")
+                    except Exception as e:
+                        self.logger.error(f"处理搜索结果时发生意外错误: {e} | 数据: {hit}")
+                    # 替换此处结束
+            return result_list
         except Exception as e:
             self.logger.error(f"相似度搜索失败: {e}")
             return []
@@ -262,7 +281,7 @@ class MilvusDatabase(VectorDatabase):
                 loaded.append(name)
         return loaded
     
-    def get_latest_memory(self, collection_name: str, limit: int) -> List[Dict[str, Any]]:
+    def get_latest_memory (self, collection_name: str, limit: int) -> List[Dict[str, Any]]:
         """获取最新插入的记忆"""
         try:
             # 使用 _get_collection 方法确保集合已加载到内存
