@@ -113,8 +113,21 @@ class Mnemosyne(Star):
                 )
                 if not search_results:
                     return
-                # 提取搜索结果中的 ID
-                ids = [result.id for result in search_results[0]]
+                
+                # 修改开始：重构结果处理逻辑
+                ids = []
+                for result in search_results:  # 直接遍历搜索结果列表
+                    # 添加类型检查确保是字典类型
+                    if not isinstance(result, dict):
+                        self.logger.warning(f"无效的搜索结果类型: {type(result)} | 内容: {result}")
+                        continue
+                    
+                    # 安全获取 ID 字段
+                    if 'id' in result:
+                        ids.append(result['id'])
+                    else:
+                        self.logger.warning(f"搜索结果缺少 'id' 字段: {result}")
+                # 修改结束
                 
                 if ids:
                     # 构造 ID 列表的过滤条件
@@ -291,7 +304,7 @@ class Mnemosyne(Star):
                 with self.memory_db:
                     data = [
                         {
-                            "personality_id":persona_id,
+                            "personality_id":"输入自己bot的id",
                             "session_id":session_id,
                             "content":completion_text,
                             "embedding":embedding
