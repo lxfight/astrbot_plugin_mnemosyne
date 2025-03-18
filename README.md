@@ -77,6 +77,17 @@ pip install pypinyin pymilvus
 
 感谢您的支持与关注，期待与您共同进步！
 
+## 🌟 贡献者
+
+[![Contributors](https://img.shields.io/github/contributors/lxfight/astrbot_plugin_mnemosyne)](https://github.com/lxfight/astrbot_plugin_mnemosyne/graphs/contributors)
+
+感谢所有贡献者！  
+[点击查看完整贡献者列表](https://github.com/lxfight/astrbot_plugin_mnemosyne/graphs/contributors)
+
+
+
 **Star趋势**：  
 [![Star History Chart](https://api.star-history.com/svg?repos=lxfight/astrbot_plugin_mnemosyne)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
+
 _每一个star都是我们前进的动力！_
+
