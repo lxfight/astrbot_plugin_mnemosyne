@@ -304,7 +304,7 @@ class Mnemosyne(Star):
                 with self.memory_db:
                     data = [
                         {
-                            "personality_id":"输入自己bot的id",
+                            "personality_id":persona_id,
                             "session_id":session_id,
                             "content":completion_text,
                             "embedding":embedding
