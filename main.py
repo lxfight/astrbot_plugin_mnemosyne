@@ -304,7 +304,7 @@ class Mnemosyne(Star):
                 with self.memory_db:
                     data = [
                         {
-                            "personality_id":persona_id,
+                            "personality_id": persona_id if persona_id is not None else "default",
                             "session_id":session_id,
                             "content":completion_text,
                             "embedding":embedding
