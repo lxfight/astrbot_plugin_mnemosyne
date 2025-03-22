@@ -1,28 +1,73 @@
-name: Bug 报告
+name: '🐛 报告 Bug'
+title: '[Bug] '
 description: 提交 Bug 时填写的详细信息
-labels: ["bug", "待处理"]
+labels: ['bug', '待处理']
+assignees: ['your-username']
 
-fields:
-  - name: "标题"
-    required: true
-    default: "[Bug] 描述问题标题"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您报告问题！请提供清晰的复现步骤和必要的信息。
 
-  - name: "复现步骤"
-    required: true
-    description: "请描述如何复现此问题"
+  - type: textarea
+    attributes:
+      label: "标题"
+      description: "用简洁的语言描述问题"
+    validations:
+      required: true
 
-  - name: "预期行为"
-    required: true
-    description: "你期望的结果是什么？"
+  - type: textarea
+    attributes:
+      label: "复现步骤"
+      description: "如何复现此问题？"
+    validations:
+      required: true
 
-  - name: "实际行为"
-    required: true
-    description: "实际发生了什么？"
+  - type: textarea
+    attributes:
+      label: "预期行为"
+      description: "你期望的结果是什么？"
+    validations:
+      required: true
 
-  - name: "环境信息"
-    required: true
-    description: "AstrBot版本、AstrBot的部署方式、mnemosyne插件的版本、Milvus数据库的部署方式等信息"
+  - type: textarea
+    attributes:
+      label: "实际行为"
+      description: "实际发生了什么？"
+    validations:
+      required: true
 
-  - name: "截图/日志"
-    required: false
-    description: "如有，请附加截图、错误日志或代码片段"
+  - type: dropdown
+    attributes:
+      label: "操作系统"
+      description: "请选择你的操作系统"
+      multiple: false
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: "截图/日志"
+      description: "附加截图、错误日志或代码片段"
+      placeholder: "请粘贴日志或上传图片链接"
+    validations:
+      required: false
+
+  - type: checkboxes
+    attributes:
+      label: "补充信息"
+      options:
+        - label: "我已提供完整的环境信息"
+          required: true
+        - label: "我愿意提供更多信息"
+          description: "如果需要进一步沟通"
+
+  - type: markdown
+    attributes:
+      value: "感谢您的反馈！我们会在 24 小时内回复。"
