@@ -1,0 +1,28 @@
+name: 功能请求
+description: 提交新功能需求
+labels: ["enhancement", "待评估"]
+
+fields:
+  - name: "标题"
+    required: true
+    default: "[Feature] 请求新功能名称"
+
+  - name: "功能描述"
+    required: true
+    description: "详细描述所需功能"
+
+  - name: "使用场景"
+    required: true
+    description: "该功能在什么场景下会被使用？"
+
+  - name: "优先级"
+    required: true
+    type: choice
+    options:
+      - 高
+      - 中
+      - 低
+
+  - name: "替代方案"
+    required: false
+    description: "是否有其他解决方案？"

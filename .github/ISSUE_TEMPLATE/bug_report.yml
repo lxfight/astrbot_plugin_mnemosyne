@@ -1,0 +1,28 @@
+name: Bug 报告
+description: 提交 Bug 时填写的详细信息
+labels: ["bug", "待处理"]
+
+fields:
+  - name: "标题"
+    required: true
+    default: "[Bug] 描述问题标题"
+
+  - name: "复现步骤"
+    required: true
+    description: "请描述如何复现此问题"
+
+  - name: "预期行为"
+    required: true
+    description: "你期望的结果是什么？"
+
+  - name: "实际行为"
+    required: true
+    description: "实际发生了什么？"
+
+  - name: "环境信息"
+    required: true
+    description: "AstrBot版本、AstrBot的部署方式、mnemosyne插件的版本、Milvus数据库的部署方式等信息"
+
+  - name: "截图/日志"
+    required: false
+    description: "如有，请附加截图、错误日志或代码片段"

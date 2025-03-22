@@ -5,7 +5,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api.all import *
 from astrbot.api.message_components import * 
 from astrbot.core.log import LogManager
-from astrbot.api.provider import ProviderRequest
+from astrbot.api.provider import ProviderRequest,Personality
 
 from pymilvus import DataType
 import time
@@ -51,7 +51,6 @@ class Mnemosyne(Star):
 
 
         # 初始化数据库
-        
         host,port = parse_address(self.config.address)
         self.memory_db = MilvusDatabase(host,port)
         # 使用上下文管理器管理连接
@@ -71,6 +70,12 @@ class Mnemosyne(Star):
             api_key = self.config.embedding_key,
             base_url = self.config.embedding_url
         )
+        
+        try:
+            self.ebd.test_connection()
+        except Exception as e:
+            logger.error(f"Embedding API 测试失败: {e}")
+            raise e
 
     
     @filter.on_llm_request()
@@ -238,7 +243,7 @@ class Mnemosyne(Star):
         """
         查询指定集合的记忆记录
         用法：/memory list_records [集合名称] [数量]
-        示例：/memory list_records defult 5
+        示例：/memory list_records default 5
         """
         try:
             # 默认使用配置中的集合

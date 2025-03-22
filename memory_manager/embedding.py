@@ -24,23 +24,35 @@ class OpenAIEmbeddingAPI:
         if not self.api_key:
             raise ValueError("必须提供 OpenAI API 密钥或设置 OPENAI_API_KEY 环境变量")
 
+        self.client = openai.OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url
+            )
     def get_embeddings(self, texts: Union[str, List[str]]) -> List[List[float]]:
         """
         获取文本嵌入向量
         :param texts: 输入文本（单条字符串或字符串列表）
         :return: 嵌入向量列表
         """
-        client = openai.OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url
-        )
-        
-        if isinstance(texts, str):
-            texts = [texts]
+        try:            
+            if isinstance(texts, str):
+                texts = [texts]
 
-        response = client.embeddings.create(
-            input=texts,
-            model=self.model
-        )
-        
+            response = self.client.embeddings.create(
+                input=texts,
+                model=self.model
+            )
+        except Exception as e:
+            raise ConnectionError(f"Embedding Connection error: {e}\n 请检查Embedding 模型配置是否正确，是否可以访问")
         return [data.embedding for data in response.data]
+    
+    def test_connection(self):
+        # 测试与embedding 的连接
+        try:
+
+            response = self.client.embeddings.create(
+                input=["你好"],
+                model=self.model
+            )
+        except Exception as e:
+            raise ConnectionError(f"Embedding Connection error: {e}\n 请检查Embedding 模型配置是否正确，是否可以访问")

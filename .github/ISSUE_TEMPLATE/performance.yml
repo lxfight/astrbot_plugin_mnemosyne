@@ -1,0 +1,21 @@
+name: 性能问题
+description: 提交性能相关的优化建议或问题
+labels: ["performance", "待分析"]
+
+
+fields:
+  - name: "标题"
+    required: true
+    default: "[性能] 描述问题标题"
+
+  - name: "复现步骤"
+    required: true
+    description: "如何复现性能问题？"
+
+  - name: "性能指标"
+    required: true
+    description: "具体数值（例如：加载时间超过 10 秒）"
+
+  - name: "优化建议"
+    required: false
+    description: "是否有优化建议或参考方案？"
