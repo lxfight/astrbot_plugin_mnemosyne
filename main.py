@@ -55,6 +55,9 @@ class Mnemosyne(Star):
         self.memory_db = MilvusDatabase(host,port)
         # 使用上下文管理器管理连接
         with self.memory_db:
+            is_consistent = self.memory_db.check_collection_schema_consistency(self.config.collection_name, self.schema)
+            if not is_consistent:
+                self.logger.warning("集合结构不一致")
             # 创建集合
             self.memory_db.create_collection(self.config.collection_name, self.schema)
 
@@ -272,9 +275,58 @@ class Mnemosyne(Star):
             self.logger.error(f"查询记录失败: {str(e)}")
             yield event.plain_result(f"⚠️ 查询记忆记录失败:{str(e)}")
 
+    @memory_group.command("delete_session_memory")
+    async def delete_session_memory(
+        self,
+        event: AstrMessageEvent,
+        session_id: str,
+        confirm: str = None
+    ):
+        """
+        删除指定会话ID的所有记忆信息（需要管理员权限）
+        用法：/memory delete_session_memory <会话ID> --confirm
+        示例：/memory delete_session_memory session123 --confirm
+        """
+        try:
+            if not confirm:
+                yield event.plain_result(
+                    f"确认要永久删除会话ID {session_id} 的所有记忆信息吗？操作不可逆！\n"
+                    f"请再次执行命令并添加 --confirm 参数"
+                )
+                return
+            if confirm == "--confirm":
+                with self.memory_db:
+                    # 构造过滤条件
+                    expr = f"session_id == \"{session_id}\""
+                    self.memory_db.delete(collection_name=self.config.collection_name, expr=expr)
+                yield event.plain_result(f"✅ 已成功删除会话ID {session_id} 的所有记忆信息")
+                self.logger.warning(f"管理员删除了会话ID {session_id} 的所有记忆信息")
+            else:
+                yield event.plain_result(f"请输入 --confirm 参数")
 
+        except Exception as e:
+            self.logger.error(f"删除会话ID {session_id} 的记忆信息失败: {str(e)}")
+            yield event.plain_result(f"⚠️ 删除失败: {str(e)}")
 
+    @memory_group.command("get_session_id")
+    async def get_session_id(self, event: AstrMessageEvent):
+        """
+        获取当前会话ID
+        用法：/memory get_session_id
+        """
+        try:
+            # 获取当前会话ID
+            session_id = await self.context.conversation_manager.get_curr_conversation_id(event.unified_msg_origin)
+            
+            if session_id:
+                yield event.plain_result(f"当前会话ID: {session_id}")
+            else:
+                yield event.plain_result("无法获取当前会话ID")
+                self.logger.warning("无法获取当前会话ID")
 
+        except Exception as e:
+            self.logger.error(f"获取当前会话ID失败: {str(e)}")
+            yield event.plain_result(f"⚠️ 获取当前会话ID失败: {str(e)}")
     # --------------------------------------------------------------------------------#
     async def Summary_long_memory(self,persona_id, session_id, memory):
         """

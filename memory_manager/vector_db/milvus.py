@@ -348,3 +348,100 @@ class MilvusDatabase(VectorDatabase):
             self.logger.info(f"成功删除集合 '{collection_name}' 及其下的所有数据.")
         except Exception as e:
             self.logger.error(f"删除集合时发生错误: {e}")
+
+    def check_collection_schema_consistency(self, collection_name: str, expected_schema: Dict[str, Any]):
+        """
+        检查集合的 Schema 是否与预期一致
+        :param collection_name: 集合名称
+        :param expected_schema: 预期的 Schema 定义
+        :return: True 如果一致，False 如果不一致
+        """
+        try:
+            self._ensure_connection()  # 确保连接有效
+
+            # 检查集合是否存在
+            if not utility.has_collection(collection_name, using=self.connection_alias):
+                self.logger.warning(f"集合 '{collection_name}' 不存在，无法检查一致性.")
+                return False
+
+            # 获取集合的现有 Schema
+            collection = Collection(collection_name)
+            existing_fields = {field.name: field for field in collection.schema.fields}
+
+            # 边界条件：如果现有字段为空
+            if not existing_fields and expected_schema["fields"]:
+                self.logger.warning(f"集合 '{collection_name}' 没有任何字段，无法与预期 Schema 匹配.")
+                return False
+            
+            # 边界条件：如果预期字段为空
+            if not expected_schema["fields"]:
+                self.logger.warning(f"预期 Schema 的字段定义为空，无法与集合 '{collection_name}' 匹配.")
+                return False
+            # 提取字段一致性检查逻辑
+            def check_field(field_definition: Dict[str, Any], existing_fields: Dict[str, Any]) -> bool:
+                field_name = field_definition["name"]
+                field_dtype = field_definition["dtype"]
+
+                # 检查字段是否存在
+                if field_name not in existing_fields:
+                    self.logger.warning(f"集合 '{collection_name}' 缺少字段 '{field_name}'.")
+                    return False
+
+                existing_field = existing_fields[field_name]
+
+                # 检查字段类型是否一致
+                if existing_field.dtype != field_dtype:
+                    self.logger.warning(
+                        f"集合 '{collection_name}' 字段 '{field_name}' 的数据类型不匹配. "
+                        f"期望: {field_dtype}, 实际: {existing_field.dtype}."
+                    )
+                    return False
+
+                # 特殊处理：VARCHAR 和 FLOAT_VECTOR
+                if field_dtype == DataType.VARCHAR:
+                    expected_max_length = field_definition.get("max_length", None)
+                    actual_max_length = getattr(existing_field, "max_length", None)
+                    if expected_max_length != actual_max_length:
+                        self.logger.warning(
+                            f"集合 '{collection_name}' 字段 '{field_name}' 的最大长度不匹配. "
+                            f"期望: {expected_max_length}, 实际: {actual_max_length}."
+                        )
+                        return False
+                elif field_dtype == DataType.FLOAT_VECTOR:
+                    expected_dim = field_definition.get("dim", None)
+                    actual_dim = existing_field.params.get("dim", None)
+                    if expected_dim != actual_dim:
+                        self.logger.warning(
+                            f"集合 '{collection_name}' 字段 '{field_name}' 的维度不匹配. "
+                            f"期望: {expected_dim}, 实际: {actual_dim}."
+                        )
+                        return False
+                return True
+            
+            # 遍历预期的字段定义
+            for field_definition in expected_schema["fields"]:
+                if not check_field(field_definition, existing_fields):
+                    return False
+
+            # 检查是否有额外的字段
+            expected_field_names = {field["name"] for field in expected_schema["fields"]}
+            extra_fields = set(existing_fields.keys()) - expected_field_names
+            if extra_fields:
+                self.logger.warning(f"集合 '{collection_name}' 包含多余的字段: {extra_fields}.")
+                return False
+            
+            self.logger.info(f"集合 '{collection_name}' 的结构与预期一致.")
+            return True
+
+        except ConnectionError as ce:
+            self.logger.error(f"连接数据库时发生错误: {ce}")
+            return False
+        except KeyError as ke:
+            self.logger.error(f"Schema 定义中缺少关键字段: {ke}")
+            return False
+        except Exception as e:
+            self.logger.error(f"检查集合结构一致性时发生未知错误: {e}")
+            return False
+        
+
+
