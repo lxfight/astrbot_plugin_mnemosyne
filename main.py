@@ -75,7 +75,6 @@ class Mnemosyne(Star):
             self.ebd.test_connection()
         except Exception as e:
             self.logger.error(f"Embedding API 测试失败: {e}")
-            raise e
 
     
     @filter.on_llm_request()
