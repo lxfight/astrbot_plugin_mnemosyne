@@ -6,6 +6,9 @@
 
 ## 小更新速览
 
+### v0.2.5
+- 添加了两条指令支持：`/memory delete_session_memory`和`/memory get_session_id`实现会话级别的记忆删除
+
 ### v0.2.4
 - 添加了关于Embedding 模型服务相关的错误提示，以期帮助更好的定位问题
 
