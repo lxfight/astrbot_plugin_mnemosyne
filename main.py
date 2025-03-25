@@ -18,7 +18,7 @@ from .memory_manager.embedding import OpenAIEmbeddingAPI
 from typing import List, Dict, Optional
 from .tools import parse_address
 
-@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.5", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
+@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.6", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
 class Mnemosyne(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -51,28 +51,39 @@ class Mnemosyne(Star):
 
 
         # 初始化数据库
-        host,port = parse_address(self.config.address)
-        self.memory_db = MilvusDatabase(host,port)
-        # 使用上下文管理器管理连接
-        with self.memory_db:
-            is_consistent = self.memory_db.check_collection_schema_consistency(self.config.collection_name, self.schema)
-            if not is_consistent:
-                self.logger.warning("集合结构不一致")
-            # 创建集合
-            self.memory_db.create_collection(self.config.collection_name, self.schema)
+        
+        try:
+            host,port = parse_address(self.config.address)
+            self.memory_db = MilvusDatabase(host,port)
+            # 使用上下文管理器管理连接
+            with self.memory_db:
+                is_consistent = self.memory_db.check_collection_schema_consistency(self.config.collection_name, self.schema)
+                if not is_consistent:
+                    self.logger.warning("集合结构不一致")
+                # 创建集合
+                self.memory_db.create_collection(self.config.collection_name, self.schema)
 
-        # 初始化对话管理器
-        self.context_manager = ConversationContextManager(
-            max_turns=self.config.num_pairs,
-            max_history_length=self.config.max_history_memory
-        )
+        except Exception as e:
+            self.logger.error(f"插件mnemosyne:与Milvus数据库连接失败: {e}")
 
-        # 初始化embedding API设置
-        self.ebd = OpenAIEmbeddingAPI(
-            model = self.config.embedding_model,
-            api_key = self.config.embedding_key,
-            base_url = self.config.embedding_url
-        )
+        try:
+            # 初始化对话管理器
+            self.context_manager = ConversationContextManager(
+                max_turns=self.config.num_pairs,
+                max_history_length=self.config.max_history_memory
+            )
+        except Exception as e:
+            self.logger.error(f"插件mnemosyne:对话管理器初始化失败: {e}")
+        
+        try:
+            # 初始化embedding API设置
+            self.ebd = OpenAIEmbeddingAPI(
+                model = self.config.embedding_model,
+                api_key = self.config.embedding_key,
+                base_url = self.config.embedding_url
+            )
+        except Exception as e:
+            self.logger.error(f"Embedding API 初始化失败: {e}")
 
         try:
             self.ebd.test_connection()
@@ -88,7 +99,11 @@ class Mnemosyne(Star):
         # 获取会话ID
         session_id =await self.context.conversation_manager.get_curr_conversation_id(event.unified_msg_origin)
         conversation = await self.context.conversation_manager.get_conversation(event.unified_msg_origin, session_id)
-        persona_id = conversation.persona_id
+        # persona_id = conversation.persona_id
+
+        # 获取默认人格
+        if not conversation.persona_id and not conversation.persona_id == "[%None]":
+            persona_id = self.context.provider_manager.selected_default_persona["name"]
 
         if not persona_id:
             self.logger.warning(f"当前对话没有人格ID,可能会导致长期记忆存储出现问题")
