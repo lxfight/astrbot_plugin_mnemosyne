@@ -100,11 +100,13 @@ class Mnemosyne(Star):
         session_id =await self.context.conversation_manager.get_curr_conversation_id(event.unified_msg_origin)
         conversation = await self.context.conversation_manager.get_conversation(event.unified_msg_origin, session_id)
         # persona_id = conversation.persona_id
-
+        persona_id = None
         # 获取默认人格
         if not conversation.persona_id and not conversation.persona_id == "[%None]":
             persona_id = self.context.provider_manager.selected_default_persona["name"]
-
+        else:
+            persona_id = conversation.persona_id
+            
         if not persona_id:
             self.logger.warning(f"当前对话没有人格ID,可能会导致长期记忆存储出现问题")
 
