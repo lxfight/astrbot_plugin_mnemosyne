@@ -18,7 +18,7 @@ from .memory_manager.embedding import OpenAIEmbeddingAPI
 from typing import List, Dict, Optional
 from .tools import parse_address
 
-@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.6", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
+@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.7", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
 class Mnemosyne(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -106,7 +106,7 @@ class Mnemosyne(Star):
             persona_id = self.context.provider_manager.selected_default_persona["name"]
         else:
             persona_id = conversation.persona_id
-            
+
         if not persona_id:
             self.logger.warning(f"当前对话没有人格ID,可能会导致长期记忆存储出现问题")
 
