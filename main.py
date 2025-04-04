@@ -16,10 +16,10 @@ from astrbot.core.log import LogManager
 from astrbot.api.provider import LLMResponse, ProviderRequest
 
 # --- 插件内部模块导入 ---
-from . import initialization # 导入初始化逻辑模块
-from . import memory_operations # 导入记忆操作逻辑模块
-from . import commands # 导入命令处理实现模块
-from .constants import * # 导入所有常量
+from .core import initialization # 导入初始化逻辑模块
+from .core import memory_operations # 导入记忆操作逻辑模块
+from .core import commands # 导入命令处理实现模块
+from .core.constants import * # 导入所有常量
 
 # --- 类型定义和依赖库 ---
 from pymilvus import CollectionSchema

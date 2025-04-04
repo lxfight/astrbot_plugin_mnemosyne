@@ -16,13 +16,13 @@ from .constants import (
     VECTOR_FIELD_NAME, DEFAULT_OUTPUT_FIELDS, DEFAULT_MAX_TURNS, DEFAULT_MAX_HISTORY
 )
 from .tools import parse_address # 从同级目录导入
-from .memory_manager.context_manager import ConversationContextManager
-from .memory_manager.vector_db.milvus_manager import MilvusManager
-from .memory_manager.embedding import OpenAIEmbeddingAPI
+from ..memory_manager.context_manager import ConversationContextManager
+from ..memory_manager.vector_db.milvus_manager import MilvusManager
+from ..memory_manager.embedding import OpenAIEmbeddingAPI
 
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
-    from .main import Mnemosyne
+    from ..main import Mnemosyne
 
 # 获取初始化专用的日志记录器
 init_logger = LogManager.GetLogger(log_name="MnemosyneInit")

@@ -21,7 +21,7 @@ from .constants import (
 
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
-    from .main import Mnemosyne
+    from ..main import Mnemosyne
 
 
 async def handle_query_memory(plugin: 'Mnemosyne', event: AstrMessageEvent, req: ProviderRequest):

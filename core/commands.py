@@ -13,7 +13,7 @@ from .constants import DEFAULT_COLLECTION_NAME, PRIMARY_FIELD_NAME
 
 # 类型提示
 if TYPE_CHECKING:
-    from .main import Mnemosyne
+    from ..main import Mnemosyne
 
 
 # 注意：函数名加了 _impl 后缀，并接收 self
