@@ -7,6 +7,7 @@ from astrbot.api.message_components import *
 from astrbot.core.log import LogManager
 from astrbot.api.provider import ProviderRequest,Personality
 
+import re
 import time
 from datetime import datetime
 
@@ -298,6 +299,26 @@ class Mnemosyne(Star):
         """
         检索相关的长期记忆，并嵌入提示
         """
+
+        # 根据配置，删除上下文中超过配置数量的长期记忆
+        i = 0
+        for record in reversed(req.contexts):
+            if record.get("role") == "user":
+                i += 1
+                # 如果配置为负数，不做任何处理
+                if self.config.contexts_memory_len < 0:
+                    break
+                # 超过配置数量的长期记忆，进行清除
+                if(i > self.config.contexts_memory_len):
+
+                    raw_content = record.get("content", "")
+                    clean_content = re.sub(r'<Mnemosyne>.*?</Mnemosyne>', '', raw_content, flags=re.DOTALL)
+
+                    record['content'] = clean_content  # 这会直接修改原字典对象
+
+                    self.logger.info(f"修改后的用户输入内容: {clean_content}")
+                    break
+
         if not self.milvus_manager:
             self.logger.error("MilvusManager 未初始化，无法查询长期记忆。")
             return

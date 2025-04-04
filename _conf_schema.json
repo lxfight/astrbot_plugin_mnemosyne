@@ -58,6 +58,13 @@
         "type":"int",
         "default":3
     },
+    "contexts_memory_len": {
+        "description":"历史上下文中保留的长期记忆数量",
+        "type":"int",
+        "hint":"小于0表示完全保留，大于等于0表示保留最新的对应条",
+        "obvious_hint":true,
+        "default":0
+    },
     "long_memory_prompt":{
         "description":"对话总结提示词",
         "type":"string",
