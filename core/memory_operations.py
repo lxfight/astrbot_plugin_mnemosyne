@@ -50,9 +50,9 @@ async def handle_query_memory(plugin: 'Mnemosyne', event: AstrMessageEvent, req:
         for record in reversed(req.contexts):
             if record.get("role") == "user":
                 i += 1
-                # 如果配置为负数或0，则不清除
+                # 如果配置为负数，则不清除
                 contexts_memory_len = plugin.config.get("contexts_memory_len", 1) # 默认只保留最近1条用户消息的记忆
-                if contexts_memory_len <= 0:
+                if contexts_memory_len < 0:
                     break
                 # 清除超过配置数量的用户消息中的记忆标记
                 if i > contexts_memory_len:
