@@ -26,273 +26,58 @@ from pymilvus import (
 from pymilvus.exceptions import MilvusException, CollectionNotExistException, IndexNotExistException
 import asyncio
 
-@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.3.0", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
+# --- Constants ---
+DEFAULT_COLLECTION_NAME = "default"
+DEFAULT_EMBEDDING_DIM = 1024
+DEFAULT_MAX_TURNS = 10
+DEFAULT_MAX_HISTORY = 20
+DEFAULT_TOP_K = 5
+DEFAULT_MILVUS_TIMEOUT = 5 # seconds
+DEFAULT_PERSONA_ON_NONE = "UNKNOWN_PERSONA"
+VECTOR_FIELD_NAME = "embedding"
+PRIMARY_FIELD_NAME = "memory_id"
+DEFAULT_OUTPUT_FIELDS = ["content", "create_time", PRIMARY_FIELD_NAME]
+
+
+@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.3.1", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
 class Mnemosyne(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
         self.context = context
-
         # 设置日志
         self.logger = LogManager.GetLogger(log_name="Mnemosyne")
 
-        try:
-            embedding_dim = self.config.get("embedding_dim")
-            if not isinstance(embedding_dim, int) or embedding_dim <= 0:
-                raise ValueError("配置‘embedding_dim’必须是一个正整数。")
 
-            self.vector_field_name = "embedding"
-            self.primary_field_name = "memory_id"
-
-            fields = [
-                FieldSchema(name=self.primary_field_name, dtype=DataType.INT64, is_primary=True, auto_id=True, description="唯一记忆标识符"),
-                FieldSchema(name="personality_id", dtype=DataType.VARCHAR, max_length=256, description="与记忆关联的角色ID"),
-                FieldSchema(name="session_id", dtype=DataType.VARCHAR, max_length=72, description="会话ID"),
-                FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=4096, description="记忆内容（摘要或片段）"),
-                FieldSchema(name=self.vector_field_name, dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="记忆的嵌入向量"),
-                FieldSchema(name="create_time", dtype=DataType.INT64, description="创建记忆时的时间戳（Unix epoch）") # 如果没有提供，将自动添加到insert中
-            ]
-
-            self.collection_schema = CollectionSchema(
-                fields=fields,
-                description=f"长期记忆存储: {self.config.get('collection_name', 'mnemosyne_default')}",
-                primary_field=self.primary_field_name,
-                enable_dynamic_field=self.config.get("enable_dynamic_field", False) # 可选：允许动态字段？
-            )
-
-            # 定义索引参数
-            self.index_params = self.config.get("index_params", {
-                "metric_type": "L2",       # 默认度量类型
-                "index_type": "AUTOINDEX", # 默认索引类型（让Milvus选择）或指定为“IVF_FLAT”
-                "params": {}               # 默认参数（AutoIndex不需要，其他可能需要）
-                # 示例：IVF_FLAT: "params": {"nlist": 1024}
-                # HNSW示例：“params”： {"M": 16, "efConstruction": 200}
-            })
-            # 定义搜索参数
-            self.search_params = self.config.get("search_params", {
-                "metric_type": self.index_params.get("metric_type", "L2"), # 必须匹配索引度量类型
-                "params": {"nprobe": 10} # IVF_*的示例搜索参数，根据需要调整索引类型
-                # HNSW示例：“params”： {"ef": 128}
-            })
-
-        except Exception as e:
-            self.logger.error(f"插件 Mnemosyne: Schema 或索引/搜索参数定义失败: {e}")
-            raise # 如果模式错误，停止初始化
-
-        # 这定义了query_memory中的查询检索哪些字段
-        # 确保它包含显示或逻辑所需的字段（如create_time）
-        # 如果搜索只返回id/距离，则通常需要主键（memory_id）来获取完整的详细信息。
-        self.output_fields_for_query = self.config.get("output_fields", ["content", "create_time", self.primary_field_name])
-        self.logger.debug(f"插件 Mnemosyne: 输出字段定义为：{self.output_fields_for_query}")
-
-        # ---- 初始化MilvusManager ----
-        self.milvus_manager = None # 初始化为None
-        try:
-            milvus_address = self.config.get("address")
-            if not milvus_address:
-                raise ValueError("Milvus 'address' （host:port或uri）没有配置。")
-
-            # 根据地址格式确定连接方式
-            if milvus_address.startswith("http://") or milvus_address.startswith("https://") or milvus_address.startswith("unix:"):
-                connect_args = {"uri": milvus_address}
-            else:
-                host, port = parse_address(milvus_address)
-                connect_args = {"host": host, "port": port}
-
-            # 如果存在，从配置中添加其他连接参数
-            connect_args["user"] = self.config.get("user")
-            connect_args["password"] = self.config.get("password")
-            connect_args["token"] = self.config.get("token")
-            connect_args["secure"] = self.config.get("secure") # 如果无，MilvusManager处理的默认值
-            connect_args["db_name"] = self.config.get("db_name", "default")
-            connect_args["alias"] = self.config.get("collection_name","default")
-
-            self.logger.info(f"尝试使用参数连接到 Milvus: {connect_args}")
-            self.milvus_manager = MilvusManager(**connect_args)
-
-            # 初始化尝试后检查连接状态
-            if not self.milvus_manager or not self.milvus_manager.is_connected():
-                raise ConnectionError("无法初始化或连接到 Milvus。请检查配置和 Milvus 服务状态。")
-
-            self.logger.info("成功连接到 Milvus。")
-
-            # --- 集合和索引设置 ---
-            collection_name = self.config.get('collection_name', 'mnemosyne_default')
-
-            # TODO 检查模式一致性
-            self._check_schema_consistency(collection_name, self.collection_schema)
-
-            # 如果集合不存在，则创建集合
-            if not self.milvus_manager.has_collection(collection_name):
-                self.logger.info(f"集合 '{collection_name}' 不存在，尝试创建...")
-                collection_created = self.milvus_manager.create_collection(
-                    collection_name=collection_name,
-                    schema=self.collection_schema,
-                    # 如果需要，从配置中添加一致性级别
-                    # consistency_level=self.config.get("consistency_level", "Bounded")
-                )
-                if not collection_created:
-                    raise RuntimeError(f"创建 Milvus 集合 '{collection_name}' 失败。")
-                self.logger.info(f"集合 '{collection_name}' 创建成功。")
-
-                # 创建集合后创建索引
-                self.logger.info(f"为集合 '{collection_name}' 的字段 '{self.vector_field_name}' 创建索引...")
-                index_success = self.milvus_manager.create_index(
-                    collection_name=collection_name,
-                    field_name=self.vector_field_name,
-                    index_params=self.index_params,
-                    # index_name=f"{self.vector_field_name}_idx" # 可选：提供名称
-                )
-                if not index_success:
-                    # 日志错误，但根据严格程度可能允许继续
-                    self.logger.error(f"为字段 '{self.vector_field_name}' 创建索引失败。搜索功能可能受影响。")
-                    # raise RuntimeError(f"创建索引失败 for field '{self.vector_field_name}'.")
-                else:
-                    self.logger.info(f"为字段 '{self.vector_field_name}' 创建索引请求已发送，将在后台构建。")
-                    # 在索引创建开始后，可选择在这里加载收集
-                    self.milvus_manager.load_collection(collection_name)
-
-            else:
-                self.logger.info(f"集合 '{collection_name}' 已存在。")
-                # 检查在现有集合上是否存在索引
-                if not self.milvus_manager.has_index(collection_name):
-                    collection = self.milvus_manager.get_collection(collection_name)
-                    has_vector_index = False
-                    if collection:
-                        try:
-                            indices = collection.indexes
-                            for index in indices:
-                                if index.field_name == self.vector_field_name:
-                                    has_vector_index = True
-                                    break
-                        except Exception as idx_e:
-                            self.logger.warning(f"检查现有集合索引时出错: {idx_e}")
-
-                    if not has_vector_index:
-                        self.logger.warning(f"现有集合 '{collection_name}' 缺少向量字段 '{self.vector_field_name}' 的索引。尝试创建...")
-                        index_success = self.milvus_manager.create_index(
-                            collection_name=collection_name,
-                            field_name=self.vector_field_name,
-                            index_params=self.index_params,
-                        )
-                        if not index_success:
-                            self.logger.error(f"为现有集合的字段 '{self.vector_field_name}' 创建索引失败。")
-                        else:
-                            self.logger.info(f"为现有集合的字段 '{self.vector_field_name}' 创建索引请求已发送。")
-                    else:
-                        self.logger.info(f"现有集合 '{collection_name}' 的向量字段 '{self.vector_field_name}' 已有索引。")
-                # 确保加载集合以便稍后进行搜索
-                self.logger.info(f"确保集合 '{collection_name}' 已加载...")
-                load_success = self.milvus_manager.load_collection(collection_name)
-                if not load_success:
-                    self.logger.error(f"初始化时加载集合 '{collection_name}' 失败。搜索功能可能不可用。")
-
-        except Exception as e:
-            self.logger.error(f"插件 Mnemosyne: Milvus 初始化或集合/索引设置失败: {e}", exc_info=True)
-            # TODO 根据严重程度，可能需要禁用插件或停止bot
-            self.milvus_manager = None # 如果安装失败，确保manager为None
-
-        # ---- 初始化其他组件 ----
-        try:
-            # 初始化会话上下文管理器
-            self.context_manager = ConversationContextManager(
-                max_turns=self.config.get("num_pairs", 10), # Use .get for defaults
-                max_history_length=self.config.get("max_history_memory", 2000)
-            )
-        except Exception as e:
-            self.logger.error(f"插件 Mnemosyne: 对话管理器初始化失败: {e}")
-            # 判断这是否致命
+        # --- 初始化核心组件 ---
+        self.collection_schema: Optional[CollectionSchema] = None
+        self.index_params: dict = {}
+        self.search_params: dict = {}
+        self.output_fields_for_query: List[str] = []
+        self.collection_name: str = DEFAULT_COLLECTION_NAME
+        self.primary_field_name = PRIMARY_FIELD_NAME
+        self.vector_field_name = VECTOR_FIELD_NAME
+        self.milvus_manager: Optional[MilvusManager] = None
+        self.context_manager: Optional[ConversationContextManager] = None
+        self.ebd: Optional[OpenAIEmbeddingAPI] = None
 
         try:
-            # 初始化嵌入API设置
-            self.ebd = OpenAIEmbeddingAPI(
-                model = self.config.get("embedding_model"),
-                api_key = self.config.get("embedding_key"),
-                base_url = self.config.get("embedding_url")
-            )
-            # 测试初始化期间的连接
-            self.ebd.test_connection()
-            self.logger.info("Embedding API 连接测试成功。")
-        except Exception as e:
-            self.logger.error(f"Embedding API 初始化或测试失败: {e}")
-            # 判断这是否致命
+            # 1. 配置架构和参数
+            self._initialize_config_and_schema()
 
-    # --- 模式检查的帮助器（移动到类内部） ---
-    def _check_schema_consistency(self, collection_name: str, expected_schema: CollectionSchema):
-        """检查现有集合的 Schema 是否与预期一致 (简化版)。"""
-        if not self.milvus_manager or not self.milvus_manager.has_collection(collection_name):
-            # self.logger.info(f"集合 '{collection_name}' 不存在，无需检查一致性。")
-            return True # 没有可供比较的现有集合
+            # 2. 初始化并连接到Milvus
+            self._initialize_milvus()
 
-        try:
-            collection = self.milvus_manager.get_collection(collection_name)
-            if not collection:
-                self.logger.error(f"无法获取集合 '{collection_name}' 以检查 schema。")
-                return False # 视为不一致
+            # 3. 初始化其他组件（上下文管理器，嵌入API）
+            self._initialize_components()
 
-            actual_schema = collection.schema
-            expected_fields = {f.name: f for f in expected_schema.fields}
-            actual_fields = {f.name: f for f in actual_schema.fields}
-
-            consistent = True
-            warnings = []
-
-            # 检查期望字段
-            for name, expected_field in expected_fields.items():
-                if name not in actual_fields:
-                    warnings.append(f"缺少字段 '{name}'")
-                    consistent = False
-                    continue
-                actual_field = actual_fields[name]
-                # 基本类型检查（可能需要对复杂类型/参数进行细化）
-                if actual_field.dtype != expected_field.dtype:
-                    # 允许VARCHAR的灵活性？检查dim中的向量。
-                    is_vector = expected_field.dtype in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]
-                    is_varchar = expected_field.dtype == DataType.VARCHAR
-
-                    if is_vector:
-                        expected_dim = expected_field.params.get('dim')
-                        actual_dim = actual_field.params.get('dim')
-                        if expected_dim != actual_dim:
-                            warnings.append(f"字段 '{name}' 维度不匹配 (预期 {expected_dim}, 实际 {actual_dim})")
-                            consistent = False
-                    elif is_varchar:
-                        expected_len = expected_field.params.get('max_length')
-                        actual_len = actual_field.params.get('max_length')
-                        if expected_len != actual_len:
-                            # 但如果实际值更大，可能不会失败？
-                            warnings.append(f"字段 '{name}' VARCHAR 长度不匹配 (预期 {expected_len}, 实际 {actual_len})")
-                            # consistent = False # 判断这是否至关重要
-                            
-                    elif actual_field.dtype != expected_field.dtype:
-                        warnings.append(f"字段 '{name}' 类型不匹配 (预期 {expected_field.dtype}, 实际 {actual_field.dtype})")
-                        consistent = False
-
-                # 查看主键/auto_id状态
-                if actual_field.is_primary != expected_field.is_primary:
-                    warnings.append(f"字段 '{name}' 主键状态不匹配")
-                    consistent = False
-                if expected_field.is_primary and actual_field.auto_id != expected_field.auto_id:
-                    warnings.append(f"字段 '{name}' AutoID 状态不匹配")
-                    consistent = False
-
-
-            # 检查意外的额外字段
-            for name in actual_fields:
-                if name not in expected_fields:
-                    warnings.append(f"发现预期之外的字段 '{name}'")
-                    # TODO 判断这是否使它不一致
-
-            if not consistent:
-                self.logger.warning(f"集合 '{collection_name}' Schema 不一致: {'; '.join(warnings)}. 请手动检查或考虑重建集合。")
-            else:
-                self.logger.info(f"集合 '{collection_name}' Schema 与预期基本一致。")
-
-            return consistent
+            self.logger.info("Mnemosyne插件初始化成功。")
 
         except Exception as e:
-            self.logger.error(f"检查集合 '{collection_name}' schema 一致性时出错: {e}", exc_info=True)
-            return False # 将错误视为不一致
+            self.logger.error(f"Mnemosyne插件初始化失败: {e}", exc_info=True)
+            # 根据严重程度，可能需要禁用该插件
+            # 目前，组件可能保持None，稍后需要进行检查。
+            # raise RuntimeError(f"Mnemosyne插件初始化失败: {e}") from e
 
     @filter.on_llm_request()
     async def query_memory(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -370,9 +155,9 @@ class Mnemosyne(Star):
 
 
                 # 3. 执行搜索
-                collection_name = self.config.get('collection_name', 'default')
-                top_k = self.config.get("top_k", 5)
-                timeout_seconds = 5 # 默认5秒超时
+                collection_name = self.config.get('collection_name', DEFAULT_COLLECTION_NAME)
+                top_k = self.config.get("top_k", DEFAULT_TOP_K)
+                timeout_seconds = DEFAULT_MILVUS_TIMEOUT # 默认5秒超时
 
                 self.logger.info(f"搜索集合 '{collection_name}' (TopK: {top_k}, Filter: '{search_expression}')")
 
@@ -568,9 +353,9 @@ class Mnemosyne(Star):
             return
 
         # 默认使用配置中的集合
-        target_collection = collection_name or self.config.get("collection_name", "mnemosyne_default")
+        target_collection = collection_name or self.config.get("collection_name", DEFAULT_COLLECTION_NAME)
 
-        if limit <= 0 or limit > 100: # Add a reasonable upper limit for safety
+        if limit <= 0 or limit > 100:
             yield event.plain_result("⚠️ 查询数量必须在 1 到 100 之间。")
             return
         if offset < 0:
@@ -753,7 +538,7 @@ class Mnemosyne(Star):
             current_timestamp = int(time.time()) # 在这里添加时间戳
 
             # 插入前处理无persona_id
-            effective_persona_id = persona_id if persona_id else self.config.get("default_persona_id_on_none", "UNKNOWN_PERSONA") # 使用默认值或占位符
+            effective_persona_id = persona_id if persona_id else self.config.get("default_persona_id_on_none", DEFAULT_PERSONA_ON_NONE) # 使用默认值或占位符
 
             data_to_insert = [
                 {
@@ -785,21 +570,7 @@ class Mnemosyne(Star):
         except Exception as e:
             self.logger.error(f"形成或存储长期记忆时发生错误: {e}", exc_info=True)
 
-    
-    # --- 生命周期方法 ---
-    async def start(self):
-        """插件启动逻辑（如果需要，除了init）"""
-        self.logger.info("Mnemosyne 插件已启动。")
-        # 确保在init中未完成或失败时加载集合
-        if self.milvus_manager and self.milvus_manager.is_connected():
-            collection_name = self.config.get('collection_name', 'mnemosyne_default')
-            if self.milvus_manager.has_collection(collection_name):
-                self.logger.info(f"启动时确保集合 '{collection_name}' 已加载...")
-                load_success = self.milvus_manager.load_collection(collection_name)
-                if not load_success:
-                    self.logger.error(f"启动时加载集合 '{collection_name}' 失败。")
-
-    async def stop(self):
+    async def terminate(self):
         """插件停止逻辑"""
         self.logger.info("Mnemosyne 插件正在停止...")
         if self.milvus_manager:
@@ -818,3 +589,272 @@ class Mnemosyne(Star):
                 self.logger.error(f"停止插件时与 Milvus 交互出错: {e}", exc_info=True)
         self.logger.info("Mnemosyne 插件已停止。")
 
+    # --- 初始化 ---
+    def _initialize_config_and_schema(self):
+        """解析配置、验证和定义模式/索引参数。"""
+        self.logger.debug("初始化配置和模式...")
+        try:
+            embedding_dim = self.config.get("embedding_dim", DEFAULT_EMBEDDING_DIM)
+            if not isinstance(embedding_dim, int) or embedding_dim <= 0:
+                raise ValueError("配置‘embedding_dim’必须是一个正整数。")
+
+            fields = [
+                FieldSchema(name=self.primary_field_name, dtype=DataType.INT64, is_primary=True, auto_id=True, description="唯一记忆标识符"),
+                FieldSchema(name="personality_id", dtype=DataType.VARCHAR, max_length=256, description="与记忆关联的角色ID"),
+                FieldSchema(name="session_id", dtype=DataType.VARCHAR, max_length=72, description="会话ID"),
+                FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=4096, description="记忆内容（摘要或片段）"),
+                FieldSchema(name=self.vector_field_name, dtype=DataType.FLOAT_VECTOR, dim=embedding_dim, description="记忆的嵌入向量"),
+                FieldSchema(name="create_time", dtype=DataType.INT64, description="创建记忆时的时间戳（Unix epoch）") # 如果没有提供，将自动添加到insert中
+            ]
+
+            self.collection_name = self.config.get('collection_name', DEFAULT_COLLECTION_NAME)
+            self.collection_schema = CollectionSchema(
+                fields=fields,
+                description=f"长期记忆存储: {self.collection_name}",
+                primary_field=PRIMARY_FIELD_NAME,
+                enable_dynamic_field=self.config.get("enable_dynamic_field", False)
+            )
+
+            # 定义索引参数
+            self.index_params = self.config.get("index_params", {
+                "metric_type": "L2",       # 默认度量类型
+                "index_type": "AUTOINDEX", # 默认索引类型（让Milvus选择）或指定为“IVF_FLAT”
+                "params": {}               # 默认参数（AutoIndex不需要，其他可能需要）
+                # 示例：IVF_FLAT: "params": {"nlist": 1024}
+                # HNSW示例：“params”： {"M": 16, "efConstruction": 200}
+            })
+            # 定义搜索参数
+            self.search_params = self.config.get("search_params", {
+                "metric_type": self.index_params.get("metric_type", "L2"), # 必须匹配索引度量类型
+                "params": {"nprobe": 10} # IVF_*的示例搜索参数，根据需要调整索引类型
+                # HNSW示例：“params”： {"ef": 128}
+            })
+
+            self.output_fields_for_query = self.config.get("output_fields", DEFAULT_OUTPUT_FIELDS)
+            # 如果用户配置没有明确要求，确保始终包含主键
+            # if PRIMARY_FIELD_NAME not in self.output_fields_for_query:
+            #     self.output_fields_for_query.append(PRIMARY_FIELD_NAME)
+
+            self.logger.debug(f"集合模式定义 '{self.collection_name}' .")
+            self.logger.debug(f"索引参数: {self.index_params}")
+            self.logger.debug(f"搜索参数: {self.search_params}")
+            self.logger.debug(f"输出字段: {self.output_fields_for_query}")
+
+        except Exception as e:
+            self.logger.error(f"初始化配置和架构失败: {e}", exc_info=True)
+            raise # 重新引发以被__init__中的try-except捕获
+
+    def _initialize_milvus(self):
+        """初始化MilvusManager，连接并设置集合/索引。"""
+        self.logger.debug("初始化Milvus连接和设置…")
+        try:
+            milvus_address = self.config.get("address")
+            if not milvus_address:
+                raise ValueError("Milvus 'address' （host:port或uri）未配置。")
+
+            if milvus_address.startswith(("http://", "https://", "unix:")):
+                connect_args = {"uri": milvus_address}
+            else:
+                host, port = parse_address(milvus_address)
+                connect_args = {"host": host, "port": port}
+
+            # 从配置中添加可选的连接参数
+            for key in ["user", "password", "token", "secure", "db_name"]:
+                if key in self.config:
+                    connect_args[key] = self.config[key]
+            connect_args["alias"] = self.config.get("connection_alias", DEFAULT_COLLECTION_NAME) # 使用配置或默认的别名，这配置未使用
+
+
+            self.logger.info(f"试图用参数连接milvus: {connect_args}")
+            self.milvus_manager = MilvusManager(**connect_args)
+
+            if not self.milvus_manager or not self.milvus_manager.is_connected():
+                raise ConnectionError("初始化或连接Milvus失败。处理步骤检查配置和服务状态.")
+
+            self.logger.info(f"成功连接到Milvus (Alias: {connect_args['alias']}).")
+
+            # --- 集合和索引设置 ---
+            self._setup_milvus_collection_and_index()
+
+        except Exception as e:
+            self.logger.error(f"Milvus初始化或收集/索引设置失败: {e}", exc_info=True)
+            self.milvus_manager = None # 确保失败时manager为None
+            raise 
+
+    def _setup_milvus_collection_and_index(self):
+        """确保Milvus集合和索引存在并已加载。"""
+        if not self.milvus_manager or not self.collection_schema:
+            self.logger.error("无法设置Milvus集合/索引：管理器或架构未初始化。")
+            raise RuntimeError("MilvusManager或CollectionSchema未准备好。")
+
+        collection_name = self.collection_name
+
+        # 如果存在collection，请检查Schema Consistency
+        if self.milvus_manager.has_collection(collection_name):
+            self.logger.info(f"集合“{collection_name}”已存在。检查模式一致性…")
+            self._check_schema_consistency(collection_name, self.collection_schema)
+            # ^^注意：_check_schema_consistency现在只记录警告。
+        else:
+            # 如果集合不存在，则创建集合
+            self.logger.info(f"未找到集合“{collection_name}”。创建…")
+            if not self.milvus_manager.create_collection(collection_name, self.collection_schema):
+                raise RuntimeError(f"创建Milvus集合“{collection_name}”失败。")
+            self.logger.info(f"成功创建集合“{collection_name}”。")
+            # 创建集合后立即尝试创建索引
+            self._ensure_milvus_index(collection_name)
+
+        # 确保Index存在于（现已存在的）集合上
+        self._ensure_milvus_index(collection_name)
+
+        # 确保Collection已加载
+        self.logger.info(f"确保集合‘{collection_name}’已加载…")
+        if not self.milvus_manager.load_collection(collection_name):
+            self.logger.error(f"加载集合“{collection_name}”失败。搜索功能可能不可用。")
+        else:
+            self.logger.info(f"已加载集合“{collection_name}”。")
+
+    def _ensure_milvus_index(self, collection_name: str):
+        """检查矢量索引，如果缺少则创建它。"""
+        if not self.milvus_manager: return
+
+        try:
+            has_vector_index = False
+            if self.milvus_manager.has_collection(collection_name):
+                # 如果可用，使用has_index方法进行更健壮的检查，或者列出索引
+                if self.milvus_manager.has_index(collection_name, index_name=None): # 首先检查是否存在任何索引
+                    collection = self.milvus_manager.get_collection(collection_name)
+                    if collection:
+                        for index in collection.indexes:
+                            if index.field_name == VECTOR_FIELD_NAME:
+                                # TODO: 可选地检查索引参数是否匹配config？
+                                self.logger.info(f"在集合“{collection_name}”上找到字段“{VECTOR_FIELD_NAME}”的现有索引。")
+                                has_vector_index = True
+                                break
+                    else:
+                        self.logger.warning(f"无法获取“{collection_name}”的收集对象以验证索引详细信息。")
+                else:
+                    self.logger.info(f"集合‘{collection_name}’已存在，但没有索引。")
+
+
+            if not has_vector_index:
+                self.logger.warning(f"在集合“{collection_name}”上找不到向量字段“{VECTOR_FIELD_NAME}”的索引。试图创建…")
+                index_success = self.milvus_manager.create_index(
+                    collection_name=collection_name,
+                    field_name=VECTOR_FIELD_NAME,
+                    index_params=self.index_params,
+                    # index_name=f"{VECTOR_FIELD_NAME}_idx"
+                )
+                if not index_success:
+                    self.logger.error(f"为字段“{VECTOR_FIELD_NAME}”创建索引失败。搜索性能将受到影响。")
+                else:
+                    self.logger.info(f"为字段“{VECTOR_FIELD_NAME}”发送索引创建请求。它会在后台中生成。")
+            # else: 索引已存在
+                # self.logger.info(f"集合“{collection_name}”上的向量字段“{VECTOR_FIELD_NAME}”已经有索引。")
+
+        except Exception as e:
+            self.logger.error(f"为“{collection_name}”检查或创建索引时出错：{e}", exc_info=True)
+            raise
+    
+    def _initialize_components(self):
+        """初始化非milvus组件，如上下文管理器和嵌入API。"""
+        self.logger.debug("初始化其他组件…")
+        try:
+            self.context_manager = ConversationContextManager(
+                max_turns=self.config.get("num_pairs", DEFAULT_MAX_TURNS),
+                max_history_length=self.config.get("max_history_memory", DEFAULT_MAX_HISTORY)
+            )
+            self.logger.info("会话上下文管理器初始化。")
+        except Exception as e:
+            self.logger.error(f"初始化会话上下文管理器失败：{e}", exc_info=True)
+            raise 
+
+        try:
+            self.ebd = OpenAIEmbeddingAPI(
+                model=self.config.get("embedding_model"),
+                api_key=self.config.get("embedding_key"),
+                base_url=self.config.get("embedding_url")
+            )
+            # 初始化时测试连接
+            self.ebd.test_connection() # 失败时引发异常
+            self.logger.info("嵌入API初始化，连接测试成功。")
+        except Exception as e:
+            self.logger.error(f"嵌入API初始化或连接测试失败：{e}", exc_info=True)
+            self.ebd = None # 确保失败时ebd为None
+            raise
+    
+    # --- 模式检查的帮助器 ---
+    def _check_schema_consistency(self, collection_name: str, expected_schema: CollectionSchema):
+        """检查现有集合的 Schema 是否与预期一致 (简化版)。"""
+        if not self.milvus_manager or not self.milvus_manager.has_collection(collection_name):
+            # self.logger.info(f"集合 '{collection_name}' 不存在，无需检查一致性。")
+            return True # 没有可供比较的现有集合
+
+        try:
+            collection = self.milvus_manager.get_collection(collection_name)
+            if not collection:
+                self.logger.error(f"无法获取集合 '{collection_name}' 以检查 schema。")
+                return False # 视为不一致
+
+            actual_schema = collection.schema
+            expected_fields = {f.name: f for f in expected_schema.fields}
+            actual_fields = {f.name: f for f in actual_schema.fields}
+
+            consistent = True
+            warnings = []
+
+            # 检查期望字段
+            for name, expected_field in expected_fields.items():
+                if name not in actual_fields:
+                    warnings.append(f"缺少字段 '{name}'")
+                    consistent = False
+                    continue
+                actual_field = actual_fields[name]
+                # 基本类型检查（可能需要对复杂类型/参数进行细化）
+                if actual_field.dtype != expected_field.dtype:
+                    # 允许VARCHAR的灵活性？检查dim中的向量。
+                    is_vector = expected_field.dtype in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR]
+                    is_varchar = expected_field.dtype == DataType.VARCHAR
+
+                    if is_vector:
+                        expected_dim = expected_field.params.get('dim')
+                        actual_dim = actual_field.params.get('dim')
+                        if expected_dim != actual_dim:
+                            warnings.append(f"字段 '{name}' 维度不匹配 (预期 {expected_dim}, 实际 {actual_dim})")
+                            consistent = False
+                    elif is_varchar:
+                        expected_len = expected_field.params.get('max_length')
+                        actual_len = actual_field.params.get('max_length')
+                        if expected_len != actual_len:
+                            # 但如果实际值更大，可能不会失败？
+                            warnings.append(f"字段 '{name}' VARCHAR 长度不匹配 (预期 {expected_len}, 实际 {actual_len})")
+                            # consistent = False # 判断这是否至关重要
+                            
+                    elif actual_field.dtype != expected_field.dtype:
+                        warnings.append(f"字段 '{name}' 类型不匹配 (预期 {expected_field.dtype}, 实际 {actual_field.dtype})")
+                        consistent = False
+
+                # 查看主键/auto_id状态
+                if actual_field.is_primary != expected_field.is_primary:
+                    warnings.append(f"字段 '{name}' 主键状态不匹配")
+                    consistent = False
+                if expected_field.is_primary and actual_field.auto_id != expected_field.auto_id:
+                    warnings.append(f"字段 '{name}' AutoID 状态不匹配")
+                    consistent = False
+
+
+            # 检查意外的额外字段
+            for name in actual_fields:
+                if name not in expected_fields:
+                    warnings.append(f"发现预期之外的字段 '{name}'")
+                    # TODO 判断这是否使它不一致
+
+            if not consistent:
+                self.logger.warning(f"集合 '{collection_name}' Schema 不一致: {'; '.join(warnings)}. 请手动检查或考虑重建集合。")
+            else:
+                self.logger.info(f"集合 '{collection_name}' Schema 与预期基本一致。")
+
+            return consistent
+
+        except Exception as e:
+            self.logger.error(f"检查集合 '{collection_name}' schema 一致性时出错: {e}", exc_info=True)
+            return False # 将错误视为不一致

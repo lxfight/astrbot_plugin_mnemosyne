@@ -615,7 +615,6 @@ class MilvusManager:
         collection = self.get_collection(collection_name)
         if not collection:
             return False
-
         # 检查加载状态
         try:
             progress = utility.loading_progress(collection_name, using=self.alias)
@@ -624,7 +623,10 @@ class MilvusManager:
                 logger.info(f"集合 '{collection_name}' 已加载。")
                 return True
         except Exception as e:
-            logger.warning(f"检查集合 '{collection_name}' 加载状态时出错: {e}。将尝试加载。")
+            if e.code == 101:  # 集合未加载
+                logger.warning(f"集合 '{collection_name}' 尚未加载，将尝试加载。")
+            else:
+                logger.error(f"检查集合 '{collection_name}' 加载状态时出错: {e}。将尝试加载。")
 
 
         logger.info(f"尝试将集合 '{collection_name}' 加载到内存...")
