@@ -389,8 +389,8 @@ class MilvusManager:
             logger.error(f"向集合 '{collection_name}' 插入数据失败: {e}")
             return None
         except Exception as e:
-             logger.error(f"向集合 '{collection_name}' 插入数据时发生意外错误: {e}")
-             return None
+            logger.error(f"向集合 '{collection_name}' 插入数据时发生意外错误: {e}")
+            return None
 
     def delete(self, collection_name: str, expression: str, partition_name: Optional[str] = None, timeout: Optional[float] = None, **kwargs) -> Optional[Any]:
         """
@@ -425,8 +425,8 @@ class MilvusManager:
             logger.error(f"从集合 '{collection_name}' 删除实体失败: {e}")
             return None
         except Exception as e:
-             logger.error(f"从集合 '{collection_name}' 删除实体时发生意外错误: {e}")
-             return None
+            logger.error(f"从集合 '{collection_name}' 删除实体时发生意外错误: {e}")
+            return None
     
     def flush(self, collection_names: List[str], timeout: Optional[float] = None):
         """

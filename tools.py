@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+Mnemosyne 插件工具函数
+"""
+
 from urllib.parse import urlparse
 
 def parse_address(address: str):
