@@ -3,13 +3,7 @@ from urllib.parse import urlparse
 import time
 
 
-from pymilvus import (
-    connections,
-    utility,
-    CollectionSchema,
-    DataType,
-    Collection
-)
+from pymilvus import connections, utility, CollectionSchema, DataType, Collection
 from pymilvus.exceptions import (
     MilvusException,
     CollectionNotExistException,
