@@ -2,16 +2,19 @@ import openai
 from typing import List, Union
 import os
 
+
 class OpenAIEmbeddingAPI:
     """
     OpenAI 兼容的 Embedding 服务封装类
     功能：支持通过环境变量或参数指定 API 密钥
     """
 
-    def __init__(self, 
-                 model: str = "text-embedding-3-small",
-                 api_key: str = None,
-                 base_url: str = None):
+    def __init__(
+        self,
+        model: str = "text-embedding-3-small",
+        api_key: str = None,
+        base_url: str = None,
+    ):
         """
         :param model: 使用的嵌入模型名称
         :param api_key: 可选 API 密钥（优先于环境变量）
@@ -23,36 +26,30 @@ class OpenAIEmbeddingAPI:
         if not self.api_key:
             raise ValueError("必须提供 OpenAI API 密钥或设置 OPENAI_API_KEY 环境变量")
 
-        self.client = openai.OpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url
-            )
-        
+        self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url)
+
     def test_connection(self):
         # 测试与embedding 的连接
         try:
-            response = self.client.embeddings.create(
-                input=["你好"],
-                model=self.model
-            )
+            response = self.client.embeddings.create(input=["你好"], model=self.model)
         except Exception as e:
-            raise ConnectionError(f"Embedding Connection error: {e}\n 请检查Embedding 模型配置是否正确，是否可以访问")
+            raise ConnectionError(
+                f"Embedding Connection error: {e}\n 请检查Embedding 模型配置是否正确，是否可以访问"
+            )
+
     def get_embeddings(self, texts: Union[str, List[str]]) -> List[List[float]]:
         """
         获取文本嵌入向量
         :param texts: 输入文本（单条字符串或字符串列表）
         :return: 嵌入向量列表
         """
-        try:            
+        try:
             if isinstance(texts, str):
                 texts = [texts]
 
-            response = self.client.embeddings.create(
-                input=texts,
-                model=self.model
-            )
+            response = self.client.embeddings.create(input=texts, model=self.model)
         except Exception as e:
-            raise ConnectionError(f"Embedding Connection error: {e}\n 请检查Embedding 模型配置是否正确，是否可以访问")
+            raise ConnectionError(
+                f"Embedding Connection error: {e}\n 请检查Embedding 模型配置是否正确，是否可以访问"
+            )
         return [data.embedding for data in response.data]
-    
-    

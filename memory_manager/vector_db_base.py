@@ -33,7 +33,9 @@ class VectorDatabase(ABC):
         pass
 
     @abstractmethod
-    def query(self, collection_name: str, filters: str, output_fields: List[str]) -> List[Dict[str, Any]]:
+    def query(
+        self, collection_name: str, filters: str, output_fields: List[str]
+    ) -> List[Dict[str, Any]]:
         """
         根据条件查询数据
         :param collection_name: 集合名称
@@ -44,7 +46,13 @@ class VectorDatabase(ABC):
         pass
 
     @abstractmethod
-    def search(self, collection_name: str, query_vector: List[float], top_k: int, filters: str = None) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        collection_name: str,
+        query_vector: List[float],
+        top_k: int,
+        filters: str = None,
+    ) -> List[Dict[str, Any]]:
         """
         执行相似性搜索
         :param collection_name: 集合名称
@@ -78,17 +86,17 @@ class VectorDatabase(ABC):
     def get_latest_memory(self, collection_name: str) -> Dict[str, Any]:
         """获取最新插入的记忆"""
         pass
-    
+
     @abstractmethod
     def delete(self, collection_name: str, expr: str):
         """根据条件删除记忆"""
         pass
-    
+
     @abstractmethod
     def drop_collection(self, collection_name: str) -> None:
         """
         删除指定的集合（包括其下的所有数据）
-        
+
         :param collection_name: 要删除的集合名称
         """
         pass

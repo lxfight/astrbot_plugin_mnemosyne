@@ -2,6 +2,7 @@ from typing import List, Dict, Optional
 import time
 from astrbot.core.log import LogManager
 
+
 class ConversationContextManager:
     """
     自动管理对话历史的上下文管理器
@@ -21,8 +22,8 @@ class ConversationContextManager:
     def _reset_counter(self, session_id: str):
         """重置指定会话的计数器"""
         if session_id in self.conversations:
-            self.conversations[session_id]['turn_count'] = 0
-            self.conversations[session_id]['last_summary_time'] = time.time()
+            self.conversations[session_id]["turn_count"] = 0
+            self.conversations[session_id]["last_summary_time"] = time.time()
 
     def add_message(self, session_id: str, role: str, content: str) -> Optional[str]:
         """
@@ -34,24 +35,28 @@ class ConversationContextManager:
         """
         if session_id not in self.conversations:
             self.conversations[session_id] = {
-                'history': [],
-                'turn_count': 0,
-                'last_summary_time': time.time()
+                "history": [],
+                "turn_count": 0,
+                "last_summary_time": time.time(),
             }
 
         conversation = self.conversations[session_id]
-        conversation['history'].append({
-            "role": role,
-            "content": content,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        })
-        conversation['turn_count'] += 1
+        conversation["history"].append(
+            {
+                "role": role,
+                "content": content,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        conversation["turn_count"] += 1
         self.logger.debug(f"对话计数器：{conversation['turn_count']}条")
         # 保持历史记录在最大长度内
-        if len(conversation['history']) > self.max_history_length:
-            conversation['history'] = conversation['history'][-self.max_history_length:]
+        if len(conversation["history"]) > self.max_history_length:
+            conversation["history"] = conversation["history"][
+                -self.max_history_length :
+            ]
 
-        if conversation['turn_count'] >= self.max_turns:
+        if conversation["turn_count"] >= self.max_turns:
             return self._generate_summary_content(session_id)
         return None
 
@@ -59,8 +64,10 @@ class ConversationContextManager:
         """生成待总结的对话内容字符串"""
         conversation = self.conversations[session_id]
         summary = "\n".join(
-            [f"[{msg['timestamp']}] {msg['role']}: {msg['content']}" 
-             for msg in conversation['history'][-self.max_turns:]]
+            [
+                f"[{msg['timestamp']}] {msg['role']}: {msg['content']}"
+                for msg in conversation["history"][-self.max_turns :]
+            ]
         )
         self._reset_counter(session_id)
         return summary
@@ -70,8 +77,10 @@ class ConversationContextManager:
         if session_id in self.conversations:
             conversation = self.conversations[session_id]
             return "\n".join(
-                [f"[{msg['timestamp']}] {msg['role']}: {msg['content']}" 
-                 for msg in conversation['history']]
+                [
+                    f"[{msg['timestamp']}] {msg['role']}: {msg['content']}"
+                    for msg in conversation["history"]
+                ]
             )
         else:
             return "会话ID不存在"
