@@ -12,15 +12,10 @@
 
 ---
 
-- ## 小更新速览
-    - ### v0.2.7
-        - [#23](https://github.com/lxfight/astrbot_plugin_mnemosyne/issues/23)问题修复
+- ## 更新速览
+    - ### v0.3.1
+        - **重构插件代码**：该插件代码进行了重构，以适应新的 Milvus 数据库控制逻辑。
 
-    - ### v0.2.6
-        - 在插件初始化时，增加了相关错误的捕捉和提示，解决插件安装后初始化失败带来的问题。
-
-    - ### v0.2.5
-        - 添加了两条指令支持：`/memory delete_session_memory`和`/memory get_session_id`实现会话级别的记忆删除
 ---
 
 - ## 开发分支更新介绍
