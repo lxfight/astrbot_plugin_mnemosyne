@@ -136,14 +136,45 @@ async def list_records_cmd_impl(
             yield event.plain_result(f"⚠️ 集合 '{target_collection}' 不存在。")
             return
 
-        query_limit = limit + offset
-        if query_limit > 16384:
-            yield event.plain_result(
-                f"⚠️ 查询范围过大 (offset + limit = {query_limit})，超过 Milvus 限制。请减小数量或偏移量。"
-            )
-            return
+        # 允许查询超过 16384 范围的实体
 
-        expr = f"{PRIMARY_FIELD_NAME} >= 0"
+        # 检索偏移量的主键字段值
+        end_offset = 0 # 结束时的偏移量
+        primary_key = "0" # 过滤用的主键字段
+        for i in range(15000,offset,15000):
+            end_offset = i
+            expr = f"{PRIMARY_FIELD_NAME} > " + primary_key
+            output_fields = [PRIMARY_FIELD_NAME]
+            self.logger.debug(f"检索第" + str(i) + "个实体的主键字段值")
+            records = self.milvus_manager.query(
+                collection_name=target_collection,
+                expression=expr,
+                output_fields=output_fields,
+                limit=1,
+                offset = 14999
+            )
+            # 更新 primary_key
+            primary_key = records.pop().get(PRIMARY_FIELD_NAME)
+
+        end_offset = offset - end_offset - 1
+        expr = f"{PRIMARY_FIELD_NAME} > " + primary_key
+        output_fields = [PRIMARY_FIELD_NAME]
+        self.logger.debug(f"检索第" + str(offset - 1) + "个实体的主键字段值")
+        records = self.milvus_manager.query(
+            collection_name=target_collection,
+            expression=expr,
+            output_fields=output_fields,
+            limit=1,
+            offset = end_offset
+        )
+
+        # 最终的 偏移量的 主键字段值
+        # 可以直接用于过滤
+        primary_key = records.pop().get(PRIMARY_FIELD_NAME)
+
+
+        # 使用 检索到的偏移量的主键字段值，以此进行过滤
+        expr = f"{PRIMARY_FIELD_NAME} >= " + primary_key
         output_fields = [
             "content",
             "create_time",
@@ -153,15 +184,15 @@ async def list_records_cmd_impl(
         ]
 
         self.logger.debug(
-            f"查询集合 '{target_collection}' 记录: expr='{expr}', limit={query_limit}, output_fields={output_fields}"
+            f"查询集合 '{target_collection}' 记录: expr='{expr}', limit={limit}, output_fields={output_fields}"
         )
 
+        # 已经通过主键字段值进行过滤，无需再使用 offset 偏移
         records = self.milvus_manager.query(
             collection_name=target_collection,
             expression=expr,
             output_fields=output_fields,
             limit=limit,
-            offset=offset,
         )
 
         if records is None:
@@ -183,6 +214,10 @@ async def list_records_cmd_impl(
                 f"在指定的偏移量 {offset} 之后，集合 '{target_collection}' 没有更多记录了。"
             )
             return
+
+
+
+
 
         total_found_in_query = len(records)
         response_lines = [
