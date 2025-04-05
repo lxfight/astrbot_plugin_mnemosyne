@@ -4,10 +4,9 @@ Mnemosyne 插件初始化逻辑
 包含配置加载、Schema 定义、Milvus 连接和设置、其他组件初始化等。
 """
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 from pymilvus import CollectionSchema, FieldSchema, DataType
-from pymilvus.exceptions import MilvusException
 
 from astrbot.core.log import LogManager
 
