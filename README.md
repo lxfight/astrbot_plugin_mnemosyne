@@ -103,6 +103,11 @@
 
 [![Contributors](https://img.shields.io/github/contributors/lxfight/astrbot_plugin_mnemosyne)](https://github.com/lxfight/astrbot_plugin_mnemosyne/graphs/contributors)
 
+<a href="https://github.com/lxfight/astrbot_plugin_mnemosyne/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=lxfight/astrbot_plugin_mnemosyne" />
+</a>
+
+
 感谢所有贡献者！  
 
 **Star趋势**：  
