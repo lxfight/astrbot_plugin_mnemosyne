@@ -141,7 +141,7 @@ async def list_records_cmd_impl(
         # 检索偏移量的主键字段值
         end_offset = 0 # 结束时的偏移量
         primary_key = "0" # 过滤用的主键字段
-        for i in range(15000,offset,15000):
+        for i in range(5,offset,5):
             end_offset = i
             expr = f"{PRIMARY_FIELD_NAME} > " + primary_key
             output_fields = [PRIMARY_FIELD_NAME]
@@ -151,7 +151,7 @@ async def list_records_cmd_impl(
                 expression=expr,
                 output_fields=output_fields,
                 limit=1,
-                offset = 14999
+                offset = 4
             )
             # 更新 primary_key
             primary_key = records.pop().get(PRIMARY_FIELD_NAME)
@@ -214,10 +214,6 @@ async def list_records_cmd_impl(
                 f"在指定的偏移量 {offset} 之后，集合 '{target_collection}' 没有更多记录了。"
             )
             return
-
-
-
-
 
         total_found_in_query = len(records)
         response_lines = [
