@@ -104,13 +104,13 @@
 [![Contributors](https://img.shields.io/github/contributors/lxfight/astrbot_plugin_mnemosyne)](https://github.com/lxfight/astrbot_plugin_mnemosyne/graphs/contributors)
 
 <a href="https://github.com/lxfight">
-  <img src="https://avatars.githubusercontent.com/lxfight" width="60" height="60" style="border-radius: 50%;" alt="lxfight">
+  <img src="https://avatars.githubusercontent.com/lxfight" width="50" height="50" style="border-radius: 50%;" alt="lxfight">
 </a>
 <a href="https://github.com/plutor-lokong">
-  <img src="https://avatars.githubusercontent.com/plutor-lokong" width="60" height="60" style="border-radius: 50%;" alt="plutor-lokong">
+  <img src="https://avatars.githubusercontent.com/plutor-lokong" width="50" height="50" style="border-radius: 50%;" alt="plutor-lokong">
 </a>
 <a href="https://github.com/Rail1bc">
-  <img src="https://avatars.githubusercontent.com/Rail1bc" width="60" height="60" style="border-radius: 50%;" alt="Rail1bc">
+  <img src="https://avatars.githubusercontent.com/Rail1bc" width="50" height="50" style="border-radius: 50%;" alt="Rail1bc">
 </a>
 
 
