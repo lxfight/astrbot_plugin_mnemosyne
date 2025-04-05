@@ -174,7 +174,7 @@ async def list_records_cmd_impl(
 
 
         # 使用 检索到的偏移量的主键字段值，以此进行过滤
-        expr = f"{PRIMARY_FIELD_NAME} >= " + str(primary_key)
+        expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
         output_fields = [
             "content",
             "create_time",
@@ -207,7 +207,7 @@ async def list_records_cmd_impl(
             return
 
         records.sort(key=lambda x: x.get("create_time", 0), reverse=True)
-        paginated_records = records[offset : offset + limit]
+        paginated_records = records[0 : limit]
 
         if not paginated_records:
             yield event.plain_result(
