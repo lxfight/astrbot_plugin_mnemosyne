@@ -156,21 +156,22 @@ async def list_records_cmd_impl(
             # 更新 primary_key
             primary_key = records.pop().get(PRIMARY_FIELD_NAME)
 
+        # 如果存在偏移量，则更新 primary_key ，否则跳过
         end_offset = offset - end_offset - 1
-        expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
-        output_fields = [PRIMARY_FIELD_NAME]
-        self.logger.debug(f"检索第" + str(offset - 1) + "个实体的主键字段值")
-        records = self.milvus_manager.query(
-            collection_name=target_collection,
-            expression=expr,
-            output_fields=output_fields,
-            limit=1,
-            offset = end_offset
-        )
-
-        # 最终的 偏移量的 主键字段值
-        # 可以直接用于过滤
-        primary_key = records.pop().get(PRIMARY_FIELD_NAME)
+        if(end_offset > 0):
+            expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
+            output_fields = [PRIMARY_FIELD_NAME]
+            self.logger.debug(f"检索第" + str(offset - 1) + "个实体的主键字段值")
+            records = self.milvus_manager.query(
+                collection_name=target_collection,
+                expression=expr,
+                output_fields=output_fields,
+                limit=1,
+                offset = end_offset
+            )
+            # 最终的 偏移量的 主键字段值
+            # 可以直接用于过滤
+            primary_key = records.pop().get(PRIMARY_FIELD_NAME)
 
 
         # 使用 检索到的偏移量的主键字段值，以此进行过滤
