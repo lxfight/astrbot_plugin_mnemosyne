@@ -140,10 +140,10 @@ async def list_records_cmd_impl(
 
         # 检索偏移量的主键字段值
         end_offset = 0 # 结束时的偏移量
-        primary_key = "0" # 过滤用的主键字段
+        primary_key = 0 # 过滤用的主键字段
         for i in range(5,offset,5):
             end_offset = i
-            expr = f"{PRIMARY_FIELD_NAME} > " + primary_key
+            expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
             output_fields = [PRIMARY_FIELD_NAME]
             self.logger.debug(f"检索第" + str(i) + "个实体的主键字段值")
             records = self.milvus_manager.query(
@@ -157,7 +157,7 @@ async def list_records_cmd_impl(
             primary_key = records.pop().get(PRIMARY_FIELD_NAME)
 
         end_offset = offset - end_offset - 1
-        expr = f"{PRIMARY_FIELD_NAME} > " + primary_key
+        expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
         output_fields = [PRIMARY_FIELD_NAME]
         self.logger.debug(f"检索第" + str(offset - 1) + "个实体的主键字段值")
         records = self.milvus_manager.query(
@@ -174,7 +174,7 @@ async def list_records_cmd_impl(
 
 
         # 使用 检索到的偏移量的主键字段值，以此进行过滤
-        expr = f"{PRIMARY_FIELD_NAME} >= " + primary_key
+        expr = f"{PRIMARY_FIELD_NAME} >= " + str(primary_key)
         output_fields = [
             "content",
             "create_time",
