@@ -160,7 +160,8 @@ async def list_records_cmd_impl(
             collection_name=target_collection,
             expression=expr,
             output_fields=output_fields,
-            limit=query_limit,
+            limit=limit,
+            offset=offset,
         )
 
         if records is None:

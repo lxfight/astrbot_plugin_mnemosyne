@@ -1,6 +1,6 @@
 name: astrbot_plugin_mnemosyne
 desc: 一个基于Milvus数据库的长期记忆存储与查询插件
 help: 输入 /memory 查看帮助
-version: v0.3.1
+version: v0.3.2
 author: lxfight
 repo: https://github.com/lxfight/astrbot_plugin_mnemosyne
