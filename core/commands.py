@@ -176,7 +176,7 @@ async def list_records_cmd_impl(
             # 可以直接用于过滤
             primary_key = records.pop().get(PRIMARY_FIELD_NAME)
 
-        expr = f'{PRIMARY_FIELD_NAME} > ' + str(primary_key) + ' AND session_id in ["{session_id}"]'
+        expr = f'{PRIMARY_FIELD_NAME} > ' + str(primary_key) + f' AND session_id in ["{session_id}"]'
         self.logger.debug(f"查询集合 '{target_collection}' 记录: expr='{expr}'")
         output_fields = [
             "content",
