@@ -103,6 +103,16 @@
 
 [![Contributors](https://img.shields.io/github/contributors/lxfight/astrbot_plugin_mnemosyne)](https://github.com/lxfight/astrbot_plugin_mnemosyne/graphs/contributors)
 
+<a href="https://github.com/lxfight">
+  <img src="https://github.com/lxfight.png" width="60" height="60" style="border-radius: 50%;" alt="lxfight">
+</a>
+<a href="https://github.com/plutor-lokong">
+  <img src="https://github.com/plutor-lokong.png" width="60" height="60" style="border-radius: 50%;" alt="plutor-lokong">
+</a>
+<a href="https://github.com/Rail1bc">
+  <img src="https://github.com/Rail1bc.png" width="60" height="60" style="border-radius: 50%;" alt="Rail1bc">
+</a>
+
 感谢所有贡献者！  
 
 **Star趋势**：  
