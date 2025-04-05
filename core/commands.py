@@ -11,7 +11,7 @@ from datetime import datetime
 from astrbot.api.event import AstrMessageEvent
 
 # 导入必要的模块和常量
-from .constants import DEFAULT_COLLECTION_NAME, PRIMARY_FIELD_NAME
+from .constants import PRIMARY_FIELD_NAME
 
 # 类型提示
 if TYPE_CHECKING:
@@ -121,7 +121,10 @@ async def list_records_cmd_impl(
     if not self.milvus_manager or not self.milvus_manager.is_connected():
         yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
         return
-
+    # 获取当前会话的 session_id
+    session_id = await self.context.conversation_manager.get_curr_conversation_id(
+        event.unified_msg_origin
+    )
     target_collection = collection_name or self.collection_name
 
     if limit <= 0 or limit > 50:
@@ -143,7 +146,8 @@ async def list_records_cmd_impl(
             )
             return
 
-        expr = f"{PRIMARY_FIELD_NAME} >= 0"
+        expr = f'{PRIMARY_FIELD_NAME} >= 0 AND session_id in ["{session_id}"]'
+        self.logger.debug(f"查询集合 '{target_collection}' 记录: expr='{expr}'")
         output_fields = [
             "content",
             "create_time",
@@ -184,7 +188,7 @@ async def list_records_cmd_impl(
             )
             return
 
-        total_found_in_query = len(records)
+        # total_found_in_query = len(records)
         response_lines = [
             f"📜 集合 '{target_collection}' 的记忆记录 (显示第 {offset + 1} 到 {offset + len(paginated_records)} 条，按时间倒序):"
         ]

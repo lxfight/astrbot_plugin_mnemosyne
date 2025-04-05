@@ -134,6 +134,7 @@ class Mnemosyne(Star):
         ):
             yield result
 
+    @permission_type(PermissionType.ADMIN)
     @memory_group.command("list_records")  # type: ignore
     async def list_records_cmd(
         self,
