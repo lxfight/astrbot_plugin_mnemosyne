@@ -220,7 +220,8 @@ async def list_records_cmd_impl(
         response_lines = [
             f"📜 集合 '{target_collection}' 的记忆记录 (显示第 {offset + 1} 到 {offset + len(paginated_records)} 条，按时间倒序):"
         ]
-        for i, record in enumerate(paginated_records, start=offset + 1):
+        # 使 limit 不同时，同一条记忆始终保持同样的 序号
+        for i, record in enumerate(paginated_records, start=0):
             ts = record.get("create_time")
             try:
                 time_str = (
@@ -236,7 +237,7 @@ async def list_records_cmd_impl(
             persona_id = record.get("personality_id", "未知人格")
             pk = record.get(PRIMARY_FIELD_NAME, "未知ID")
             response_lines.append(
-                f"#{i} [ID: {pk}]\n"
+                f"#{offset + limit - i} [ID: {pk}]\n"
                 f"  时间: {time_str}\n"
                 f"  人格: {persona_id}\n"
                 f"  会话: {session_id}\n"
