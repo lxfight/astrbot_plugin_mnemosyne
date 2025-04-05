@@ -240,7 +240,7 @@ async def list_records_cmd_impl(
             persona_id = record.get("personality_id", "未知人格")
             pk = record.get(PRIMARY_FIELD_NAME, "未知ID")
             response_lines.append(
-                f"#{offset + limit - i} [ID: {pk}]\n"
+                f"#{offset + len(paginated_records) - i} [ID: {pk}]\n"
                 f"  时间: {time_str}\n"
                 f"  人格: {persona_id}\n"
                 f"  会话: {session_id}\n"
