@@ -1,395 +1,192 @@
-from astrbot.api.provider import LLMResponse
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.event.filter import PermissionType,permission_type
+# -*- coding: utf-8 -*-
+"""
+Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
+负责插件注册、初始化流程调用、事件和命令的绑定。
+"""
+
+from typing import List, Optional
+
+# --- AstrBot 核心导入 ---
+from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event.filter import PermissionType, permission_type
 from astrbot.api.star import Context, Star, register
-from astrbot.api.all import *
-from astrbot.api.message_components import * 
+from astrbot.api.all import *  # 导入 AstrBot API
+from astrbot.api.message_components import *  # 导入消息组件
 from astrbot.core.log import LogManager
-from astrbot.api.provider import ProviderRequest,Personality
+from astrbot.api.provider import LLMResponse, ProviderRequest
 
-from pymilvus import DataType
-import time
-from datetime import datetime
+# --- 插件内部模块导入 ---
+from .core import initialization  # 导入初始化逻辑模块
+from .core import memory_operations  # 导入记忆操作逻辑模块
+from .core import commands  # 导入命令处理实现模块
+from .core.constants import *  # 导入所有常量
 
+# --- 类型定义和依赖库 ---
+from pymilvus import CollectionSchema
 from .memory_manager.context_manager import ConversationContextManager
-from .memory_manager.vector_db.milvus import MilvusDatabase
+from .memory_manager.vector_db.milvus_manager import MilvusManager
 from .memory_manager.embedding import OpenAIEmbeddingAPI
 
-from typing import List, Dict, Optional
-from .tools import parse_address
 
-@register("Mnemosyne", "lxfight", "一个AstrBot插件，实现基于RAG技术的长期记忆功能。", "0.2.7", "https://github.com/lxfight/astrbot_plugin_mnemosyne")
+@register(
+    "Mnemosyne",
+    "lxfight",
+    "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
+    "0.3.1",
+    "https://github.com/lxfight/astrbot_plugin_mnemosyne",
+)
 class Mnemosyne(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
-
-        # 设置日志
+        self.context = context
         self.logger = LogManager.GetLogger(log_name="Mnemosyne")
+        self.logger.info("开始初始化 Mnemosyne 插件...")
 
-        # 定义向量数据库的基础结构和需要查询的内容
-        # 这部分影响Milvus数据库结构，和query函数查询得到的内容
-        self.schema = {
-            "fields": [
-                {"name": "memory_id", "dtype": DataType.INT64, "is_primary": True, "auto_id": True},
-                {"name": "personality_id", "dtype": DataType.VARCHAR, "max_length": 256,"is_nullable":True},
-                {"name": "session_id", "dtype": DataType.VARCHAR, "max_length": 72},
-                {"name": "content", "dtype": DataType.VARCHAR, "max_length": 4096},
-                {"name": "embedding", "dtype": DataType.FLOAT_VECTOR, "dim": self.config.embedding_dim,
-                    "index_params": {
-                        "index_type": "IVF_SQ8",
-                        "metric_type": "L2",
-                        "params": {"nlist": 256}
-                    }},
-                {"name": "create_time", "dtype": DataType.INT64}
-            ],
-            "description": f"对话机器人的长期记忆存储库: {self.config.collection_name}"
-        }
+        # --- 初始化核心组件状态 ---
+        self.collection_schema: Optional[CollectionSchema] = None
+        self.index_params: dict = {}
+        self.search_params: dict = {}
+        self.output_fields_for_query: List[str] = []
+        self.collection_name: str = DEFAULT_COLLECTION_NAME
+        self.milvus_manager: Optional[MilvusManager] = None
+        self.context_manager: Optional[ConversationContextManager] = None
+        self.ebd: Optional[OpenAIEmbeddingAPI] = None
 
-        # 这会使得MilvusDatabase.query 函数查询时只返回content,create_time内容
-        self.output_fields = ["content","create_time"]
-
-
-        # 初始化数据库
-        
+        # --- 执行初始化流程 ---
         try:
-            host,port = parse_address(self.config.address)
-            self.memory_db = MilvusDatabase(host,port)
-            # 使用上下文管理器管理连接
-            with self.memory_db:
-                is_consistent = self.memory_db.check_collection_schema_consistency(self.config.collection_name, self.schema)
-                if not is_consistent:
-                    self.logger.warning("集合结构不一致")
-                # 创建集合
-                self.memory_db.create_collection(self.config.collection_name, self.schema)
-
+            initialization.initialize_config_and_schema(self)
+            initialization.initialize_milvus(self)
+            initialization.initialize_components(self)
+            self.logger.info("Mnemosyne 插件核心组件初始化成功。")
         except Exception as e:
-            self.logger.error(f"插件mnemosyne:与Milvus数据库连接失败: {e}")
-
-        try:
-            # 初始化对话管理器
-            self.context_manager = ConversationContextManager(
-                max_turns=self.config.num_pairs,
-                max_history_length=self.config.max_history_memory
+            self.logger.critical(
+                f"Mnemosyne 插件初始化过程中发生严重错误，插件可能无法正常工作: {e}",
+                exc_info=True,
             )
-        except Exception as e:
-            self.logger.error(f"插件mnemosyne:对话管理器初始化失败: {e}")
-        
-        try:
-            # 初始化embedding API设置
-            self.ebd = OpenAIEmbeddingAPI(
-                model = self.config.embedding_model,
-                api_key = self.config.embedding_key,
-                base_url = self.config.embedding_url
-            )
-        except Exception as e:
-            self.logger.error(f"Embedding API 初始化失败: {e}")
 
-        try:
-            self.ebd.test_connection()
-        except Exception as e:
-            self.logger.error(f"Embedding API 测试失败: {e}")
-
-    
+    # --- 事件处理钩子 (调用 memory_operations.py 中的实现) ---
     @filter.on_llm_request()
     async def query_memory(self, event: AstrMessageEvent, req: ProviderRequest):
-        """
-        检索相关的长期记忆，并嵌入提示
-        """
-        # 获取会话ID
-        session_id =await self.context.conversation_manager.get_curr_conversation_id(event.unified_msg_origin)
-        conversation = await self.context.conversation_manager.get_conversation(event.unified_msg_origin, session_id)
-        # persona_id = conversation.persona_id
-        persona_id = None
-        # 获取默认人格
-        if not conversation.persona_id and not conversation.persona_id == "[%None]":
-            persona_id = self.context.provider_manager.selected_default_persona["name"]
-        else:
-            persona_id = conversation.persona_id
-
-        if not persona_id:
-            self.logger.warning(f"当前对话没有人格ID,可能会导致长期记忆存储出现问题")
-
-        # 记录对话历史
-        memory = self.context_manager.add_message(session_id=session_id, role="user", content=req.prompt)
-        if memory:
-            # 触发消息总结
-            await self.Summary_long_memory(persona_id,session_id,memory)
-
+        """[事件钩子] 在 LLM 请求前，查询并注入长期记忆。"""
         try:
-            detailed_results = []
-            # 向量化
-            query_ebd = self.ebd.get_embeddings(req.prompt)
-
-            # 是否启用人格ID隔离
-            if self.config.use_personality_filtering:
-                filters = f"personality_id == \"{persona_id}\" and session_id == \"{session_id}\""
-            else:
-                filters = f"session_id == \"{session_id}\""
-            
-            with self.memory_db:
-                # 查询长期记忆
-                search_results = self.memory_db.search(
-                    collection_name = self.config.collection_name,
-                    query_vector = query_ebd[0],
-                    top_k = self.config.top_k,
-                    filters = filters
-                )
-                if not search_results:
-                    return
-                
-                # 修改开始：重构结果处理逻辑
-                ids = []
-                for result in search_results:  # 直接遍历搜索结果列表
-                    # 添加类型检查确保是字典类型
-                    if not isinstance(result, dict):
-                        self.logger.warning(f"无效的搜索结果类型: {type(result)} | 内容: {result}")
-                        continue
-                    
-                    # 安全获取 ID 字段
-                    if 'id' in result:
-                        ids.append(result['id'])
-                    else:
-                        self.logger.warning(f"搜索结果缺少 'id' 字段: {result}")
-                # 修改结束
-                
-                if ids:
-                    # 构造 ID 列表的过滤条件
-                    id_str = ", ".join(map(str, ids))
-                    query_filters = f"memory_id in [{id_str}]"
-
-                    detailed_results = self.memory_db.query(
-                        collection_name = self.config.collection_name,
-                        filters = query_filters,
-                        output_fields= self.output_fields
-                    )
+            await memory_operations.handle_query_memory(self, event, req)
         except Exception as e:
-            self.logger.error(f"长期记忆查询发生错误：\n{e}")
-            return 
-        
-        if detailed_results:
-            long_memory = "这里是一些长期记忆中的内容，或许会对你回答有所帮助：\n"
-            for result in detailed_results:
-                long_memory += f"记忆内容：{result['content']}, 时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(result['create_time']))}\n"
+            self.logger.error(
+                f"处理 on_llm_request 钩子时发生未捕获异常: {e}", exc_info=True
+            )
 
-            self.logger.info(f'得到的长期记忆：\n{long_memory}')
-
-            req.system_prompt += long_memory
-        else:
-            self.logger.info("未找到相应的长期记忆，不补充")
-
-    
     @filter.on_llm_response()
     async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse):
-        """
-        在LLM调用完成后,添加上下文记录
-        """
-        session_id =await self.context.conversation_manager.get_curr_conversation_id(event.unified_msg_origin)
-        conversation = await self.context.conversation_manager.get_conversation(event.unified_msg_origin, session_id)
-        persona_id = conversation.persona_id
+        """[事件钩子] 在 LLM 响应后，记录上下文并可能触发总结。"""
+        try:
+            await memory_operations.handle_on_llm_resp(self, event, resp)
+        except Exception as e:
+            self.logger.error(
+                f"处理 on_llm_response 钩子时发生未捕获异常: {e}", exc_info=True
+            )
 
+    # --- 内部辅助方法 (调用 memory_operations.py 中的实现) ---
+    async def Summary_long_memory(
+        self, persona_id: Optional[str], session_id: str, memory_text: str
+    ):
+        """[辅助方法] 触发长期记忆总结和存储流程。"""
+        try:
+            await memory_operations.handle_summary_long_memory(
+                self, persona_id, session_id, memory_text
+            )
+        except Exception as e:
+            self.logger.error(
+                f"调用 Summary_long_memory 时发生未捕获异常: {e}", exc_info=True
+            )
 
-        if not persona_id:
-            self.logger.warning(f"当前对话没有人格ID,可能会导致长期记忆存储出现问题")
-        # 添加上下文
-        memory = self.context_manager.add_message(session_id=session_id, role="assistant", content=resp.completion_text)
+    # --- 命令处理 (定义方法并应用装饰器，调用 commands.py 中的实现) ---
 
-        if memory:
-            # 触发消息总结
-            await self.Summary_long_memory(persona_id,session_id,memory)
-    
-    #---------------------------------------------------------------------------#
     @command_group("memory")
     def memory_group(self):
-        """长期记忆管理命令"""
+        """长期记忆管理命令组 /memory"""
+        # 这个方法体是空的，主要是为了定义组
         pass
-    
 
-    @memory_group.command("list")
-    async def list_collections(self, event: AstrMessageEvent):
-        """列出所有记忆集合 /memory list"""
-        try:
-            with self.memory_db:
-                collections = self.memory_db.list_collections()
-            response = "当前记忆集合列表：\n" + "\n".join(
-                [f"🔖 {col}" for col in collections]
-            )
-            yield event.plain_result(response)
-        except Exception as e:
-            self.logger.error(f"获取集合列表失败: {str(e)}")
-            yield event.plain_result(f"⚠️ 获取集合列表失败{str(e)}")
-    
+    # 应用装饰器，并调用实现函数
+    @memory_group.command("list")  # type: ignore
+    async def list_collections_cmd(self, event: AstrMessageEvent):
+        """列出当前 Milvus 实例中的所有集合 /memory list
+        使用示例：/memory list
+        """
+        # 调用 commands.py 中的实现，并代理 yield
+        async for result in commands.list_collections_cmd_impl(self, event):
+            yield result
 
     @permission_type(PermissionType.ADMIN)
-    @memory_group.command("drop_collection")
-    async def delete_collection(
+    @memory_group.command("drop_collection")  # type: ignore
+    async def delete_collection_cmd(
         self,
         event: AstrMessageEvent,
         collection_name: str,
-        confirm: str = None
+        confirm: Optional[str] = None,
     ):
+        """[管理员] 删除指定的 Milvus 集合及其所有数据
+        使用示例：/memory drop_collection [collection_name] [confirm]
         """
-        删除向量数据库集合（需要管理员权限）
-        用法：/memory drop_collection <集合名称> --confirm
-        示例：/memory drop_collection test_memories --confirm
-        """
-        try:
-            if not confirm:
-                yield event.plain_result(
-                    f"确认要永久删除集合 {collection_name} 吗？操作不可逆！\n"
-                    f"请再次执行命令并添加 --confirm 参数"
-                )
-                return
-            if confirm == "--confirm":
-                with self.memory_db:
-                    self.memory_db.drop_collection(collection_name)
-                yield event.plain_result(f"✅ 已成功删除集合 {collection_name}")
-                self.logger.warning(f"管理员删除了集合: {collection_name}")
-            else:
-                yield event.plain_result(f"请输入 --confirm 参数")
+        async for result in commands.delete_collection_cmd_impl(
+            self, event, collection_name, confirm
+        ):
+            yield result
 
-        except Exception as e:
-            self.logger.error(f"删除集合失败: {str(e)}")
-            yield event.plain_result(f"⚠️ 删除失败: {str(e)}")
-
-    @memory_group.command("list_records")
-    async def list_records(
+    @memory_group.command("list_records")  # type: ignore
+    async def list_records_cmd(
         self,
         event: AstrMessageEvent,
-        collection_name: str = None,
-        limit: int = 10
+        collection_name: Optional[str] = None,
+        limit: int = 5,
+        offset: int = 0,
     ):
+        """查询指定集合的记忆记录 (按创建时间倒序显示)
+        使用示例: /memory list_records [collection_name] [limit] [offset]
         """
-        查询指定集合的记忆记录
-        用法：/memory list_records [集合名称] [数量]
-        示例：/memory list_records default 5
-        """
-        try:
-            # 默认使用配置中的集合
-            if not collection_name:
-                collection_name = self.config["collection_name"]
-            with self.memory_db:
-                records = self.memory_db.get_latest_memory(collection_name, limit)
-                # self.logger.debug(f"查询到的记录: {records}")
+        async for result in commands.list_records_cmd_impl(
+            self, event, collection_name, limit, offset
+        ):
+            yield result
 
-            if not records:
-                yield event.plain_result("该集合暂无记忆记录")
-                return
-                
-            response = [f"📝 集合 {collection_name} 的最新 {limit} 条记忆："]
-            for i, record in enumerate(records, 1):
-                # self.logger.debug(f'{record['create_time']},{record['content']},{record['session_id']}')
-                create_time = datetime.fromtimestamp(record['create_time'])
-                time_str = create_time.strftime("%Y-%m-%d %H:%M")
-                response.append(
-                    f"{i}. [{time_str}] {record['content']}..."
-                    f"\n   SessionID: {record['session_id']}"
-                )
-                
-            yield event.plain_result("\n\n".join(response))
-            
-        except Exception as e:
-            self.logger.error(f"查询记录失败: {str(e)}")
-            yield event.plain_result(f"⚠️ 查询记忆记录失败:{str(e)}")
-
-    @memory_group.command("delete_session_memory")
-    async def delete_session_memory(
-        self,
-        event: AstrMessageEvent,
-        session_id: str,
-        confirm: str = None
+    @permission_type(PermissionType.ADMIN)
+    @memory_group.command("delete_session_memory")  # type: ignore
+    async def delete_session_memory_cmd(
+        self, event: AstrMessageEvent, session_id: str, confirm: Optional[str] = None
     ):
+        """[管理员] 删除指定会话 ID 相关的所有记忆信息
+        使用示例：/memory delete_session_memory [session_id] [confirm]
         """
-        删除指定会话ID的所有记忆信息（需要管理员权限）
-        用法：/memory delete_session_memory <会话ID> --confirm
-        示例：/memory delete_session_memory session123 --confirm
+        async for result in commands.delete_session_memory_cmd_impl(
+            self, event, session_id, confirm
+        ):
+            yield result
+
+    @memory_group.command("get_session_id")  # type: ignore
+    async def get_session_id_cmd(self, event: AstrMessageEvent):
+        """获取当前与您对话的会话 ID
+        使用示例：/memory get_session_id
         """
-        try:
-            if not confirm:
-                yield event.plain_result(
-                    f"确认要永久删除会话ID {session_id} 的所有记忆信息吗？操作不可逆！\n"
-                    f"请再次执行命令并添加 --confirm 参数"
-                )
-                return
-            if confirm == "--confirm":
-                with self.memory_db:
-                    # 构造过滤条件
-                    expr = f"session_id == \"{session_id}\""
-                    self.memory_db.delete(collection_name=self.config.collection_name, expr=expr)
-                yield event.plain_result(f"✅ 已成功删除会话ID {session_id} 的所有记忆信息")
-                self.logger.warning(f"管理员删除了会话ID {session_id} 的所有记忆信息")
-            else:
-                yield event.plain_result(f"请输入 --confirm 参数")
+        async for result in commands.get_session_id_cmd_impl(self, event):
+            yield result
 
-        except Exception as e:
-            self.logger.error(f"删除会话ID {session_id} 的记忆信息失败: {str(e)}")
-            yield event.plain_result(f"⚠️ 删除失败: {str(e)}")
-
-    @memory_group.command("get_session_id")
-    async def get_session_id(self, event: AstrMessageEvent):
-        """
-        获取当前会话ID
-        用法：/memory get_session_id
-        """
-        try:
-            # 获取当前会话ID
-            session_id = await self.context.conversation_manager.get_curr_conversation_id(event.unified_msg_origin)
-            
-            if session_id:
-                yield event.plain_result(f"当前会话ID: {session_id}")
-            else:
-                yield event.plain_result("无法获取当前会话ID")
-                self.logger.warning("无法获取当前会话ID")
-
-        except Exception as e:
-            self.logger.error(f"获取当前会话ID失败: {str(e)}")
-            yield event.plain_result(f"⚠️ 获取当前会话ID失败: {str(e)}")
-    # --------------------------------------------------------------------------------#
-    async def Summary_long_memory(self,persona_id, session_id, memory):
-        """
-        总结对话历史形成长期记忆,并插入数据库
-        """
-        try:
-            llm_response = await self.context.get_using_provider().text_chat(
-                prompt=self.config.long_memory_prompt,
-                contexts=[{"role":"user","content":f"{memory}"}]
-            )
-
-            self.logger.debug(f"llm_respone:{llm_response}")
-            # 检查并提取 completion_text
-            if hasattr(llm_response, "completion_text"):
-                completion_text = llm_response.completion_text
-            elif isinstance(llm_response, dict) and "completion_text" in llm_response:
-                completion_text = llm_response["completion_text"]
-            else:
-                raise ValueError("llm_response 缺少 completion_text 字段")
-
-            embedding = self.ebd.get_embeddings(completion_text)[0]
-
-            if hasattr(llm_response, "role"):
-                role = llm_response.role
-            elif isinstance(llm_response, dict) and "role" in llm_response:
-                role = llm_response["role"]
-            else:
-                raise ValueError("llm_response 缺少 role 字段")
-            
-            if role == "assistant":
-                with self.memory_db:
-                    data = [
-                        {
-                            "personality_id": persona_id if persona_id is not None else "default",
-                            "session_id":session_id,
-                            "content":completion_text,
-                            "embedding":embedding
-                        }
-                    ]
-                    self.memory_db.insert(collection_name=self.config.collection_name, data=data)
-                    self.logger.info(f"记录记忆：\n{completion_text}")
-            else:
-                self.logger.error(f"大语言模型总结长期记忆发生错误, 角色不是 assistant。模型回复内容：{completion_text}")
-                
-        except Exception as e:
-            self.logger.error(f"形成长期记忆时发生错误：\n{e}")
-
-
-    
+    # --- 插件生命周期方法 ---
+    async def terminate(self):
+        """插件停止时的清理逻辑"""
+        self.logger.info("Mnemosyne 插件正在停止...")
+        if self.milvus_manager and self.milvus_manager.is_connected():
+            try:
+                if self.milvus_manager.has_collection(self.collection_name):
+                    self.logger.info(
+                        f"正在从内存中释放集合 '{self.collection_name}'..."
+                    )
+                    self.milvus_manager.release_collection(self.collection_name)
+                self.logger.info("正在断开与 Milvus 的连接...")
+                self.milvus_manager.disconnect()
+                self.logger.info("Milvus 连接已成功断开。")
+            except Exception as e:
+                self.logger.error(f"停止插件时与 Milvus 交互出错: {e}", exc_info=True)
+        else:
+            self.logger.info("Milvus 管理器未初始化或已断开连接，无需断开。")
+        self.logger.info("Mnemosyne 插件已停止。")

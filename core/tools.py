@@ -1,4 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Mnemosyne 插件工具函数
+"""
+
 from urllib.parse import urlparse
+
 
 def parse_address(address: str):
     """
@@ -9,5 +15,7 @@ def parse_address(address: str):
         address = "http://" + address
     parsed = urlparse(address)
     host = parsed.hostname
-    port = parsed.port if parsed.port is not None else 19530  # 如果未指定端口，默认使用19530
+    port = (
+        parsed.port if parsed.port is not None else 19530
+    )  # 如果未指定端口，默认使用19530
     return host, port
