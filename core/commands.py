@@ -158,7 +158,7 @@ async def list_records_cmd_impl(
 
         # 如果存在偏移量，则更新 primary_key ，否则跳过
         end_offset = offset - end_offset - 1
-        if(end_offset > 0):
+        if(end_offset >= 0):
             expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
             output_fields = [PRIMARY_FIELD_NAME]
             self.logger.debug(f"检索第" + str(offset - 1) + "个实体的主键字段值")
