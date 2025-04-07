@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project version="4">
-  <component name="Black">
-    <option name="sdkName" value="Python 3.10 (astrbot_plugin_mnemosyne)" />
-  </component>
-  <component name="ProjectRootManager" version="2" default="true">
-    <output url="file://$PROJECT_DIR$/out" />
-  </component>
-</project>
