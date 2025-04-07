@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, List, Dict, Optional
 
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.event import AstrMessageEvent
-from jinja2.runtime import new_context
 from pymilvus.exceptions import MilvusException
 
 # 导入必要的类型和模块

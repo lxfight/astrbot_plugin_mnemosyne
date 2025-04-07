@@ -91,7 +91,7 @@ class ConversationContextManager:
         :param session_id: 会话ID
         :param role: 角色（user/assistant）
         :param contents: 待处理的历史上下文
-        :return: 返回长期记忆
+        :return: 返回短期记忆
         """
         # 检查 会话 是否存在于 conversations 内
         if session_id not in self.conversations:
