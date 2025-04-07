@@ -106,11 +106,11 @@ async def handle_query_memory(
 
 
         # --- 通过 历史上下文 获取短期上下文 & 触发总结 ---
-        # 如果用户非要在 num_pairs配置 填个奇数，会导致无法触发长期记忆总结
+        # 如果用户非要在 num_pairs配置 填个奇数，会导致遗失1条用户消息
         # 历史上下文长度 与 num_pairs 求余 ，
         contexts_len = len(req.contexts)
         new_contexts_len = contexts_len % plugin.config.get("num_pairs", 10)
-        if contexts_len > 0 and (new_contexts_len == 0):
+        if contexts_len > 0 and (new_contexts_len <= 1):
             logger.info(
                 f"短期记忆达到阈值（LLM响应前），触发后台总结任务 (Session: {session_id[:8]}...)"
             )
