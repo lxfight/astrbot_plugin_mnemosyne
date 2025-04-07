@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, List, Dict, Optional
 
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.event import AstrMessageEvent
+from jinja2.runtime import new_context
 from pymilvus.exceptions import MilvusException
 
 # 导入必要的类型和模块
@@ -107,8 +108,10 @@ async def handle_query_memory(
 
         # --- 通过 历史上下文 获取短期上下文 & 触发总结 ---
         # 如果用户非要在 num_pairs配置 填个奇数，会导致每次长期记忆总结时，1个用户消息被遗漏
-
-        if (len(req.contexts) > plugin.config.get("num_pairs", 10)):
+        # 历史上下文长度 与 num_pairs 求余 ，
+        contexts_len = len(req.contexts)
+        new_contexts_len = contexts_len % plugin.config.get("num_pairs", 10)
+        if contexts_len > 0 and (new_contexts_len == 0):
             logger.info(
                 f"短期记忆达到阈值（LLM响应前），触发后台总结任务 (Session: {session_id[:8]}...)"
             )
