@@ -122,11 +122,15 @@ async def handle_query_memory(
                 session_id=session_id, role="assistant", contents=contexts
             )
             # 使用获取到的 persona_id (可能是 None 或占位符)
-            asyncio.create_task(
-                handle_summary_long_memory(
-                    plugin, persona_id, session_id, memory_summary
+            # 添加配置开关，形成长期记忆时是否异步，默认异步
+            if plugin.config.get("summary_long_memory_async", True):
+                asyncio.create_task(
+                    handle_summary_long_memory(
+                        plugin, persona_id, session_id, memory_summary
+                    )
                 )
-            )
+            else:
+                await handle_summary_long_memory(plugin, persona_id, session_id, memory_summary)
 
         # 使用新逻辑，暂时注释
         # --- 记录用户消息到短期上下文 & 触发总结 ---
