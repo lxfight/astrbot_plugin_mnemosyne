@@ -104,25 +104,52 @@ async def handle_query_memory(
             else:
                 logger.info(f"当前会话无人格，使用默认人格: '{persona_id}'")
 
-        # --- 记录用户消息到短期上下文 & 触发总结 ---
-        if plugin.context_manager:
-            memory_summary_input = req.prompt  # 使用原始的用户输入进行总结可能更准确
-            memory_summary = plugin.context_manager.add_message(
-                session_id=session_id, role="user", content=memory_summary_input
+
+        # --- 通过 历史上下文 获取短期上下文 & 触发总结 ---
+        # 历史上下文长度 与 num_pairs 求余 ，
+        # 如果用户非要在 num_pairs配置 填一个奇数，不告知用户，偷偷+1
+        contexts_len = len(req.contexts)
+        if contexts_len % 2 != 0 :
+            contexts_len += 1
+        new_contexts_len = contexts_len % plugin.config.get("num_pairs", 10)
+        if contexts_len > 0 and (new_contexts_len == 0):
+            logger.info(
+                f"短期记忆达到阈值（LLM响应前），触发后台总结任务 (Session: {session_id[:8]}...)"
+            )
+            # 从 历史上下文 中，获取最新的 num_pairs 条 短期上下文
+            contexts = req.contexts[-plugin.config.get("num_pairs", 10):]
+
+            # 进行格式化处理
+            memory_summary = plugin.context_manager.summarize_memory(
+                session_id=session_id, role="assistant", contents=contexts
+            )
+            # 使用获取到的 persona_id (可能是 None 或占位符)
+            asyncio.create_task(
+                handle_summary_long_memory(
+                    plugin, persona_id, session_id, memory_summary
+                )
             )
 
-            if memory_summary:
-                logger.info(
-                    f"短期记忆达到阈值，触发后台总结任务 (Session: {session_id[:8]}...)"
-                )
-                # 确保 persona_id 正确传递 (可能是 None 或占位符)
-                asyncio.create_task(
-                    handle_summary_long_memory(
-                        plugin, persona_id, session_id, memory_summary
-                    )
-                )
-        else:
-            logger.warning("短期上下文管理器不可用，跳过记录用户消息和潜在的总结。")
+        # 使用新逻辑，暂时注释
+        # --- 记录用户消息到短期上下文 & 触发总结 ---
+        # if plugin.context_manager:
+        #     memory_summary_input = req.prompt  # 使用原始的用户输入进行总结可能更准确
+        #     memory_summary = plugin.context_manager.add_message(
+        #         session_id=session_id, role="user", content=memory_summary_input
+        #     )
+        #
+        #     if memory_summary:
+        #         logger.info(
+        #             f"短期记忆达到阈值，触发后台总结任务 (Session: {session_id[:8]}...)"
+        #         )
+        #         # 确保 persona_id 正确传递 (可能是 None 或占位符)
+        #         asyncio.create_task(
+        #             handle_summary_long_memory(
+        #                 plugin, persona_id, session_id, memory_summary
+        #             )
+        #         )
+        # else:
+        #     logger.warning("短期上下文管理器不可用，跳过记录用户消息和潜在的总结。")
 
         # --- RAG 搜索 ---
         detailed_results = []
@@ -322,22 +349,25 @@ async def handle_on_llm_resp(
             logger.error("无法获取当前 session_id，无法记录 LLM 响应到短期记忆。")
             return
 
-        # 添加 LLM 响应到短期上下文
-        llm_response_text = resp.completion_text
-        memory_summary = plugin.context_manager.add_message(
-            session_id=session_id, role="assistant", content=llm_response_text
-        )
 
-        if memory_summary:
-            logger.info(
-                f"短期记忆达到阈值（LLM响应后），触发后台总结任务 (Session: {session_id[:8]}...)"
-            )
-            # 使用获取到的 persona_id (可能是 None 或占位符)
-            asyncio.create_task(
-                handle_summary_long_memory(
-                    plugin, persona_id, session_id, memory_summary
-                )
-            )
+        # 通过 历史上下文 获取短期上下文
+        # 暂时注释 旧获取方法
+        # 添加 LLM 响应到短期上下文
+        # llm_response_text = resp.completion_text
+        # memory_summary = plugin.context_manager.add_message(
+        #     session_id=session_id, role="assistant", content=llm_response_text
+        # )
+        #
+        # if memory_summary:
+        #     logger.info(
+        #         f"短期记忆达到阈值（LLM响应后），触发后台总结任务 (Session: {session_id[:8]}...)"
+        #     )
+        #     # 使用获取到的 persona_id (可能是 None 或占位符)
+        #     asyncio.create_task(
+        #         handle_summary_long_memory(
+        #             plugin, persona_id, session_id, memory_summary
+        #         )
+        #     )
 
     except Exception as e:
         logger.error(f"处理 LLM 响应后的记忆记录失败: {e}", exc_info=True)
