@@ -106,7 +106,7 @@ async def handle_query_memory(
 
 
         # --- 通过 历史上下文 获取短期上下文 & 触发总结 ---
-        # 如果用户非要在 num_pairs配置 填个奇数，会导致每次长期记忆总结时，1个用户消息被遗漏
+        # 如果用户非要在 num_pairs配置 填个奇数，会导致无法触发长期记忆总结
         # 历史上下文长度 与 num_pairs 求余 ，
         contexts_len = len(req.contexts)
         new_contexts_len = contexts_len % plugin.config.get("num_pairs", 10)
