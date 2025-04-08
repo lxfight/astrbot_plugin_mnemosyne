@@ -211,6 +211,7 @@ async def _perform_milvus_search(
         Milvus 搜索结果列表，如果没有找到或出错则为 None。
     """
     logger = plugin.logger
+    # 防止没有过滤条件引发的潜在错误
     filters = ["memory_id > 0"]
     if session_id:
         filters.append(f'session_id == "{session_id}"')
@@ -322,13 +323,14 @@ def _format_and_inject_memory(
         "memory_injection_method", "user_prompt"
     )
 
+    # TODO 当配置为user_prompt时，contexts_memory_len配置将无效，因为remove_mnemosyne_tags会删除其中所有的标签
     if injection_method == "user_prompt":
         logger.debug(f"查看contexts：{req.contexts}")
         req.contexts = remove_mnemosyne_tags(req.contexts)
         req.prompt = long_memory + "\n" + req.prompt
 
     elif injection_method == "system_prompt":
-        logger.debug(f"查看长期记忆：{req.system_prompt}")
+        logger.debug(f"查看长期记忆：{req.system_prompt}，判断是否要对里面的内容进行删除\n")
         logger.debug(f"查看contexts：{req.contexts}")
         req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt)
         req.system_prompt += long_memory

@@ -62,7 +62,9 @@
     "memory_injection_method":{
         "description":"记忆插入方式",
         "type":"string",
-        "options": ["user_prompt", "system_prompt", "insert_system_prompt"]
+        "hint":"user_prompt 会嵌入到用户消息的最前面，system_prompt会嵌入到系统消息中，insert_system_prompt会向上下文列表中添加一条新的系统消息",
+        "options": ["user_prompt", "system_prompt", "insert_system_prompt"],
+        "default": "user_prompt"
     },
     "long_memory_prompt":{
         "description":"对话总结提示词",
