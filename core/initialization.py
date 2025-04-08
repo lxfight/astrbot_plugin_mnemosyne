@@ -31,20 +31,30 @@ if TYPE_CHECKING:
 # 获取初始化专用的日志记录器
 init_logger = LogManager.GetLogger(log_name="MnemosyneInit")
 
+
 def initialize_config_check(plugin: "Mnemosyne"):
     """
     一些必要的参数检查可以放在这里
     """
     astrbot_config = plugin.context.get_config()
     # num_pairs需要小于['provider_settings']['max_context_length']配置的数量，如果该配置为-1，则不限制。
-    astrbot_max_context_length = astrbot_config['provider_settings']['max_context_length']
-    if astrbot_max_context_length > 0 and \
-        plugin.config['num_pairs'] > 2 * astrbot_max_context_length: # 这里乘2是因为消息条数计算规则不同
-        raise ValueError(f"\nnum_pairs不能大于astrbot的配置(最多携带对话数量(条))\
-                            配置的数量:{2 * astrbot_max_context_length}，否则可能会导致消息丢失。\n")
+    astrbot_max_context_length = astrbot_config["provider_settings"][
+        "max_context_length"
+    ]
+    if (
+        astrbot_max_context_length > 0
+        and plugin.config["num_pairs"] > 2 * astrbot_max_context_length
+    ):  # 这里乘2是因为消息条数计算规则不同
+        raise ValueError(
+            f"\nnum_pairs不能大于astrbot的配置(最多携带对话数量(条))\
+                            配置的数量:{2 * astrbot_max_context_length}，否则可能会导致消息丢失。\n"
+        )
     elif astrbot_max_context_length == 0:
-        raise ValueError(f"\nastrbot的配置(最多携带对话数量(条))\
-                            配置的数量:{astrbot_max_context_length}必须要大于0，否则Mnemosyne插件将无法正常运行\n")
+        raise ValueError(
+            f"\nastrbot的配置(最多携带对话数量(条))\
+                            配置的数量:{astrbot_max_context_length}必须要大于0，否则Mnemosyne插件将无法正常运行\n"
+        )
+
 
 def initialize_config_and_schema(plugin: "Mnemosyne"):
     """解析配置、验证和定义模式/索引参数。"""
@@ -170,10 +180,10 @@ def initialize_milvus(plugin: "Mnemosyne"):
             "user",
             "password",
             "token",
-            "secure", # 是否使用 TLS/SSL 安全连接。
+            "secure",  # 是否使用 TLS/SSL 安全连接。
         ]:
-            if key in plugin.config['authentication']:
-                connect_args[key] = plugin.config['authentication'].get(key,"")
+            if key in plugin.config["authentication"]:
+                connect_args[key] = plugin.config["authentication"].get(key, "")
 
         # 设置连接别名，虽然 MilvusManager 内部可能不直接使用，但保持配置选项
         connect_args["alias"] = plugin.config.get(
@@ -308,9 +318,7 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
                 # 可以考虑添加一个检查索引状态的步骤，或者在首次搜索前强制 load
 
     except Exception as e:
-        init_logger.error(
-            f"检查或创建集合 '{collection_name}' 的索引时发生错误: {e}"
-        )
+        init_logger.error(f"检查或创建集合 '{collection_name}' 的索引时发生错误: {e}")
         # 决定是否重新抛出异常，这可能会阻止插件启动
         raise
 

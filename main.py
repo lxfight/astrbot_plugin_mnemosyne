@@ -58,10 +58,12 @@ class Mnemosyne(Star):
         self.flush_after_insert = False
         # --- 执行初始化流程 ---
         try:
-            initialization.initialize_config_check(self)     # astrbot 配置与Mnemosyne配置检查
-            initialization.initialize_config_and_schema(self) # 初始化配置和schema
-            initialization.initialize_milvus(self) # 初始化 Milvus
-            initialization.initialize_components(self) # 初始化核心组件
+            initialization.initialize_config_check(
+                self
+            )  # astrbot 配置与Mnemosyne配置检查
+            initialization.initialize_config_and_schema(self)  # 初始化配置和schema
+            initialization.initialize_milvus(self)  # 初始化 Milvus
+            initialization.initialize_components(self)  # 初始化核心组件
             self.logger.info("Mnemosyne 插件核心组件初始化成功。")
         except Exception as e:
             self.logger.critical(
@@ -92,7 +94,6 @@ class Mnemosyne(Star):
                 f"处理 on_llm_response 钩子时发生捕获异常: {e}", exc_info=True
             )
         return
-
 
     # --- 命令处理 (定义方法并应用装饰器，调用 commands.py 中的实现) ---
 

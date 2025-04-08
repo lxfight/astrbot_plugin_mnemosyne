@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import functools
 import re
 
+
 def parse_address(address: str):
     """
     解析地址，提取出主机名和端口号。
@@ -26,12 +27,16 @@ def content_to_str(func):
     """
     实现一个装饰器，将输入的内容全部转化为字符串并打印
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         str_args = [str(arg) for arg in args]
         str_kwargs = {k: str(v) for k, v in kwargs.items()}
-        print(f"Function '{func.__name__}' called with arguments: args={str_args}, kwargs={str_kwargs}")
+        print(
+            f"Function '{func.__name__}' called with arguments: args={str_args}, kwargs={str_kwargs}"
+        )
         return func(*str_args, **str_kwargs)
+
     return wrapper
 
 
@@ -43,7 +48,7 @@ def remove_mnemosyne_tags(contents: list):
     cleaned_contents = []
     for content in contents:
         if isinstance(content, dict) and content.get("role") == "user":
-            cleaned_text = compiled_regex.sub("", content.get("content",""))
+            cleaned_text = compiled_regex.sub("", content.get("content", ""))
             cleaned_contents.append({"role": "user", "content": cleaned_text})
         else:
             cleaned_contents.append(content)
@@ -62,7 +67,6 @@ def remove_system_mnemosyne_tags(text: str):
     return text
 
 
-
 def remove_system_content(contents: list):
     """
     使用正则表达式去除LLM上下文中插入的系统提示
@@ -73,7 +77,9 @@ def remove_system_content(contents: list):
             # 如果是字典且 role 是 system，则跳过，不添加到 cleaned_contents
             continue
         else:
-            cleaned_contents.append(content) # 保留其他类型的消息或非 system role 的消息
+            cleaned_contents.append(
+                content
+            )  # 保留其他类型的消息或非 system role 的消息
     return cleaned_contents
 
 
@@ -92,14 +98,14 @@ def format_context_to_string(context_history: list) -> str:
     """
     formatted_string = ""
     for message in context_history:
-        if isinstance(message, dict) and 'role' in message and 'content' in message:
-            role = message['role']
-            content = message['content']
-            if role == 'user' or role == 'assistant':
-                formatted_string += content + "\n" # 使用换行符分隔消息
+        if isinstance(message, dict) and "role" in message and "content" in message:
+            role = message["role"]
+            content = message["content"]
+            if role == "user" or role == "assistant":
+                formatted_string += content + "\n"  # 使用换行符分隔消息
         elif isinstance(message, str):
             # 如果消息是字符串，直接添加到字符串中，并假设是用户或助手消息，也用换行符分隔
             formatted_string += message + "\n"
         # 忽略其他类型的消息或 role 不是 user/assistant 的字典消息
 
-    return formatted_string.strip() # 使用 strip() 移除末尾可能多余的换行符
+    return formatted_string.strip()  # 使用 strip() 移除末尾可能多余的换行符

@@ -142,9 +142,9 @@ async def list_records_cmd_impl(
         # 允许查询超过 16384 范围的实体
 
         # 检索偏移量的主键字段值
-        end_offset = 0 # 结束时的偏移量
-        primary_key = 0 # 过滤用的主键字段
-        for i in range(15000,offset,15000):
+        end_offset = 0  # 结束时的偏移量
+        primary_key = 0  # 过滤用的主键字段
+        for i in range(15000, offset, 15000):
             end_offset = i
             expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
             output_fields = [PRIMARY_FIELD_NAME]
@@ -154,14 +154,14 @@ async def list_records_cmd_impl(
                 expression=expr,
                 output_fields=output_fields,
                 limit=1,
-                offset = 14999
+                offset=14999,
             )
             # 更新 primary_key
             primary_key = records.pop().get(PRIMARY_FIELD_NAME)
 
         # 如果存在偏移量，则更新 primary_key ，否则跳过
         end_offset = offset - end_offset - 1
-        if(end_offset >= 0):
+        if end_offset >= 0:
             expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
             output_fields = [PRIMARY_FIELD_NAME]
             self.logger.debug(f"检索第" + str(offset - 1) + "个实体的主键字段值")
@@ -170,13 +170,17 @@ async def list_records_cmd_impl(
                 expression=expr,
                 output_fields=output_fields,
                 limit=1,
-                offset = end_offset
+                offset=end_offset,
             )
             # 最终的 偏移量的 主键字段值
             # 可以直接用于过滤
             primary_key = records.pop().get(PRIMARY_FIELD_NAME)
 
-        expr = f'{PRIMARY_FIELD_NAME} > ' + str(primary_key) + f' AND session_id in ["{session_id}"]'
+        expr = (
+            f"{PRIMARY_FIELD_NAME} > "
+            + str(primary_key)
+            + f' AND session_id in ["{session_id}"]'
+        )
         self.logger.debug(f"查询集合 '{target_collection}' 记录: expr='{expr}'")
         output_fields = [
             "content",
@@ -211,7 +215,7 @@ async def list_records_cmd_impl(
             return
 
         records.sort(key=lambda x: x.get("create_time", 0), reverse=True)
-        paginated_records = records[0 : limit]
+        paginated_records = records[0:limit]
 
         if not paginated_records:
             yield event.plain_result(

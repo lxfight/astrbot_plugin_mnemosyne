@@ -13,7 +13,12 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.event import AstrMessageEvent
 from pymilvus.exceptions import MilvusException
 
-from .tools import remove_mnemosyne_tags,remove_system_mnemosyne_tags,remove_system_content,format_context_to_string
+from .tools import (
+    remove_mnemosyne_tags,
+    remove_system_mnemosyne_tags,
+    remove_system_content,
+    format_context_to_string,
+)
 
 # 导入必要的类型和模块
 from .constants import (
@@ -52,7 +57,6 @@ async def handle_query_memory(
         await _check_and_trigger_summary(plugin, session_id, req.contexts, persona_id)
         plugin.msg_counter.increment_counter(session_id)
 
-
         # --- RAG 搜索 ---
         detailed_results = []
         try:
@@ -72,14 +76,12 @@ async def handle_query_memory(
             if detailed_results:
                 _format_and_inject_memory(plugin, detailed_results, req)
 
-
         except Exception as e:
             logger.error(f"处理长期记忆 RAG 查询时发生错误: {e}", exc_info=True)
             return
 
     except Exception as e:
         logger.error(f"处理 LLM 请求前的记忆查询流程失败: {e}", exc_info=True)
-
 
 
 async def handle_on_llm_resp(
@@ -108,7 +110,6 @@ async def handle_on_llm_resp(
         logger.error(f"处理 LLM 响应后的记忆记录失败: {e}", exc_info=True)
 
 
-
 # 记忆查询 (RAG) 相关函数
 async def _check_rag_prerequisites(plugin: "Mnemosyne") -> bool:
     """
@@ -133,7 +134,9 @@ async def _check_rag_prerequisites(plugin: "Mnemosyne") -> bool:
     return True
 
 
-async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> Optional[str]:
+async def _get_persona_id(
+    plugin: "Mnemosyne", event: AstrMessageEvent
+) -> Optional[str]:
     """
     获取当前会话的人格 ID。
 
@@ -170,7 +173,10 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> Optio
 
 
 async def _check_and_trigger_summary(
-    plugin: "Mnemosyne", session_id: str, req_contexts: List[Dict] , persona_id: Optional[str]
+    plugin: "Mnemosyne",
+    session_id: str,
+    req_contexts: List[Dict],
+    persona_id: Optional[str],
 ):
     """
     检查是否满足总结条件并触发总结任务。
@@ -182,9 +188,11 @@ async def _check_and_trigger_summary(
         persona_id: 人格 ID.
     """
     logger = plugin.logger
-    if plugin.msg_counter.adjust_counter_if_necessary(session_id, req_contexts) and \
-        plugin.msg_counter.get_counter(session_id) >= plugin.config.get("num_pairs", 10):
-
+    if plugin.msg_counter.adjust_counter_if_necessary(
+        session_id, req_contexts
+    ) and plugin.msg_counter.get_counter(session_id) >= plugin.config.get(
+        "num_pairs", 10
+    ):
         logger.info("开始总结历史对话...")
         asyncio.create_task(
             handle_summary_long_memory(
@@ -196,7 +204,10 @@ async def _check_and_trigger_summary(
 
 
 async def _perform_milvus_search(
-    plugin: "Mnemosyne", query_vector: List[float], session_id: Optional[str], persona_id: Optional[str]
+    plugin: "Mnemosyne",
+    query_vector: List[float],
+    session_id: Optional[str],
+    persona_id: Optional[str],
 ) -> Optional[List[Dict]]:
     """
     执行 Milvus 向量搜索。
@@ -272,6 +283,7 @@ async def _perform_milvus_search(
         logger.debug(f"搜索命中 {len(detailed_results)} 条记录。")
         return detailed_results
 
+
 # LLM 响应处理相关函数
 def _format_and_inject_memory(
     plugin: "Mnemosyne", detailed_results: List[Dict], req: ProviderRequest
@@ -310,18 +322,14 @@ def _format_and_inject_memory(
         memory_entry_format = plugin.config.get(
             "memory_entry_format", "- [{time}] {content}"
         )
-        long_memory += (
-            memory_entry_format.format(time=time_str, content=content) + "\n"
-        )
+        long_memory += memory_entry_format.format(time=time_str, content=content) + "\n"
 
     long_memory += long_memory_suffix
 
     logger.info(f"补充了 {len(detailed_results)} 条长期记忆到提示中。")
     logger.debug(f"补充内容:\n{long_memory}")
 
-    injection_method = plugin.config.get(
-        "memory_injection_method", "user_prompt"
-    )
+    injection_method = plugin.config.get("memory_injection_method", "user_prompt")
 
     # BUG 当配置为user_prompt时，contexts_memory_len配置将无效，因为remove_mnemosyne_tags会删除其中所有的标签
     if injection_method == "user_prompt":
@@ -330,7 +338,9 @@ def _format_and_inject_memory(
         req.prompt = long_memory + "\n" + req.prompt
 
     elif injection_method == "system_prompt":
-        logger.debug(f"查看长期记忆：{req.system_prompt}，判断是否要对里面的内容进行删除\n")
+        logger.debug(
+            f"查看长期记忆：{req.system_prompt}，判断是否要对里面的内容进行删除\n"
+        )
         logger.debug(f"查看contexts：{req.contexts}")
         req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt)
         req.system_prompt += long_memory
@@ -338,15 +348,13 @@ def _format_and_inject_memory(
     elif injection_method == "insert_system_prompt":
         logger.debug(f"查看contexts：{req.contexts}")
         req.contexts = remove_system_content(req.contexts)
-        req.contexts.append({"role":"system","content":long_memory})
+        req.contexts.append({"role": "system", "content": long_memory})
 
     else:
         logger.warning(
             f"未知的记忆注入方法 '{injection_method}'，将默认追加到用户 prompt。"
         )
         req.prompt = long_memory + "\n" + req.prompt
-
-
 
 
 # 记忆总结相关函数
@@ -374,7 +382,9 @@ async def _check_summary_prerequisites(plugin: "Mnemosyne", memory_text: str) ->
     return True
 
 
-async def _get_summary_llm_response(plugin: "Mnemosyne", memory_text: str) -> Optional[LLMResponse]:
+async def _get_summary_llm_response(
+    plugin: "Mnemosyne", memory_text: str
+) -> Optional[LLMResponse]:
     """
     请求 LLM 进行记忆总结。
 
@@ -418,7 +428,9 @@ async def _get_summary_llm_response(plugin: "Mnemosyne", memory_text: str) -> Op
         return None
 
 
-def _extract_summary_text(plugin: "Mnemosyne", llm_response: LLMResponse) -> Optional[str]:
+def _extract_summary_text(
+    plugin: "Mnemosyne", llm_response: LLMResponse
+) -> Optional[str]:
     """
     从 LLM 响应中提取总结文本并进行校验。
 
@@ -451,7 +463,11 @@ def _extract_summary_text(plugin: "Mnemosyne", llm_response: LLMResponse) -> Opt
 
 
 async def _store_summary_to_milvus(
-    plugin: "Mnemosyne", persona_id: Optional[str], session_id: str, summary_text: str, embedding_vector: List[float]
+    plugin: "Mnemosyne",
+    persona_id: Optional[str],
+    session_id: str,
+    summary_text: str,
+    embedding_vector: List[float],
 ):
     """
     将总结文本和向量存储到 Milvus 中。
@@ -470,9 +486,7 @@ async def _store_summary_to_milvus(
     effective_persona_id = (
         persona_id
         if persona_id
-        else plugin.config.get(
-            "default_persona_id_on_none", DEFAULT_PERSONA_ON_NONE
-        )
+        else plugin.config.get("default_persona_id_on_none", DEFAULT_PERSONA_ON_NONE)
     )
 
     data_to_insert = [
@@ -514,6 +528,7 @@ async def _store_summary_to_milvus(
             f"插入总结记忆到 Milvus 失败。MutationResult: {mutation_result}. LLM 回复: {summary_text[:100]}..."
         )
 
+
 async def handle_summary_long_memory(
     plugin: "Mnemosyne", persona_id: Optional[str], session_id: str, memory_text: str
 ):
@@ -546,8 +561,9 @@ async def handle_summary_long_memory(
         embedding_vector = embedding_vectors[0]
 
         # 4. 存储到 Milvus
-        await _store_summary_to_milvus(plugin, persona_id, session_id, summary_text, embedding_vector)
-
+        await _store_summary_to_milvus(
+            plugin, persona_id, session_id, summary_text, embedding_vector
+        )
 
     except Exception as e:
         logger.error(f"在总结或存储长期记忆的过程中发生严重错误: {e}", exc_info=True)
