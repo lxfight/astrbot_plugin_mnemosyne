@@ -107,17 +107,19 @@ async def handle_query_memory(
 
         # --- 通过 历史上下文 获取短期上下文 & 触发总结 ---
         # 历史上下文长度 与 num_pairs 求余 ，
-        # 如果用户非要在 num_pairs配置 填一个奇数，不告知用户，偷偷+1
         contexts_len = len(req.contexts)
-        if contexts_len % 2 != 0 :
-            contexts_len += 1
-        new_contexts_len = contexts_len % plugin.config.get("num_pairs", 10)
+        # 获取 num_pairs 配置，如果为奇数，则+1
+        num_pairs = plugin.config.get("num_pairs", 10)
+        if num_pairs % 2 != 0 :
+            num_pairs += 1
+        # 对 历史上下文长度 取余 num_pairs ，如果等于 0 ，则触发总结
+        new_contexts_len = contexts_len % num_pairs
         if contexts_len > 0 and (new_contexts_len == 0):
             logger.info(
                 f"短期记忆达到阈值（LLM响应前），触发后台总结任务 (Session: {session_id[:8]}...)"
             )
             # 从 历史上下文 中，获取最新的 num_pairs 条 短期上下文
-            contexts = req.contexts[-plugin.config.get("num_pairs", 10):]
+            contexts = req.contexts[-num_pairs:]
 
             # 进行格式化处理
             memory_summary = plugin.context_manager.summarize_memory(
