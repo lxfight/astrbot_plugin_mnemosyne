@@ -18,12 +18,6 @@
         "type":"bool",
         "default":true
     },
-    "max_history_memory":{
-        "description":"最大聊天历史长度,为未来拓展的设计",
-        "type":"int",
-        "hint":"该配置目前保持 > num_pairs 参数即可,暂无实际用途,为未来拓展的设计",
-        "default":20
-    },
     "num_pairs":{
         "description":"记忆总结的对话长度",
         "type":"int",
@@ -64,6 +58,11 @@
         "hint":"小于0表示完全保留，大于等于0表示保留最新的对应条",
         "obvious_hint":true,
         "default":0
+    },
+    "memory_injection_method":{
+        "description":"记忆插入方式",
+        "type":"string",
+        "options": ["user_prompt", "system_prompt", "insert_system_prompt"]
     },
     "long_memory_prompt":{
         "description":"对话总结提示词",

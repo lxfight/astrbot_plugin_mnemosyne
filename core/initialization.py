@@ -17,11 +17,10 @@ from .constants import (
     PRIMARY_FIELD_NAME,
     VECTOR_FIELD_NAME,
     DEFAULT_OUTPUT_FIELDS,
-    DEFAULT_MAX_TURNS,
-    DEFAULT_MAX_HISTORY,
 )
-from .tools import parse_address  # 从同级目录导入
-from ..memory_manager.context_manager import ConversationContextManager
+from .tools import parse_address
+
+from ..memory_manager.message_counter import MessageCounter
 from ..memory_manager.vector_db.milvus_manager import MilvusManager
 from ..memory_manager.embedding import OpenAIEmbeddingAPI
 
@@ -301,7 +300,7 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
 
     except Exception as e:
         init_logger.error(
-            f"检查或创建集合 '{collection_name}' 的索引时发生错误: {e}", exc_info=True
+            f"检查或创建集合 '{collection_name}' 的索引时发生错误: {e}"
         )
         # 决定是否重新抛出异常，这可能会阻止插件启动
         raise
@@ -310,18 +309,13 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
 def initialize_components(plugin: "Mnemosyne"):
     """初始化非 Milvus 的其他组件，如上下文管理器和嵌入 API。"""
     init_logger.debug("开始初始化其他核心组件...")
-    # 1. 初始化对话上下文管理器
+    # 1. 初始化消息计数器
     try:
-        plugin.context_manager = ConversationContextManager(
-            max_turns=plugin.config.get("num_pairs", DEFAULT_MAX_TURNS),
-            max_history_length=plugin.config.get(
-                "max_history_memory", DEFAULT_MAX_HISTORY
-            ),
-        )
-        init_logger.info("短期对话上下文管理器初始化成功。")
+        plugin.msg_counter = MessageCounter()
+        init_logger.info("消息计数器初始化成功。")
     except Exception as e:
-        init_logger.error(f"初始化短期对话上下文管理器失败: {e}", exc_info=True)
-        raise  # 这是核心组件，失败则插件无法工作
+        init_logger.error(f"消息计数器初始化失败:{e}")
+        raise
 
     # 2. 初始化 Embedding API
     try:
