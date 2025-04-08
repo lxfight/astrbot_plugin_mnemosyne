@@ -58,11 +58,10 @@ class Mnemosyne(Star):
         self.flush_after_insert = False
         # --- 执行初始化流程 ---
         try:
-            # TODO 初始化前有一些必要参数的检查，num_pairs需要小于最多携带对话数量
-
-            initialization.initialize_config_and_schema(self)
-            initialization.initialize_milvus(self)
-            initialization.initialize_components(self)
+            initialization.initialize_config_check(self)     # astrbot 配置与Mnemosyne配置检查
+            initialization.initialize_config_and_schema(self) # 初始化配置和schema
+            initialization.initialize_milvus(self) # 初始化 Milvus
+            initialization.initialize_components(self) # 初始化核心组件
             self.logger.info("Mnemosyne 插件核心组件初始化成功。")
         except Exception as e:
             self.logger.critical(
