@@ -6,6 +6,28 @@
         "obvious_hint":true,
         "default":"http://localhost:19530"
     },
+    "authentication":{
+        "description":"milvus数据库的认证信息",
+        "type":"object",
+        "hint":"如果milvus开启了服务器认证，请填写对应的信息",
+        "obvious_hint":true,
+        "items":{
+            "token":{
+                "description":"milvus数据库的认证token",
+                "type":"string",
+                "hint":"token优先于账户密码",
+                "obvious_hint":true
+            },
+            "user":{
+                "description":"milvus数据库的认证用户名",
+                "type":"string"
+            },
+            "password":{
+                "description":"milvus数据库的认证密码",
+                "type":"string"
+            }
+        }
+    },
     "collection_name":{
         "description":"向量数据库的集合名称",
         "type":"string",

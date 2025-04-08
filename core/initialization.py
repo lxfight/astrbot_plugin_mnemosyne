@@ -156,25 +156,20 @@ def initialize_milvus(plugin: "Mnemosyne"):
             "user",
             "password",
             "token",
-            "secure",
-            "db_name",
-            "server_pem_path",
-            "server_key_path",
-            "ca_pem_path",
-            "client_pem_path",
-            "client_key_path",
+            "secure", # 是否使用 TLS/SSL 安全连接。
         ]:
-            if key in plugin.config:
-                connect_args[key] = plugin.config[key]
+            if key in plugin.config['authentication']:
+                connect_args[key] = plugin.config['authentication'].get(key,"")
 
         # 设置连接别名，虽然 MilvusManager 内部可能不直接使用，但保持配置选项
         connect_args["alias"] = plugin.config.get(
             "connection_alias", f"mnemosyne_{plugin.collection_name}"
-        )  # 使用更有意义的别名
+        )
 
         init_logger.info(
             f"尝试使用参数连接到 Milvus: { {k: v for k, v in connect_args.items() if k != 'password' and k != 'token'} }"
         )  # 不打印敏感信息
+        # init_logger.debug(f"连接参数: {connect_args}")
         plugin.milvus_manager = MilvusManager(**connect_args)
 
         if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
