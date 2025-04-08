@@ -119,7 +119,7 @@ async def handle_query_memory(
                 f"短期记忆达到阈值（LLM响应前），触发后台总结任务 (Session: {session_id[:8]}...)"
             )
             # 从 历史上下文 中，获取最新的 num_pairs 条 短期上下文
-            contexts = req.contexts[-plugin.config.get("num_pairs", 10):]
+            contexts = req.contexts[-num_pairs:]
 
             # 进行格式化处理
             memory_summary = plugin.context_manager.summarize_memory(
