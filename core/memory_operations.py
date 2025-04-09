@@ -331,7 +331,7 @@ def _format_and_inject_memory(
 
     injection_method = plugin.config.get("memory_injection_method", "user_prompt")
 
-    # BUG 当配置为user_prompt时，contexts_memory_len配置将无效，因为remove_mnemosyne_tags会删除其中所有的标签
+    # BUG 当配置为user_prompt时，contexts_memory_len配置将无效，因为remove_mnemosyne_tags()会删除其中所有的标签
     if injection_method == "user_prompt":
         logger.debug(f"查看contexts：{req.contexts}")
         req.contexts = remove_mnemosyne_tags(req.contexts)

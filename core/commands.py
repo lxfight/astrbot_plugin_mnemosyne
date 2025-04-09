@@ -18,9 +18,6 @@ if TYPE_CHECKING:
     from ..main import Mnemosyne
 
 
-# 注意：函数名加了 _impl 后缀，并接收 self
-# 注意：装饰器已移除
-
 
 async def list_collections_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
     """[实现] 列出当前 Milvus 实例中的所有集合"""
