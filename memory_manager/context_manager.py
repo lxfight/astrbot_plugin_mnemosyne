@@ -84,3 +84,33 @@ class ConversationContextManager:
             )
         else:
             return "会话ID不存在"
+
+    def summarize_memory(self, session_id: str, role: str, contents: List) -> str:
+        """
+        通过历史上下文，格式化处理为短期上下文
+        :param session_id: 会话ID
+        :param role: 角色（user/assistant）
+        :param contents: 待处理的历史上下文
+        :return: 返回短期记忆
+        """
+        # 检查 会话 是否存在于 conversations 内
+        if session_id not in self.conversations:
+            self.conversations[session_id] = {
+                "history": [],
+                "turn_count": 0,
+                "last_summary_time": time.time(),
+            }
+
+        conversation = self.conversations[session_id]
+        for content in contents:
+            conversation["history"].append(
+                {
+                    "role": role,
+                    "content": content,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
+            conversation["turn_count"] += 1
+
+        # 返回 格式化 后的 短期上下文
+        return self._generate_summary_content(session_id)

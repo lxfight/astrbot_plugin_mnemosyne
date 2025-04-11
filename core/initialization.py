@@ -17,11 +17,10 @@ from .constants import (
     PRIMARY_FIELD_NAME,
     VECTOR_FIELD_NAME,
     DEFAULT_OUTPUT_FIELDS,
-    DEFAULT_MAX_TURNS,
-    DEFAULT_MAX_HISTORY,
 )
-from .tools import parse_address  # 从同级目录导入
-from ..memory_manager.context_manager import ConversationContextManager
+from .tools import parse_address
+
+from ..memory_manager.message_counter import MessageCounter
 from ..memory_manager.vector_db.milvus_manager import MilvusManager
 from ..memory_manager.embedding import OpenAIEmbeddingAPI
 
@@ -31,6 +30,30 @@ if TYPE_CHECKING:
 
 # 获取初始化专用的日志记录器
 init_logger = LogManager.GetLogger(log_name="MnemosyneInit")
+
+
+def initialize_config_check(plugin: "Mnemosyne"):
+    """
+    一些必要的参数检查可以放在这里
+    """
+    astrbot_config = plugin.context.get_config()
+    # num_pairs需要小于['provider_settings']['max_context_length']配置的数量，如果该配置为-1，则不限制。
+    astrbot_max_context_length = astrbot_config["provider_settings"][
+        "max_context_length"
+    ]
+    if (
+        astrbot_max_context_length > 0
+        and plugin.config["num_pairs"] > 2 * astrbot_max_context_length
+    ):  # 这里乘2是因为消息条数计算规则不同
+        raise ValueError(
+            f"\nnum_pairs不能大于astrbot的配置(最多携带对话数量(条))\
+                            配置的数量:{2 * astrbot_max_context_length}，否则可能会导致消息丢失。\n"
+        )
+    elif astrbot_max_context_length == 0:
+        raise ValueError(
+            f"\nastrbot的配置(最多携带对话数量(条))\
+                            配置的数量:{astrbot_max_context_length}必须要大于0，否则Mnemosyne插件将无法正常运行\n"
+        )
 
 
 def initialize_config_and_schema(plugin: "Mnemosyne"):
@@ -157,25 +180,20 @@ def initialize_milvus(plugin: "Mnemosyne"):
             "user",
             "password",
             "token",
-            "secure",
-            "db_name",
-            "server_pem_path",
-            "server_key_path",
-            "ca_pem_path",
-            "client_pem_path",
-            "client_key_path",
+            "secure",  # 是否使用 TLS/SSL 安全连接。
         ]:
-            if key in plugin.config:
-                connect_args[key] = plugin.config[key]
+            if key in plugin.config["authentication"]:
+                connect_args[key] = plugin.config["authentication"].get(key, "")
 
         # 设置连接别名，虽然 MilvusManager 内部可能不直接使用，但保持配置选项
         connect_args["alias"] = plugin.config.get(
             "connection_alias", f"mnemosyne_{plugin.collection_name}"
-        )  # 使用更有意义的别名
+        )
 
         init_logger.info(
             f"尝试使用参数连接到 Milvus: { {k: v for k, v in connect_args.items() if k != 'password' and k != 'token'} }"
         )  # 不打印敏感信息
+        # init_logger.debug(f"连接参数: {connect_args}")
         plugin.milvus_manager = MilvusManager(**connect_args)
 
         if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
@@ -300,9 +318,7 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
                 # 可以考虑添加一个检查索引状态的步骤，或者在首次搜索前强制 load
 
     except Exception as e:
-        init_logger.error(
-            f"检查或创建集合 '{collection_name}' 的索引时发生错误: {e}", exc_info=True
-        )
+        init_logger.error(f"检查或创建集合 '{collection_name}' 的索引时发生错误: {e}")
         # 决定是否重新抛出异常，这可能会阻止插件启动
         raise
 
@@ -310,18 +326,13 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
 def initialize_components(plugin: "Mnemosyne"):
     """初始化非 Milvus 的其他组件，如上下文管理器和嵌入 API。"""
     init_logger.debug("开始初始化其他核心组件...")
-    # 1. 初始化对话上下文管理器
+    # 1. 初始化消息计数器
     try:
-        plugin.context_manager = ConversationContextManager(
-            max_turns=plugin.config.get("num_pairs", DEFAULT_MAX_TURNS),
-            max_history_length=plugin.config.get(
-                "max_history_memory", DEFAULT_MAX_HISTORY
-            ),
-        )
-        init_logger.info("短期对话上下文管理器初始化成功。")
+        plugin.msg_counter = MessageCounter()
+        init_logger.info("消息计数器初始化成功。")
     except Exception as e:
-        init_logger.error(f"初始化短期对话上下文管理器失败: {e}", exc_info=True)
-        raise  # 这是核心组件，失败则插件无法工作
+        init_logger.error(f"消息计数器初始化失败:{e}")
+        raise
 
     # 2. 初始化 Embedding API
     try:

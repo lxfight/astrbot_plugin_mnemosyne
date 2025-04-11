@@ -11,15 +11,12 @@ from datetime import datetime
 from astrbot.api.event import AstrMessageEvent
 
 # 导入必要的模块和常量
-from .constants import DEFAULT_COLLECTION_NAME, PRIMARY_FIELD_NAME
+from .constants import PRIMARY_FIELD_NAME
 
 # 类型提示
 if TYPE_CHECKING:
     from ..main import Mnemosyne
 
-
-# 注意：函数名加了 _impl 后缀，并接收 self
-# 注意：装饰器已移除
 
 
 async def list_collections_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
@@ -121,7 +118,10 @@ async def list_records_cmd_impl(
     if not self.milvus_manager or not self.milvus_manager.is_connected():
         yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
         return
-
+    # 获取当前会话的 session_id
+    session_id = await self.context.conversation_manager.get_curr_conversation_id(
+        event.unified_msg_origin
+    )
     target_collection = collection_name or self.collection_name
 
     if limit <= 0 or limit > 50:
@@ -136,14 +136,49 @@ async def list_records_cmd_impl(
             yield event.plain_result(f"⚠️ 集合 '{target_collection}' 不存在。")
             return
 
-        query_limit = limit + offset
-        if query_limit > 16384:
-            yield event.plain_result(
-                f"⚠️ 查询范围过大 (offset + limit = {query_limit})，超过 Milvus 限制。请减小数量或偏移量。"
-            )
-            return
+        # 允许查询超过 16384 范围的实体
 
-        expr = f"{PRIMARY_FIELD_NAME} >= 0"
+        # 检索偏移量的主键字段值
+        end_offset = 0  # 结束时的偏移量
+        primary_key = 0  # 过滤用的主键字段
+        for i in range(15000, offset, 15000):
+            end_offset = i
+            expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
+            output_fields = [PRIMARY_FIELD_NAME]
+            self.logger.debug(f"检索第" + str(i) + "个实体的主键字段值")
+            records = self.milvus_manager.query(
+                collection_name=target_collection,
+                expression=expr,
+                output_fields=output_fields,
+                limit=1,
+                offset=14999,
+            )
+            # 更新 primary_key
+            primary_key = records.pop().get(PRIMARY_FIELD_NAME)
+
+        # 如果存在偏移量，则更新 primary_key ，否则跳过
+        end_offset = offset - end_offset - 1
+        if end_offset >= 0:
+            expr = f"{PRIMARY_FIELD_NAME} > " + str(primary_key)
+            output_fields = [PRIMARY_FIELD_NAME]
+            self.logger.debug(f"检索第" + str(offset - 1) + "个实体的主键字段值")
+            records = self.milvus_manager.query(
+                collection_name=target_collection,
+                expression=expr,
+                output_fields=output_fields,
+                limit=1,
+                offset=end_offset,
+            )
+            # 最终的 偏移量的 主键字段值
+            # 可以直接用于过滤
+            primary_key = records.pop().get(PRIMARY_FIELD_NAME)
+
+        expr = (
+            f"{PRIMARY_FIELD_NAME} > "
+            + str(primary_key)
+            + f' AND session_id in ["{session_id}"]'
+        )
+        self.logger.debug(f"查询集合 '{target_collection}' 记录: expr='{expr}'")
         output_fields = [
             "content",
             "create_time",
@@ -153,9 +188,10 @@ async def list_records_cmd_impl(
         ]
 
         self.logger.debug(
-            f"查询集合 '{target_collection}' 记录: expr='{expr}', limit={query_limit}, output_fields={output_fields}"
+            f"查询集合 '{target_collection}' 记录: expr='{expr}', limit={limit}, output_fields={output_fields}"
         )
 
+        # 已经通过主键字段值进行过滤，无需再使用 offset 偏移
         records = self.milvus_manager.query(
             collection_name=target_collection,
             expression=expr,
@@ -176,7 +212,7 @@ async def list_records_cmd_impl(
             return
 
         records.sort(key=lambda x: x.get("create_time", 0), reverse=True)
-        paginated_records = records[offset : offset + limit]
+        paginated_records = records[0:limit]
 
         if not paginated_records:
             yield event.plain_result(
@@ -184,11 +220,12 @@ async def list_records_cmd_impl(
             )
             return
 
-        total_found_in_query = len(records)
+        # total_found_in_query = len(records)
         response_lines = [
             f"📜 集合 '{target_collection}' 的记忆记录 (显示第 {offset + 1} 到 {offset + len(paginated_records)} 条，按时间倒序):"
         ]
-        for i, record in enumerate(paginated_records, start=offset + 1):
+        # 使 limit 不同时，同一条记忆始终保持同样的 序号
+        for i, record in enumerate(paginated_records, start=0):
             ts = record.get("create_time")
             try:
                 time_str = (
@@ -204,7 +241,7 @@ async def list_records_cmd_impl(
             persona_id = record.get("personality_id", "未知人格")
             pk = record.get(PRIMARY_FIELD_NAME, "未知ID")
             response_lines.append(
-                f"#{i} [ID: {pk}]\n"
+                f"#{offset + len(paginated_records) - i} [ID: {pk}]\n"
                 f"  时间: {time_str}\n"
                 f"  人格: {persona_id}\n"
                 f"  会话: {session_id}\n"
