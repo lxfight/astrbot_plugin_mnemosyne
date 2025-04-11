@@ -23,7 +23,7 @@ from .core.constants import *  # 导入所有常量
 
 # --- 类型定义和依赖库 ---
 from pymilvus import CollectionSchema
-from .memory_manager.context_manager import ConversationContextManager
+from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db.milvus_manager import MilvusManager
 from .memory_manager.embedding import OpenAIEmbeddingAPI
 
@@ -32,7 +32,7 @@ from .memory_manager.embedding import OpenAIEmbeddingAPI
     "Mnemosyne",
     "lxfight",
     "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
-    "0.3.1",
+    "0.3.3",
     "https://github.com/lxfight/astrbot_plugin_mnemosyne",
 )
 class Mnemosyne(Star):
@@ -50,14 +50,20 @@ class Mnemosyne(Star):
         self.output_fields_for_query: List[str] = []
         self.collection_name: str = DEFAULT_COLLECTION_NAME
         self.milvus_manager: Optional[MilvusManager] = None
-        self.context_manager: Optional[ConversationContextManager] = None
+        self.msg_counter: Optional[MessageCounter] = None
+        # self.context_manager: Optional[ConversationContextManager] = None
         self.ebd: Optional[OpenAIEmbeddingAPI] = None
 
+        # 是否需要刷新
+        self.flush_after_insert = False
         # --- 执行初始化流程 ---
         try:
-            initialization.initialize_config_and_schema(self)
-            initialization.initialize_milvus(self)
-            initialization.initialize_components(self)
+            initialization.initialize_config_check(
+                self
+            )  # astrbot 配置与Mnemosyne配置检查
+            initialization.initialize_config_and_schema(self)  # 初始化配置和schema
+            initialization.initialize_milvus(self)  # 初始化 Milvus
+            initialization.initialize_components(self)  # 初始化核心组件
             self.logger.info("Mnemosyne 插件核心组件初始化成功。")
         except Exception as e:
             self.logger.critical(
@@ -73,32 +79,21 @@ class Mnemosyne(Star):
             await memory_operations.handle_query_memory(self, event, req)
         except Exception as e:
             self.logger.error(
-                f"处理 on_llm_request 钩子时发生未捕获异常: {e}", exc_info=True
+                f"处理 on_llm_request 钩子时发生捕获异常: {e}", exc_info=True
             )
+        return
 
     @filter.on_llm_response()
     async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse):
-        """[事件钩子] 在 LLM 响应后，记录上下文并可能触发总结。"""
+        """[事件钩子] 在 LLM 响应后"""
+
         try:
             await memory_operations.handle_on_llm_resp(self, event, resp)
         except Exception as e:
             self.logger.error(
-                f"处理 on_llm_response 钩子时发生未捕获异常: {e}", exc_info=True
+                f"处理 on_llm_response 钩子时发生捕获异常: {e}", exc_info=True
             )
-
-    # --- 内部辅助方法 (调用 memory_operations.py 中的实现) ---
-    async def Summary_long_memory(
-        self, persona_id: Optional[str], session_id: str, memory_text: str
-    ):
-        """[辅助方法] 触发长期记忆总结和存储流程。"""
-        try:
-            await memory_operations.handle_summary_long_memory(
-                self, persona_id, session_id, memory_text
-            )
-        except Exception as e:
-            self.logger.error(
-                f"调用 Summary_long_memory 时发生未捕获异常: {e}", exc_info=True
-            )
+        return
 
     # --- 命令处理 (定义方法并应用装饰器，调用 commands.py 中的实现) ---
 
@@ -117,6 +112,7 @@ class Mnemosyne(Star):
         # 调用 commands.py 中的实现，并代理 yield
         async for result in commands.list_collections_cmd_impl(self, event):
             yield result
+        return
 
     @permission_type(PermissionType.ADMIN)
     @memory_group.command("drop_collection")  # type: ignore
@@ -150,6 +146,7 @@ class Mnemosyne(Star):
             self, event, collection_name, limit, offset
         ):
             yield result
+        return
 
     @permission_type(PermissionType.ADMIN)
     @memory_group.command("delete_session_memory")  # type: ignore
@@ -163,6 +160,7 @@ class Mnemosyne(Star):
             self, event, session_id, confirm
         ):
             yield result
+        return
 
     @memory_group.command("get_session_id")  # type: ignore
     async def get_session_id_cmd(self, event: AstrMessageEvent):
@@ -171,6 +169,7 @@ class Mnemosyne(Star):
         """
         async for result in commands.get_session_id_cmd_impl(self, event):
             yield result
+        return
 
     # --- 插件生命周期方法 ---
     async def terminate(self):
@@ -191,3 +190,4 @@ class Mnemosyne(Star):
         else:
             self.logger.info("Milvus 管理器未初始化或已断开连接，无需断开。")
         self.logger.info("Mnemosyne 插件已停止。")
+        return

@@ -500,6 +500,7 @@ class MilvusManager:
             # 根据需要决定是否抛出异常
         except Exception as e:
             logger.error(f"刷新集合 {collection_names} 时发生意外错误: {e}")
+        return
 
     # --- Indexing ---
     def create_index(

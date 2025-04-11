@@ -6,6 +6,28 @@
         "obvious_hint":true,
         "default":"http://localhost:19530"
     },
+    "authentication":{
+        "description":"milvus数据库的认证信息",
+        "type":"object",
+        "hint":"如果milvus开启了服务器认证，请填写对应的信息",
+        "obvious_hint":true,
+        "items":{
+            "token":{
+                "description":"milvus数据库的认证token",
+                "type":"string",
+                "hint":"token优先于账户密码",
+                "obvious_hint":true
+            },
+            "user":{
+                "description":"milvus数据库的认证用户名",
+                "type":"string"
+            },
+            "password":{
+                "description":"milvus数据库的认证密码",
+                "type":"string"
+            }
+        }
+    },
     "collection_name":{
         "description":"向量数据库的集合名称",
         "type":"string",
@@ -17,12 +39,6 @@
         "description":"记忆查询时是否使用人格过滤",
         "type":"bool",
         "default":true
-    },
-    "max_history_memory":{
-        "description":"最大聊天历史长度,为未来拓展的设计",
-        "type":"int",
-        "hint":"该配置目前保持 > num_pairs 参数即可,暂无实际用途,为未来拓展的设计",
-        "default":20
     },
     "num_pairs":{
         "description":"记忆总结的对话长度",
@@ -64,6 +80,13 @@
         "hint":"小于0表示完全保留，大于等于0表示保留最新的对应条",
         "obvious_hint":true,
         "default":0
+    },
+    "memory_injection_method":{
+        "description":"记忆插入方式",
+        "type":"string",
+        "hint":"user_prompt 会嵌入到用户消息的最前面，system_prompt会嵌入到系统消息中，insert_system_prompt会向上下文列表中添加一条新的系统消息",
+        "options": ["user_prompt", "system_prompt", "insert_system_prompt"],
+        "default": "user_prompt"
     },
     "long_memory_prompt":{
         "description":"对话总结提示词",
