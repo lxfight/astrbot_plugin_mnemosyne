@@ -148,9 +148,6 @@ async def list_records_cmd_impl(
             self.logger.info(f"将按会话 ID '{session_id}' 过滤记录。")
         else:
             # 如果没有会话ID上下文，查询所有记录
-            # 注意：Milvus 可能需要一个有效的过滤条件，即使是查询所有。
-            # 使用 '{PRIMARY_FIELD_NAME} >= 0' 是一个常见技巧 (假设主键非负)。
-            # 请根据您的 Milvus schema 和版本确认最佳实践。
             expr = f"{PRIMARY_FIELD_NAME} >= 0"
             self.logger.info("未指定会话 ID，将查询集合中的所有记录。")
             # 或者，如果您的 milvus_manager 支持空表达式查询所有，则 expr = "" 或 None
