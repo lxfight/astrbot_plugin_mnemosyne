@@ -6,6 +6,7 @@ Mnemosyne 插件工具函数
 from urllib.parse import urlparse
 import functools
 import re
+from typing import List, Dict, Set,Union
 
 
 def parse_address(address: str):
@@ -40,72 +41,174 @@ def content_to_str(func):
     return wrapper
 
 
-def remove_mnemosyne_tags(contents: list):
+def remove_mnemosyne_tags(
+    contents: List[Dict[str, str]], contexts_memory_len: int = 0
+) -> List[Dict[str, str]]:
     """
-    使用正则表达式去除LLM上下文中的<mnemosyne> </mnemosyne>标签对
+    使用正则表达式去除LLM上下文中的<mnemosyne> </mnemosyne>标签对。
+    如果 contexts_memory_len > 0，则仅保留最后 contexts_memory_len 个标签对。
+
+    Args:
+        contents: 包含聊天记录的列表，每个元素是一个字典（如 {"role": "user", "content": "..."}）。
+        contexts_memory_len: 需要保留的最新的 <mnemosyne> 标签对数量。如果 <= 0，则移除所有标签对。
+
+    Returns:
+        清理或部分清理了 <mnemosyne> 标签对的聊天记录列表。
     """
     compiled_regex = re.compile(r"<mnemosyne>.*?</mnemosyne>", re.DOTALL)
-    cleaned_contents = []
-    for content in contents:
-        if isinstance(content, dict) and content.get("role") == "user":
-            cleaned_text = compiled_regex.sub("", content.get("content", ""))
-            cleaned_contents.append({"role": "user", "content": cleaned_text})
-        else:
-            cleaned_contents.append(content)
+    cleaned_contents: List[Dict[str, str]] = []
+
+    if contexts_memory_len <= 0:
+        # 移除所有标签
+        for content_item in contents:
+            if isinstance(content_item, dict) and content_item.get("role") == "user":
+                original_text = content_item.get("content", "")
+                cleaned_text = compiled_regex.sub("", original_text)
+                cleaned_contents.append({"role": "user", "content": cleaned_text})
+            else:
+                cleaned_contents.append(content_item)
+    else:
+        # 找出所有用户消息中的所有 mnemosyne 块
+        all_mnemosyne_blocks: List[str] = []
+        for content_item in contents:
+            if isinstance(content_item, dict) and content_item.get("role") == "user":
+                original_text = content_item.get("content", "")
+                found_blocks = compiled_regex.findall(original_text)
+                all_mnemosyne_blocks.extend(found_blocks)
+
+        # 确定要保留的块
+        blocks_to_keep: Set[str] = set(all_mnemosyne_blocks[-contexts_memory_len:])
+
+        # 定义替换函数
+        def replace_logic(match: re.Match) -> str:
+            block = match.group(0)
+            return block if block in blocks_to_keep else ""
+
+        # 再次遍历并应用替换逻辑
+        for content_item in contents:
+            if isinstance(content_item, dict) and content_item.get("role") == "user":
+                original_text = content_item.get("content", "")
+                # 只有当文本中确实包含需要处理的标签时才进行替换
+                if compiled_regex.search(original_text):
+                    cleaned_text = compiled_regex.sub(replace_logic, original_text)
+                    cleaned_contents.append({"role": "user", "content": cleaned_text})
+                else:
+                    cleaned_contents.append(content_item)  # 无需处理，直接添加
+            else:
+                cleaned_contents.append(content_item)
 
     return cleaned_contents
 
 
-def remove_system_mnemosyne_tags(text: str):
+def remove_system_mnemosyne_tags(text: str, contexts_memory_len: int = 0) -> str:
     """
-    使用正则表达式去除LLM上下文系统提示中的<mnemosyne> </mnemosyne>标签对
+    使用正则表达式去除LLM上下文系统提示中的<mnemosyne> </mnemosyne>标签对。
+    如果 contexts_memory_len > 0，则仅保留最后 contexts_memory_len 个标签对。
+
+    Args:
+        text: 系统提示字符串。
+        contexts_memory_len: 需要保留的最新的 <mnemosyne> 标签对数量。如果 <= 0，则移除所有标签对。
+
+    Returns:
+        清理或部分清理了 <mnemosyne> 标签对的系统提示字符串。
     """
+    if not isinstance(text, str):
+        return text  # 如果输入不是字符串，直接返回
+
     compiled_regex = re.compile(r"<mnemosyne>.*?</mnemosyne>", re.DOTALL)
-    if isinstance(text, str):
+
+    if contexts_memory_len <= 0:
+        # 移除所有标签
         cleaned_text = compiled_regex.sub("", text)
-        return cleaned_text
-    return text
+    else:
+        # 找出所有 mnemosyne 块
+        all_mnemosyne_blocks: List[str] = compiled_regex.findall(text)
+
+        # 确定要保留的块
+        blocks_to_keep: Set[str] = set(all_mnemosyne_blocks[-contexts_memory_len:])
+
+        # 定义替换函数
+        def replace_logic(match: re.Match) -> str:
+            block = match.group(0)
+            return block if block in blocks_to_keep else ""
+
+        # 应用替换逻辑
+        # 只有当文本中确实包含需要处理的标签时才进行替换
+        if compiled_regex.search(text):
+            cleaned_text = compiled_regex.sub(replace_logic, text)
+        else:
+            cleaned_text = text  # 无需处理
+
+    return cleaned_text
 
 
-def remove_system_content(contents: list):
+def remove_system_content(
+    contents: List[Dict[str, str]], contexts_memory_len: int = 0
+) -> List[Dict[str, str]]:
     """
-    使用正则表达式去除LLM上下文中插入的系统提示
+    使用正则表达式去除LLM上下文中插入的系统提示 (role='system' 的消息)。
+    注意：contexts_memory_len 参数在此函数中未被使用，因为它的语义（控制记忆标签）
+          与本函数移除系统提示的功能不直接相关。函数将始终移除所有 system 消息。
+
+    Args:
+        contents: 包含聊天记录的列表。
+        contexts_memory_len: (未使用) 为了接口一致性而保留的参数。
+
+    Returns:
+        移除了所有 role='system' 消息的聊天记录列表。
     """
-    cleaned_contents = []
-    for content in contents:
-        if isinstance(content, dict) and content.get("role") == "system":
+    cleaned_contents: List[Dict[str, str]] = []
+    for content_item in contents:
+        # 检查 content_item 是否为字典以及 'role'键是否存在且值为 'system'
+        if isinstance(content_item, dict) and content_item.get("role") == "system":
             # 如果是字典且 role 是 system，则跳过，不添加到 cleaned_contents
             continue
         else:
-            cleaned_contents.append(
-                content
-            )  # 保留其他类型的消息或非 system role 的消息
+            # 保留其他类型的消息或非 system role 的消息
+            cleaned_contents.append(content_item)
     return cleaned_contents
 
 
-def format_context_to_string(context_history: list) -> str:
+def format_context_to_string(context_history: List[Union[Dict[str, str], str]], length: int = 10) -> str:
     """
-    将字典列表形式的上下文历史记录转换为字符串，
-    只保留 role 为 'user' 和 'assistant' 的消息内容，并用换行符分隔。
+    从上下文历史记录中提取最后 'length' 条用户和AI的对话消息，
+    并将它们的内容转换为用换行符分隔的字符串。
+    只处理 role 为 'user' 和 'assistant' 的消息，其他类型的消息将被忽略且不计入 'length'。
 
     Args:
         context_history (list): 上下文历史消息列表，每个消息可以是字典或字符串。
                                 如果是字典，应包含 'role' 和 'content' 键。
+        length (int, optional): 需要提取的用户或AI对话消息的数量。默认为 10。
+                                如果 <= 0，则返回空字符串。
 
     Returns:
-        str: 格式化后的字符串，包含 role 为 'user' 和 'assistant' 的消息内容，
-            消息之间用换行符分隔。
+        str: 格式化后的字符串，包含最后 'length' 条 role 为 'user' 和 'assistant'
+            的消息内容，消息之间用换行符分隔，按原始顺序排列。
     """
-    formatted_string = ""
-    for message in context_history:
-        if isinstance(message, dict) and "role" in message and "content" in message:
-            role = message["role"]
-            content = message["content"]
-            if role == "user" or role == "assistant":
-                formatted_string += content + "\n"  # 使用换行符分隔消息
-        elif isinstance(message, str):
-            # 如果消息是字符串，直接添加到字符串中，并假设是用户或助手消息，也用换行符分隔
-            formatted_string += message + "\n"
-        # 忽略其他类型的消息或 role 不是 user/assistant 的字典消息
+    if length <= 0:
+        return ""
 
-    return formatted_string.strip()  # 使用 strip() 移除末尾可能多余的换行符
+    # 使用列表存储符合条件的消息内容，因为我们需要按顺序保留最后N条
+    selected_contents: List[str] = []
+    count = 0
+
+    # 从后往前遍历历史记录
+    for message in reversed(context_history):
+        role = None
+        content = None
+
+        if isinstance(message, dict) and "role" in message and "content" in message:
+            role = message.get("role")
+            content = message.get("content")
+
+        # 检查 role 是否为 'user' 或 'assistant'
+        if role in ("user", "assistant") and content is not None:
+            # 将内容添加到列表的 *开头*，以保持原始顺序
+            selected_contents.insert(0, str(content)) # 确保是字符串
+            count += 1
+            # 如果已经收集到足够数量的消息，则停止遍历
+            if count >= length:
+                break
+
+    # 使用换行符连接收集到的内容
+    return "\n".join(selected_contents)

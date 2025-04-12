@@ -32,6 +32,8 @@ from .constants import (
 if TYPE_CHECKING:
     from ..main import Mnemosyne
 
+from astrbot.core.log import LogManager
+logger = LogManager.GetLogger(__name__)
 
 async def handle_query_memory(
     plugin: "Mnemosyne", event: AstrMessageEvent, req: ProviderRequest
@@ -40,7 +42,7 @@ async def handle_query_memory(
     处理 LLM 请求前的 RAG 检索逻辑。
     检索相关的长期记忆，并将其注入到 ProviderRequest 中。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
 
     # --- 前置检查 ---
     if not await _check_rag_prerequisites(plugin):
@@ -54,7 +56,7 @@ async def handle_query_memory(
         )
 
         # --- 判断是否总结 ---
-        await _check_and_trigger_summary(plugin, session_id, req.contexts, persona_id)
+        await _check_and_trigger_summary(plugin, session_id, req, persona_id)
         plugin.msg_counter.increment_counter(session_id)
 
         # --- RAG 搜索 ---
@@ -90,7 +92,7 @@ async def handle_on_llm_resp(
     """
     处理 LLM 响应后的逻辑。更新计数器。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     if resp.role != "assistant":
         logger.warning("LLM 响应不是助手角色，不进行记录。")
         return
@@ -121,7 +123,7 @@ async def _check_rag_prerequisites(plugin: "Mnemosyne") -> bool:
     Returns:
         True 如果前提条件满足，False 否则。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
         logger.error("Milvus 服务未初始化或未连接，无法查询长期记忆。")
         return False
@@ -147,7 +149,7 @@ async def _get_persona_id(
     Returns:
         人格 ID 字符串，如果没有人格或发生错误则为 None。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     session_id = await plugin.context.conversation_manager.get_curr_conversation_id(
         event.unified_msg_origin
     )
@@ -175,7 +177,7 @@ async def _get_persona_id(
 async def _check_and_trigger_summary(
     plugin: "Mnemosyne",
     session_id: str,
-    req_contexts: List[Dict],
+    req: ProviderRequest,
     persona_id: Optional[str],
 ):
     """
@@ -187,17 +189,30 @@ async def _check_and_trigger_summary(
         req_contexts: 请求上下文列表。
         persona_id: 人格 ID.
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     if plugin.msg_counter.adjust_counter_if_necessary(
-        session_id, req_contexts
+        session_id, req.contexts
     ) and plugin.msg_counter.get_counter(session_id) >= plugin.config.get(
         "num_pairs", 10
     ):
+        # 总结前删除插入的记忆
+        injection_method = plugin.config.get("memory_injection_method", "user_prompt")
+        contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
+        # 恢复`contexts_memory_len`配置的功能
+        if injection_method == "user_prompt":
+            req.contexts = remove_mnemosyne_tags(req.contexts,contexts_memory_len)
+        elif injection_method == "system_prompt":
+            req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt,contexts_memory_len)
+        elif injection_method == "insert_system_prompt":
+            req.contexts = remove_system_content(req.contexts,contexts_memory_len)
+
         logger.info("开始总结历史对话...")
+        history_contents = format_context_to_string(req.contexts,plugin.config.get("num_pairs", 10))
+        logger.debug(f"总结的部分{history_contents}")
+
         asyncio.create_task(
             handle_summary_long_memory(
-                plugin, persona_id, session_id, format_context_to_string(req_contexts)
-            )
+                plugin, persona_id, session_id, history_contents)
         )
         logger.info("总结历史对话任务已提交到后台执行。")
         plugin.msg_counter.reset_counter(session_id)
@@ -221,7 +236,7 @@ async def _perform_milvus_search(
     Returns:
         Milvus 搜索结果列表，如果没有找到或出错则为 None。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     # 防止没有过滤条件引发的潜在错误
     filters = ["memory_id > 0"]
     if session_id:
@@ -235,7 +250,7 @@ async def _perform_milvus_search(
         filters.append(f'personality_id == "{effective_persona_id_for_filter}"')
         logger.debug(f"将使用人格 '{effective_persona_id_for_filter}' 过滤记忆。")
     elif use_personality_filtering:
-        logger.debug(f"启用了人格过滤，但当前无有效人格 ID，不按人格过滤。")
+        logger.debug("启用了人格过滤，但当前无有效人格 ID，不按人格过滤。")
 
     search_expression = " and ".join(filters) if filters else ""
     collection_name = plugin.collection_name
@@ -296,7 +311,7 @@ def _format_and_inject_memory(
         detailed_results: 详细的搜索结果列表。
         req: ProviderRequest 对象。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     if not detailed_results:
         logger.info("未找到或获取到相关的长期记忆，不进行补充。")
         return
@@ -331,10 +346,11 @@ def _format_and_inject_memory(
 
     injection_method = plugin.config.get("memory_injection_method", "user_prompt")
 
-    # BUG 当配置为user_prompt时，contexts_memory_len配置将无效，因为remove_mnemosyne_tags()会删除其中所有的标签
+    # 恢复`contexts_memory_len`的功能
+    contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
     if injection_method == "user_prompt":
         logger.debug(f"查看contexts：{req.contexts}")
-        req.contexts = remove_mnemosyne_tags(req.contexts)
+        req.contexts = remove_mnemosyne_tags(req.contexts,contexts_memory_len)
         req.prompt = long_memory + "\n" + req.prompt
 
     elif injection_method == "system_prompt":
@@ -342,12 +358,12 @@ def _format_and_inject_memory(
             f"查看长期记忆：{req.system_prompt}，判断是否要对里面的内容进行删除\n"
         )
         logger.debug(f"查看contexts：{req.contexts}")
-        req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt)
+        req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt,contexts_memory_len)
         req.system_prompt += long_memory
 
     elif injection_method == "insert_system_prompt":
         logger.debug(f"查看contexts：{req.contexts}")
-        req.contexts = remove_system_content(req.contexts)
+        req.contexts = remove_system_content(req.contexts,contexts_memory_len)
         req.contexts.append({"role": "system", "content": long_memory})
 
     else:
@@ -369,7 +385,7 @@ async def _check_summary_prerequisites(plugin: "Mnemosyne", memory_text: str) ->
     Returns:
         True 如果前提条件满足，False 否则。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
         logger.error("Milvus 服务不可用，无法存储总结后的长期记忆。")
         return False
@@ -395,7 +411,7 @@ async def _get_summary_llm_response(
     Returns:
         LLMResponse 对象，如果请求失败则为 None。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     try:
         llm_provider = plugin.context.get_using_provider()
         if not llm_provider:
@@ -441,14 +457,14 @@ def _extract_summary_text(
     Returns:
         总结文本字符串，如果提取失败则为 None。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     completion_text = None
     if isinstance(llm_response, LLMResponse):
         completion_text = llm_response.completion_text
-        role = llm_response.role
+        # role = llm_response.role
     elif isinstance(llm_response, dict):
         completion_text = llm_response.get("completion_text")
-        role = llm_response.get("role")
+        # role = llm_response.get("role")
     else:
         logger.error(f"LLM 总结返回了未知类型的数据: {type(llm_response)}")
         return None
@@ -479,7 +495,7 @@ async def _store_summary_to_milvus(
         summary_text: 总结文本。
         embedding_vector: 总结文本的 Embedding 向量。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
     collection_name = plugin.collection_name
     current_timestamp = int(time.time())
 
@@ -536,7 +552,7 @@ async def handle_summary_long_memory(
     使用 LLM 总结短期对话历史形成长期记忆，并将其向量化后存入 Milvus。
     这是一个后台任务。
     """
-    logger = plugin.logger
+    # logger = plugin.logger
 
     # --- 前置检查 ---
     if not await _check_summary_prerequisites(plugin, memory_text):
@@ -564,6 +580,6 @@ async def handle_summary_long_memory(
         await _store_summary_to_milvus(
             plugin, persona_id, session_id, summary_text, embedding_vector
         )
-
+        return
     except Exception as e:
         logger.error(f"在总结或存储长期记忆的过程中发生严重错误: {e}", exc_info=True)

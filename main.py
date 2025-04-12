@@ -32,7 +32,7 @@ from .memory_manager.embedding import OpenAIEmbeddingAPI
     "Mnemosyne",
     "lxfight",
     "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
-    "0.3.3",
+    "0.3.6",
     "https://github.com/lxfight/astrbot_plugin_mnemosyne",
 )
 class Mnemosyne(Star):
@@ -58,9 +58,7 @@ class Mnemosyne(Star):
         self.flush_after_insert = False
         # --- 执行初始化流程 ---
         try:
-            initialization.initialize_config_check(
-                self
-            )  # astrbot 配置与Mnemosyne配置检查
+            initialization.initialize_config_check(self)
             initialization.initialize_config_and_schema(self)  # 初始化配置和schema
             initialization.initialize_milvus(self)  # 初始化 Milvus
             initialization.initialize_components(self)  # 初始化核心组件
