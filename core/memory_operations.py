@@ -54,7 +54,7 @@ async def handle_query_memory(
         )
 
         # --- 判断是否总结 ---
-        await _check_and_trigger_summary(plugin, session_id, req.contexts, persona_id)
+        await _check_and_trigger_summary(plugin, session_id, req, persona_id)
         plugin.msg_counter.increment_counter(session_id)
 
         # --- RAG 搜索 ---
@@ -175,7 +175,7 @@ async def _get_persona_id(
 async def _check_and_trigger_summary(
     plugin: "Mnemosyne",
     session_id: str,
-    req_contexts: List[Dict],
+    req: ProviderRequest,
     persona_id: Optional[str],
 ):
     """
@@ -189,14 +189,24 @@ async def _check_and_trigger_summary(
     """
     logger = plugin.logger
     if plugin.msg_counter.adjust_counter_if_necessary(
-        session_id, req_contexts
+        session_id, req.contexts
     ) and plugin.msg_counter.get_counter(session_id) >= plugin.config.get(
         "num_pairs", 10
     ):
+        # 总结前删除插入的记忆
+        injection_method = plugin.config.get("memory_injection_method", "user_prompt")
+        # BUG 当配置为user_prompt时，contexts_memory_len配置将无效，因为remove_mnemosyne_tags()会删除其中所有的标签
+        if injection_method == "user_prompt":
+            req.contexts = remove_mnemosyne_tags(req.contexts)
+        elif injection_method == "system_prompt":
+            req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt)
+        elif injection_method == "insert_system_prompt":
+            req.contexts = remove_system_content(req.contexts)
+
         logger.info("开始总结历史对话...")
         asyncio.create_task(
             handle_summary_long_memory(
-                plugin, persona_id, session_id, format_context_to_string(req_contexts)
+                plugin, persona_id, session_id, format_context_to_string(req.contexts)
             )
         )
         logger.info("总结历史对话任务已提交到后台执行。")
