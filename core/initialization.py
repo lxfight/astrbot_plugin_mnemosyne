@@ -60,7 +60,7 @@ def initialize_config_check(plugin: "Mnemosyne"):
 
     # ------ 检查contexts_memory_len ------
     contexts_memory_len = plugin.config.get("contexts_memory_len",0)
-    if contexts_memory_len > astrbot_max_context_length:
+    if astrbot_max_context_length > 0 and contexts_memory_len > astrbot_max_context_length:
         raise ValueError(
             f"\ncontexts_memory_len不能大于astrbot的配置(最多携带对话数量(条))\
                             配置的数量:{astrbot_max_context_length}。\n"
