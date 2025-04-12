@@ -195,18 +195,19 @@ async def _check_and_trigger_summary(
     ):
         # 总结前删除插入的记忆
         injection_method = plugin.config.get("memory_injection_method", "user_prompt")
-        # BUG 当配置为user_prompt时，contexts_memory_len配置将无效，因为remove_mnemosyne_tags()会删除其中所有的标签
+        contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
+        # 恢复`contexts_memory_len`配置的功能
         if injection_method == "user_prompt":
-            req.contexts = remove_mnemosyne_tags(req.contexts)
+            req.contexts = remove_mnemosyne_tags(req.contexts,contexts_memory_len)
         elif injection_method == "system_prompt":
-            req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt)
+            req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt,contexts_memory_len)
         elif injection_method == "insert_system_prompt":
-            req.contexts = remove_system_content(req.contexts)
+            req.contexts = remove_system_content(req.contexts,contexts_memory_len)
 
         logger.info("开始总结历史对话...")
         asyncio.create_task(
             handle_summary_long_memory(
-                plugin, persona_id, session_id, format_context_to_string(req.contexts)
+                plugin, persona_id, session_id, format_context_to_string(req.contexts,plugin.config.get("num_pairs", 10))
             )
         )
         logger.info("总结历史对话任务已提交到后台执行。")
@@ -341,10 +342,11 @@ def _format_and_inject_memory(
 
     injection_method = plugin.config.get("memory_injection_method", "user_prompt")
 
-    # BUG 当配置为user_prompt时，contexts_memory_len配置将无效，因为remove_mnemosyne_tags()会删除其中所有的标签
+    # 恢复`contexts_memory_len`的功能
+    contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
     if injection_method == "user_prompt":
         logger.debug(f"查看contexts：{req.contexts}")
-        req.contexts = remove_mnemosyne_tags(req.contexts)
+        req.contexts = remove_mnemosyne_tags(req.contexts,contexts_memory_len)
         req.prompt = long_memory + "\n" + req.prompt
 
     elif injection_method == "system_prompt":
@@ -352,12 +354,12 @@ def _format_and_inject_memory(
             f"查看长期记忆：{req.system_prompt}，判断是否要对里面的内容进行删除\n"
         )
         logger.debug(f"查看contexts：{req.contexts}")
-        req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt)
+        req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt,contexts_memory_len)
         req.system_prompt += long_memory
 
     elif injection_method == "insert_system_prompt":
         logger.debug(f"查看contexts：{req.contexts}")
-        req.contexts = remove_system_content(req.contexts)
+        req.contexts = remove_system_content(req.contexts,contexts_memory_len)
         req.contexts.append({"role": "system", "content": long_memory})
 
     else:
