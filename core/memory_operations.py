@@ -200,19 +200,27 @@ async def _check_and_trigger_summary(
         contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
         # 恢复`contexts_memory_len`配置的功能
         if injection_method == "user_prompt":
-            req.contexts = remove_mnemosyne_tags(req.contexts,contexts_memory_len)
+            req.contexts = remove_mnemosyne_tags(req.contexts, contexts_memory_len)
+            # logger.debug(f"\n astrbot 上下文：\n{req.contexts}")
+
         elif injection_method == "system_prompt":
-            req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt,contexts_memory_len)
+            req.system_prompt = remove_system_mnemosyne_tags(
+                req.system_prompt, contexts_memory_len
+            )
+            # logger.debug(f"\n astrbot 上下文：\n{req.contexts}")
+
         elif injection_method == "insert_system_prompt":
-            req.contexts = remove_system_content(req.contexts,contexts_memory_len)
+            req.contexts = remove_system_content(req.contexts, contexts_memory_len)
+            # logger.debug(f"\n astrbot 上下文：\n{req.contexts}")
 
         logger.info("开始总结历史对话...")
-        history_contents = format_context_to_string(req.contexts,plugin.config.get("num_pairs", 10))
-        logger.debug(f"总结的部分{history_contents}")
+        history_contents = format_context_to_string(
+            req.contexts, plugin.config.get("num_pairs", 10)
+        )
+        # logger.debug(f"总结的部分{history_contents}")
 
         asyncio.create_task(
-            handle_summary_long_memory(
-                plugin, persona_id, session_id, history_contents)
+            handle_summary_long_memory(plugin, persona_id, session_id, history_contents)
         )
         logger.info("总结历史对话任务已提交到后台执行。")
         plugin.msg_counter.reset_counter(session_id)
@@ -317,7 +325,7 @@ def _format_and_inject_memory(
         return
 
     long_memory_prefix = plugin.config.get(
-        "long_memory_prefix", "<Mnemosyne>长期记忆片段："
+        "long_memory_prefix", "<Mnemosyne> 长期记忆片段："
     )
     long_memory_suffix = plugin.config.get("long_memory_suffix", "</Mnemosyne>")
     long_memory = f"{long_memory_prefix}\n"
@@ -349,27 +357,30 @@ def _format_and_inject_memory(
     # 恢复`contexts_memory_len`的功能
     contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
     if injection_method == "user_prompt":
-        logger.debug(f"查看contexts：{req.contexts}")
-        req.contexts = remove_mnemosyne_tags(req.contexts,contexts_memory_len)
+        # logger.debug(f"查看contexts：{req.contexts}")
+        req.contexts = remove_mnemosyne_tags(req.contexts, contexts_memory_len)
         req.prompt = long_memory + "\n" + req.prompt
 
     elif injection_method == "system_prompt":
         logger.debug(
             f"查看长期记忆：{req.system_prompt}，判断是否要对里面的内容进行删除\n"
         )
-        logger.debug(f"查看contexts：{req.contexts}")
-        req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt,contexts_memory_len)
+        # logger.debug(f"查看contexts：{req.contexts}")
+        req.system_prompt = remove_system_mnemosyne_tags(
+            req.system_prompt, contexts_memory_len
+        )
         req.system_prompt += long_memory
 
     elif injection_method == "insert_system_prompt":
-        logger.debug(f"查看contexts：{req.contexts}")
-        req.contexts = remove_system_content(req.contexts,contexts_memory_len)
+        # logger.debug(f"查看contexts：{req.contexts}")
+        req.contexts = remove_system_content(req.contexts, contexts_memory_len)
         req.contexts.append({"role": "system", "content": long_memory})
 
     else:
         logger.warning(
             f"未知的记忆注入方法 '{injection_method}'，将默认追加到用户 prompt。"
         )
+        req.contexts = remove_mnemosyne_tags(req.contexts, contexts_memory_len)
         req.prompt = long_memory + "\n" + req.prompt
 
 
