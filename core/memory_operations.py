@@ -56,6 +56,7 @@ async def handle_query_memory(
         )
 
         # --- 判断是否总结 ---
+        logger.debug(f"当前会话：{session_id}的上下文消息为\n{req.contexts}")
         await _check_and_trigger_summary(plugin, session_id, req, persona_id)
         plugin.msg_counter.increment_counter(session_id)
 
