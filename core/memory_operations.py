@@ -64,7 +64,17 @@ async def handle_query_memory(
         detailed_results = []
         try:
             # 1. 向量化用户查询
-            query_embeddings = plugin.ebd.get_embeddings(req.prompt)
+            # query_embeddings = plugin.ebd.get_embeddings(req.prompt)
+            try:
+                query_embeddings = await asyncio.get_event_loop().run_in_executor(
+                    None,  # 使用默认线程池
+                    plugin.ebd.get_embeddings, # 同步函数
+                    req.prompt # 函数参数
+                )
+            except Exception as e:
+                logger.error(f"执行 Embedding 获取时出错: {e}", exc_info=True)
+                query_embeddings = None # 确保后续能处理失败
+
             if not query_embeddings:
                 logger.error("无法获取用户查询的 Embedding 向量。")
                 return
@@ -530,10 +540,22 @@ async def _store_summary_to_milvus(
     logger.info(
         f"准备向集合 '{collection_name}' 插入 1 条总结记忆 (Persona: {effective_persona_id}, Session: {session_id[:8]}...)"
     )
-    mutation_result = plugin.milvus_manager.insert(
-        collection_name=collection_name,
-        data=data_to_insert,
-    )
+    # mutation_result = plugin.milvus_manager.insert(
+    #     collection_name=collection_name,
+    #     data=data_to_insert,
+    # )
+    # --- 修改 insert 调用 ---
+    loop = asyncio.get_event_loop()
+    mutation_result = None
+    try:
+        mutation_result = await loop.run_in_executor(
+            None, # 使用默认线程池
+            plugin.milvus_manager.insert,
+            collection_name,
+            data_to_insert
+        )
+    except Exception as e:
+        logger.error(f"向 Milvus 插入总结记忆时出错: {e}", exc_info=True)
 
     if mutation_result and mutation_result.insert_count > 0:
         inserted_ids = mutation_result.primary_keys
@@ -543,7 +565,12 @@ async def _store_summary_to_milvus(
             logger.debug(
                 f"正在刷新 (Flush) 集合 '{collection_name}' 以确保记忆立即可用..."
             )
-            plugin.milvus_manager.flush([collection_name])
+            # plugin.milvus_manager.flush([collection_name])
+            await loop.run_in_executor(
+                None, # 使用默认线程池
+                plugin.milvus_manager.flush, # 要在线程池执行的同步函数
+                [collection_name]            # flush 的参数 (是一个列表)
+            )
             logger.debug(f"集合 '{collection_name}' 刷新完成。")
 
         except Exception as flush_err:
@@ -582,7 +609,17 @@ async def handle_summary_long_memory(
             return
 
         # 3. 获取总结文本的 Embedding
-        embedding_vectors = plugin.ebd.get_embeddings(summary_text)
+        # embedding_vectors = plugin.ebd.get_embeddings(summary_text)
+        try:
+            embedding_vectors = await asyncio.get_event_loop().run_in_executor(
+                None, # 使用默认线程池
+                plugin.ebd.get_embeddings, # 同步函数
+                summary_text # 函数参数
+            )
+        except Exception as e:
+            logger.error(f"获取总结文本 Embedding 时出错: '{summary_text[:100]}...' - {e}", exc_info=True)
+            embedding_vectors = None # 确保后续能处理失败
+
         if not embedding_vectors:
             logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")
             return
