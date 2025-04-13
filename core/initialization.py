@@ -39,13 +39,12 @@ def initialize_config_check(plugin: "Mnemosyne"):
     astrbot_config = plugin.context.get_config()
     # ------ 检查num_pairs ------
     num_pairs = plugin.config["num_pairs"]
-        # num_pairs需要小于['provider_settings']['max_context_length']配置的数量，如果该配置为-1，则不限制。
+    # num_pairs需要小于['provider_settings']['max_context_length']配置的数量，如果该配置为-1，则不限制。
     astrbot_max_context_length = astrbot_config["provider_settings"][
         "max_context_length"
     ]
     if (
-        astrbot_max_context_length > 0
-        and num_pairs > 2 * astrbot_max_context_length
+        astrbot_max_context_length > 0 and num_pairs > 2 * astrbot_max_context_length
     ):  # 这里乘2是因为消息条数计算规则不同
         raise ValueError(
             f"\nnum_pairs不能大于astrbot的配置(最多携带对话数量(条))\
@@ -59,13 +58,17 @@ def initialize_config_check(plugin: "Mnemosyne"):
     # ------ num_pairs ------
 
     # ------ 检查contexts_memory_len ------
-    contexts_memory_len = plugin.config.get("contexts_memory_len",0)
-    if astrbot_max_context_length > 0 and contexts_memory_len > astrbot_max_context_length:
+    contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
+    if (
+        astrbot_max_context_length > 0
+        and contexts_memory_len > astrbot_max_context_length
+    ):
         raise ValueError(
             f"\ncontexts_memory_len不能大于astrbot的配置(最多携带对话数量(条))\
                             配置的数量:{astrbot_max_context_length}。\n"
         )
     # ------ contexts_memory_len ------
+
 
 def initialize_config_and_schema(plugin: "Mnemosyne"):
     """解析配置、验证和定义模式/索引参数。"""

@@ -6,7 +6,7 @@ Mnemosyne 插件工具函数
 from urllib.parse import urlparse
 import functools
 import re
-from typing import List, Dict, Set,Union
+from typing import List, Dict, Set, Union
 
 
 def parse_address(address: str):
@@ -55,7 +55,7 @@ def remove_mnemosyne_tags(
     Returns:
         清理或部分清理了 <mnemosyne> 标签对的聊天记录列表。
     """
-    compiled_regex = re.compile(r"<mnemosyne>.*?</mnemosyne>", re.DOTALL)
+    compiled_regex = re.compile(r"<Mnemosyne>.*?</Mnemosyne>", re.DOTALL)
     cleaned_contents: List[Dict[str, str]] = []
 
     if contexts_memory_len <= 0:
@@ -63,6 +63,9 @@ def remove_mnemosyne_tags(
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
+                # 强制转换为字符串
+                if not isinstance(original_text, str):
+                    original_text = str(original_text)
                 cleaned_text = compiled_regex.sub("", original_text)
                 cleaned_contents.append({"role": "user", "content": cleaned_text})
             else:
@@ -73,6 +76,9 @@ def remove_mnemosyne_tags(
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
+                # 强制转换为字符串
+                if not isinstance(original_text, str):
+                    original_text = str(original_text)
                 found_blocks = compiled_regex.findall(original_text)
                 all_mnemosyne_blocks.extend(found_blocks)
 
@@ -102,26 +108,26 @@ def remove_mnemosyne_tags(
 
 def remove_system_mnemosyne_tags(text: str, contexts_memory_len: int = 0) -> str:
     """
-    使用正则表达式去除LLM上下文系统提示中的<mnemosyne> </mnemosyne>标签对。
+    使用正则表达式去除LLM上下文系统提示中的<Mnemosyne> </Mnemosyne>标签对。
     如果 contexts_memory_len > 0，则仅保留最后 contexts_memory_len 个标签对。
 
     Args:
         text: 系统提示字符串。
-        contexts_memory_len: 需要保留的最新的 <mnemosyne> 标签对数量。如果 <= 0，则移除所有标签对。
+        contexts_memory_len: 需要保留的最新的 <Mnemosyne> 标签对数量。如果 <= 0，则移除所有标签对。
 
     Returns:
-        清理或部分清理了 <mnemosyne> 标签对的系统提示字符串。
+        清理或部分清理了 <Mnemosyne> 标签对的系统提示字符串。
     """
     if not isinstance(text, str):
         return text  # 如果输入不是字符串，直接返回
 
-    compiled_regex = re.compile(r"<mnemosyne>.*?</mnemosyne>", re.DOTALL)
+    compiled_regex = re.compile(r"<Mnemosyne>.*?</Mnemosyne>", re.DOTALL)
 
     if contexts_memory_len <= 0:
         # 移除所有标签
         cleaned_text = compiled_regex.sub("", text)
     else:
-        # 找出所有 mnemosyne 块
+        # 找出所有 Mnemosyne 块
         all_mnemosyne_blocks: List[str] = compiled_regex.findall(text)
 
         # 确定要保留的块
@@ -146,30 +152,49 @@ def remove_system_content(
     contents: List[Dict[str, str]], contexts_memory_len: int = 0
 ) -> List[Dict[str, str]]:
     """
-    使用正则表达式去除LLM上下文中插入的系统提示 (role='system' 的消息)。
-    注意：contexts_memory_len 参数在此函数中未被使用，因为它的语义（控制记忆标签）
-          与本函数移除系统提示的功能不直接相关。函数将始终移除所有 system 消息。
+    从LLM上下文中移除较旧的系统提示 ('role'='system' 的消息)，
+    保留指定数量的最新的 system 消息，并维持整体消息顺序。
 
     Args:
         contents: 包含聊天记录的列表。
-        contexts_memory_len: (未使用) 为了接口一致性而保留的参数。
+        contexts_memory_len: 需要保留的最新的 system 消息的数量 (非负整数)。
 
     Returns:
-        移除了所有 role='system' 消息的聊天记录列表。
+        处理后的聊天记录列表。
     """
-    cleaned_contents: List[Dict[str, str]] = []
-    for content_item in contents:
-        # 检查 content_item 是否为字典以及 'role'键是否存在且值为 'system'
-        if isinstance(content_item, dict) and content_item.get("role") == "system":
-            # 如果是字典且 role 是 system，则跳过，不添加到 cleaned_contents
-            continue
-        else:
-            # 保留其他类型的消息或非 system role 的消息
-            cleaned_contents.append(content_item)
+    if not isinstance(contents, list):
+        return []
+    if contexts_memory_len < 0:
+        contexts_memory_len = 0 # 确保为非负数
+
+    # 1. 找到所有 system 消息的索引
+    system_message_indices = [
+        i for i, msg in enumerate(contents)
+        if isinstance(msg, dict) and msg.get("role") == "system"
+    ]
+
+    # 2. 确定要移除的 system 消息的索引
+    indices_to_remove: Set[int] = set()
+    num_system_messages = len(system_message_indices)
+
+    if num_system_messages > contexts_memory_len:
+
+        num_to_remove = num_system_messages - contexts_memory_len
+
+        indices_to_remove = set(system_message_indices[:num_to_remove])
+
+    # 3. 构建新的列表，跳过要移除的索引
+    cleaned_contents = [
+        msg for i, msg in enumerate(contents)
+        if i not in indices_to_remove
+    ]
+
     return cleaned_contents
 
 
-def format_context_to_string(context_history: List[Union[Dict[str, str], str]], length: int = 10) -> str:
+def format_context_to_string(
+    context_history: List[Union[Dict[str, str], str]], length: int = 10
+) -> str:
     """
     从上下文历史记录中提取最后 'length' 条用户和AI的对话消息，
     并将它们的内容转换为用换行符分隔的字符串。
@@ -201,12 +226,14 @@ def format_context_to_string(context_history: List[Union[Dict[str, str], str]], 
             role = message.get("role")
             content = message.get("content")
 
-        # 检查 role 是否为 'user' 或 'assistant'
-        if role in ("user", "assistant") and content is not None:
-            # 将内容添加到列表的 *开头*，以保持原始顺序
-            selected_contents.insert(0, str(content)) # 确保是字符串
-            count += 1
-            # 如果已经收集到足够数量的消息，则停止遍历
+        # 优化逻辑，添加明确的消息来源
+        if content is not None:
+            if role == "user":
+                selected_contents.insert(0, str("user:" + content + "\n"))
+                count += 1
+            elif role == "assistant":
+                selected_contents.insert(0, str("assistant:" + content + "\n"))
+                count += 1
             if count >= length:
                 break
 
