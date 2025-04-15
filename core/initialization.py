@@ -69,6 +69,38 @@ def initialize_config_check(plugin: "Mnemosyne"):
         )
     # ------ contexts_memory_len ------
 
+    # ------ 检查LLM服务商是否指定且有效 ------
+    # 1. 从配置中获取指定的服务商ID，如果未指定则为空字符串
+    provider_id = plugin.config.get("LLM_providers", "")
+    provider = None # 初始化 provider 变量
+
+    if not provider_id:
+        # 2. 如果未指定ID，尝试获取默认服务商
+        provider = plugin.context.get_using_provider()
+        if not provider:
+            # 3a. 获取默认服务商失败，抛出错误
+            raise ValueError(
+                "\n配置错误：LLM_providers 未指定，且无法获取默认的LLM服务商。\n"
+                "请检查：\n"
+                "1. 配置文件中是否正确设置了默认服务商。\n"
+                "2. 或在当前插件配置中指定有效的 'LLM_providers' ID。\n"
+            )
+
+    else:
+        # 4. 如果指定了ID，尝试根据ID获取服务商
+        provider = plugin.context.get_provider_by_id(provider_id)
+        if not provider:
+            # 5a. 根据ID获取服务商失败，抛出错误
+            raise ValueError(
+                f"\n配置错误：未找到ID为 '{provider_id}' 的LLM服务商。\n"
+                "请检查：\n"
+                f"1. 配置文件中是否存在ID为 '{provider_id}' 的服务商定义。\n"
+                f"2. 插件配置中的 'LLM_providers' 字段值 ('{provider_id}') 是否拼写正确。\n"
+            )
+
+    # 6. 如果前面的步骤没有抛出错误，说明已成功获取 provider，将其赋值给插件
+    plugin.provider = provider
+    # ------ LLM服务商是否指定且有效 ------
 
 def initialize_config_and_schema(plugin: "Mnemosyne"):
     """解析配置、验证和定义模式/索引参数。"""

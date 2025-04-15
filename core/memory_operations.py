@@ -423,11 +423,15 @@ async def _get_summary_llm_response(
         LLMResponse 对象，如果请求失败则为 None。
     """
     # logger = plugin.logger
+    llm_provider = plugin.provider
+    # TODO 这部分逻辑真史，回头改下
     try:
-        llm_provider = plugin.context.get_using_provider()
         if not llm_provider:
-            logger.error("无法获取用于总结记忆的 LLM Provider。")
-            return None
+            # 如果plugin.provider不正确，在这时候，使用当前使用的LLM服务商，避免错误
+            llm_provider = plugin.context.get_using_provider()
+            if not llm_provider:
+                logger.error("无法获取用于总结记忆的 LLM Provider。")
+                return None
     except Exception as e:
         logger.error(f"获取 LLM Provider 时出错: {e}", exc_info=True)
         return None
