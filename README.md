@@ -12,18 +12,36 @@
 
 ---
 
-- ## 更新速览
-    - ### v0.3.4 -> v0.3.12
-        - **指定LLM服务商配置bug修复**：修复了指定LLM服务商后初始化错误的bug
-        - **配置增加**：更新了配置架构，支持指定LLM服务商进行记忆总结
-        - **逻辑优化**：每一次会话都会检查之前的历史消息中是否有需要删除的长期记忆片段。
-        - **函数优化**：使用异步方式处理同步IO操作，避免阻塞主线程。
-        - **函数错误修复**：调整了正则表达式的大小写敏感问题
-        - **紧急修复**：增加对 astrbot_max_context_length 大小的判断，避免负数导致的错误
-        - **恢复配置项功能**：恢复了配置项`历史上下文中保留的长期记忆数量 (contexts_memory_len)`的作用。
-        - **修复`num_pairs`不生效的错误**：修复了关于`num_pairs`配置项无法生效，导致记忆总结时，携带大量历史记录。
-        - **修复BUG**：关于`v0.3.3`版本以来，调用LLM总结记忆时，会有旧的记忆存在于上下文中，此版本进行了删除，以解决一些问题。
-        - **修复指令BUG**：关于`/memory list_records` 指令错误的修复
+<div style="border: 1px solid #ddd; padding: 10px; margin-bottom: 15px; border-radius: 5px; background-color: #f8f8f8;">
+<h2>🎉 更新速览 🎉</h2>
+
+<div style="border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 5px;">
+    <h4>🚀 v0.3.13</h4>
+    <ul>
+        <li>✨ <strong>新增 `Milvus Lite` 支持：</strong> 可以在本地使用极其轻量的数据库，无需部署完整 Milvus！（感谢提供建议的群友！但是我忘记是谁了，希望可以来认领一下）</li>
+        <li>⚠️ <strong>重要提示：</strong> `Milvus Lite` 仅支持 `Ubuntu >= 20.04` 和 `MacOS >= 11.0`。</li>
+    </ul>
+</div>
+
+<details>
+    <summary>🔨 v0.3.4 -> v0.3.12</summary>
+    <ul>
+      <li>✅ <strong>Bug 修复：</strong> 修复了指定 LLM 服务商后初始化错误的 Bug。</li>
+      <li>➕ <strong>配置更新：</strong> 更新了配置架构，支持指定 LLM 服务商进行记忆总结。</li>
+      <li>🔧 <strong>逻辑优化：</strong> 会话时检查历史消息中是否有需要删除的长期记忆片段。</li>
+      <li>⚡ <strong>性能优化：</strong> 使用异步方式处理同步 IO 操作，避免阻塞主线程。</li>
+      <li>🐛 <strong>Bug 修复：</strong> 调整了正则表达式的大小写敏感问题。</li>
+      <li>🚑 <strong>紧急修复：</strong> 增加对 `astrbot_max_context_length` 大小的判断，避免负数导致的错误。</li>
+      <li>⚙️ <strong>功能恢复：</strong> 恢复了配置项 `历史上下文中保留的长期记忆数量 (contexts_memory_len)` 的作用。</li>
+      <li>🐛 <strong>Bug 修复：</strong> 修复了关于 `num_pairs` 配置项无法生效的问题，导致记忆总结时携带大量历史记录。</li>
+      <li>🗑️ <strong>Bug 修复：</strong> 修复了 `v0.3.3` 版本以来，调用 LLM 总结记忆时，旧记忆存在于上下文的问题。</li>
+      <li>🛠️ <strong>指令修复：</strong> 修复了 `/memory list_records` 指令错误。</li>
+    </ul>
+</details>
+</div>
+
+
+
 
 ---
 

@@ -72,8 +72,8 @@ async def handle_query_memory(
             try:
                 query_embeddings = await asyncio.get_event_loop().run_in_executor(
                     None,  # 使用默认线程池
-                    plugin.ebd.get_embeddings, # 同步函数
-                    req.prompt # 函数参数
+                    lambda:plugin.ebd.get_embeddings(req.prompt),
+
                 )
             except Exception as e:
                 logger.error(f"执行 Embedding 获取时出错: {e}", exc_info=True)
@@ -541,11 +541,14 @@ async def _store_summary_to_milvus(
     loop = asyncio.get_event_loop()
     mutation_result = None
     try:
+
         mutation_result = await loop.run_in_executor(
             None, # 使用默认线程池
-            plugin.milvus_manager.insert,
+            lambda:plugin.milvus_manager.insert(
+            collection_name=plugin.config.get("collection_name","default"),
             data = data_to_insert,
             partition_name = collection_name,
+            ),
         )
     except Exception as e:
         logger.error(f"向 Milvus 插入总结记忆时出错: {e}", exc_info=True)
@@ -606,8 +609,9 @@ async def handle_summary_long_memory(
         try:
             embedding_vectors = await asyncio.get_event_loop().run_in_executor(
                 None, # 使用默认线程池
-                plugin.ebd.get_embeddings, # 同步函数
-                texts = summary_text # 函数参数
+                lambda:plugin.ebd.get_embeddings(
+                    summary_text
+                ),
             )
         except Exception as e:
             logger.error(f"获取总结文本 Embedding 时出错: '{summary_text[:100]}...' - {e}", exc_info=True)

@@ -3,12 +3,19 @@
         "description":"记忆总结使用的LLM服务商ID",
         "type":"string"
     },
+    "milvus_lite_path":{
+        "description":"milvus数据库的lite模式路径",
+        "type":"string",
+        "hint":"注意！！！只使用milvus_lite_path或者address其中一个即可，milvus_lite_path优先级较高",
+        "obvious_hint":true,
+        "default":""
+    },
     "address":{
         "description":"milvus数据库地址",
         "type":"string",
         "hint":"支持支持格式如:http://localhost:19530，https://localhost:19530，localhost:19530",
         "obvious_hint":true,
-        "default":"http://localhost:19530"
+        "default":""
     },
     "authentication":{
         "description":"milvus数据库的认证信息",

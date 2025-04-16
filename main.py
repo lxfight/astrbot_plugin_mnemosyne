@@ -180,14 +180,16 @@ class Mnemosyne(Star):
         self.logger.info("Mnemosyne 插件正在停止...")
         if self.milvus_manager and self.milvus_manager.is_connected():
             try:
-                if self.milvus_manager.has_collection(self.collection_name):
+                if not self.milvus_manager._is_lite and self.milvus_manager.has_collection(self.collection_name):
                     self.logger.info(
                         f"正在从内存中释放集合 '{self.collection_name}'..."
                     )
                     self.milvus_manager.release_collection(self.collection_name)
+
                 self.logger.info("正在断开与 Milvus 的连接...")
                 self.milvus_manager.disconnect()
                 self.logger.info("Milvus 连接已成功断开。")
+
             except Exception as e:
                 self.logger.error(f"停止插件时与 Milvus 交互出错: {e}", exc_info=True)
         else:
