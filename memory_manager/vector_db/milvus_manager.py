@@ -1,7 +1,8 @@
+import os
+import pathlib
 from typing import List, Dict, Optional, Any, Union
 from urllib.parse import urlparse
 import time
-
 
 from pymilvus import connections, utility, CollectionSchema, DataType, Collection
 from pymilvus.exceptions import (
@@ -14,7 +15,6 @@ from pymilvus.exceptions import (
 # logger = logging.getLogger(__name__)
 
 from astrbot.core.log import LogManager
-
 logger = LogManager.GetLogger(log_name="Mnemosyne")
 
 
@@ -22,214 +22,386 @@ class MilvusManager:
     """
     一个用于管理与 Milvus 数据库交互的类。
     封装了连接、集合管理、数据操作、索引和搜索等常用功能。
-    支持通过 URI 或 host/port 进行连接。
+    支持连接到标准 Milvus 服务器 (通过 URI 或 host/port) 或使用 Milvus Lite (通过本地路径)。
+
+    连接优先级:
+    1. 如果提供了 `lite_path`，则使用 Milvus Lite 模式。
+    2. 如果提供了网络 `uri` (http/https)，则使用标准网络连接。
+    3. 如果提供了显式的 `host` (非 'localhost')，则使用 host/port 连接。
+    4. 如果以上都未提供，则默认使用 Milvus Lite，数据路径为当前文件向上追溯4层的目录下的 `milvus_data/default_milvus_lite.db`
     """
 
     def __init__(
         self,
         alias: str = "default",
+        lite_path: Optional[str] = None,
         uri: Optional[str] = None,
         host: Optional[str] = None,
         port: Optional[Union[str, int]] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
-        secure: Optional[bool] = None,  # 添加 secure 参数
-        token: Optional[str] = None,  # Milvus 2.2.9+ 支持 API Key / Token
-        db_name: str = "default",  # Milvus 2.2+ 支持多数据库
+        secure: Optional[bool] = None,
+        token: Optional[str] = None,
+        db_name: str = "default",
         **kwargs,
     ):
         """
         初始化 MilvusManager。
-        优先使用 'uri' 进行连接。如果 'uri' 未提供，则使用 'host' 和 'port'。
-        必须提供 'uri' 或 ('host' 和 'port') 之一。
+
         Args:
+            # 参数说明与之前保持一致
             alias (str): 此连接的别名。
-            uri (Optional[str]): Milvus 连接 URI。例如：
-                - "http://localhost:19530"
-                - "https://user:password@milvus.example.com:19530"
-                - "https://your-reverse-proxy.com/milvus-path" (代理地址)
-                - "unix:/path/to/milvus.sock" (如果 pymilvus 支持)
-                如果提供，将忽略 host 和 port 参数。
-            host (Optional[str]): Milvus 服务器的主机名或 IP 地址。仅在 uri 未提供时使用。
-                                    默认为 "localhost"（如果 uri 和 host 都未提供）。
-            port (Optional[Union[str, int]]): Milvus 服务器的端口。仅在 uri 未提供时使用。
-                                                默认为 19530（如果 uri 和 port 都未提供）。
-            user (Optional[str]): 用于身份验证的用户名 (如果 Milvus 启用 RBAC)。
-                                    如果包含在 uri 中，uri 中的值优先。
-            password (Optional[str]): 用于身份验证的密码 (如果 Milvus 启用 RBAC)。
-                                        如果包含在 uri 中，uri 中的值优先。
-            secure (Optional[bool]): 是否使用 TLS/SSL 安全连接。
-                                        如果 uri 以 "https" 开头，通常应设为 True。
-                                        如果 uri 未提供，根据需要设置。
-            token (Optional[str]): 用于身份验证的 API Key 或 Token (Milvus 2.2.9+)。
-                                    优先于 user/password。
-            db_name (str): 要连接的数据库名称 (Milvus 2.2+)。默认为 "default"。
+            lite_path (Optional[str]): Milvus Lite 数据文件的本地路径。优先使用。
+            uri (Optional[str]): 标准 Milvus 连接 URI (http/https)。
+            host (Optional[str]): Milvus 服务器主机名/IP。
+            port (Optional[Union[str, int]]): Milvus 服务器端口。
+            user (Optional[str]): 标准 Milvus 认证用户名。
+            password (Optional[str]): 标准 Milvus 认证密码。
+            secure (Optional[bool]): 是否对标准 Milvus 连接使用 TLS/SSL。
+            token (Optional[str]): 标准 Milvus 认证 Token/API Key。
+            db_name (str): 要连接的数据库名称 (Milvus 2.2+)。
             **kwargs: 传递给 connections.connect 的其他参数。
         """
 
         self.alias = alias
+        self._original_lite_path = lite_path # 保留原始输入以供参考
+        self._lite_path = self._prepare_lite_path(lite_path) if lite_path is not None else None
+
         self._uri = uri
-        self._host = host if host is not None else "localhost"  # 提供默认值以防万一
-        self._port = str(port) if port is not None else "19530"  # 提供默认值并转为 str
+
+        self._host = host
+        self._raw_host = host
+        self._port = str(port) if port is not None else "19530"
+
         self._user = user
         self._password = password
         self._secure = secure
         self._token = token
         self._db_name = db_name
+
         self.connect_kwargs = kwargs  # 存储额外的连接参数
 
         self._connection_info = {}  # 用于存储最终传递给 connect 的参数
         self._is_connected = False
+        self._is_lite = False # 标志是否为 Lite 模式
 
-        # -- 参数优先级和验证 --
-        if self._uri:
-            logger.info(f"将使用 URI '{self._uri}' 进行连接 (别名: {self.alias})。")
-            self._connection_info["uri"] = self._uri
-            # 尝试从 URI 解析 user/password，除非已显式提供 token 或 user/pass
-            parsed_uri = urlparse(self._uri)
-            if not self._token:  # Token 优先级最高
-                uri_user = parsed_uri.username
-                uri_password = parsed_uri.password
-                if uri_user and self._user is None:
-                    self._user = uri_user
-                    logger.info(f"从 URI 中提取到用户名 (别名: {self.alias})。")
-                if uri_password and self._password is None:
-                    self._password = uri_password
-                    logger.info(f"从 URI 中提取到密码 (别名: {self.alias})。")
-            # 如果 secure 未显式设置，尝试从 URI scheme 推断
-            if self._secure is None and parsed_uri.scheme == "https":
-                logger.info(
-                    f"URI scheme 是 'https'，将设置 secure=True (别名: {self.alias})。"
-                )
-                self._secure = True
-            elif self._secure is None:
-                self._secure = False  # 默认不安全
-            self._connection_info["secure"] = self._secure
-        elif self._host:
-            logger.info(
-                f"将使用 Host '{self._host}' 和 Port '{self._port}' 进行连接 (别名: {self.alias})。"
-            )
-            self._connection_info["host"] = self._host
-            self._connection_info["port"] = self._port  # 确保是字符串
-            if self._secure is not None:
-                self._connection_info["secure"] = self._secure
-            else:
-                self._connection_info["secure"] = False  # 默认不安全
+        # 3. 确定连接模式并配置参数
+        self._configure_connection_mode()
+
+        # 4. 添加通用配置 (如 db_name)
+        self._add_common_config()
+
+        # 5. 合并额外的 kwargs 参数
+        self._merge_kwargs()
+
+        # 6. 尝试建立初始连接
+        self._attempt_initial_connect()
+
+    # ------- 私有方法 -------
+    def _prepare_lite_path(self, path_input: str) -> str:
+        """
+        准备 Milvus Lite 路径。如果输入路径不是以 .db 结尾，
+        则假定为目录，并在其后附加默认文件名。
+        返回绝对路径。
+        """
+        path_input = os.path.normpath(path_input) # 标准化路径分隔符
+        _, ext = os.path.splitext(path_input)
+
+        final_path = path_input
+        if ext.lower() != ".db":
+            # 不是以 .db 结尾，假设是目录或基名，附加默认文件名
+            final_path = os.path.join(path_input, "mnemosyne_lite.db")
+            logger.info(f"提供的 lite_path '{path_input}' 未以 '.db' 结尾。假定为目录/基名，自动附加默认文件名 'mnemosyne_lite.db'。")
+
+        # 确保返回的是绝对路径，避免相对路径带来的混淆
+        absolute_path = os.path.abspath(final_path)
+        logger.debug(f"最终处理后的 Milvus Lite 绝对路径: '{absolute_path}'")
+        return absolute_path
+
+    def _configure_connection_mode(self):
+        """根据输入参数决定连接模式并调用相应的配置方法。"""
+        # 注意：这里的 self._lite_path 已经是经过 _prepare_lite_path 处理后的完整路径
+        if self._lite_path is not None:
+            self._configure_lite_explicit()
+        elif self._uri and urlparse(self._uri).scheme in ["http", "https"]:
+            self._configure_uri()
+        # 检查 host 是否显式提供且不是 'localhost' (忽略大小写)
+        elif self._host is not None and self._host.lower() != 'localhost':
+            self._configure_host_port()
         else:
-            # uri 和 host 都未有效提供（使用默认值或 None）
-            # 在 pymilvus < 2.4 中，如果 host 和 uri 都没给，connect 会报错
-            # 在 pymilvus >= 2.4 中，connect 可以不带 host/port/uri，使用默认 'localhost:19530'
-            # 为了明确性，我们还是倾向于要求至少有 host 或 uri
-            # 但为了兼容默认行为，我们可以尝试使用默认值
+            self._configure_lite_default() # 默认模式也应该使用 _prepare_lite_path 计算路径
+
+    def _ensure_db_dir_exists(self, db_path: str):
+        """确保 Milvus Lite 数据库文件所在的目录存在。"""
+        # db_path 已经是绝对路径
+        db_dir = os.path.dirname(db_path)
+        if not os.path.exists(db_dir): # 检查目录是否存在
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+                logger.info(f"为 Milvus Lite 创建了目录: '{db_dir}'")
+            except OSError as e:
+                logger.error(f"无法为 Milvus Lite 创建目录 '{db_dir}': {e}。请检查权限。")
+                # 也许应该在这里抛出异常，因为无法创建目录会导致连接失败
+                # raise OSError(f"无法为 Milvus Lite 创建目录 '{db_dir}': {e}") from e
+            except Exception as e: # 捕获其他潜在错误
+                 logger.error(f"尝试为 Milvus Lite 创建目录 '{db_dir}' 时发生意外错误: {e}。")
+                 # raise # 重新抛出，让上层知道出错了
+
+    def _get_default_lite_path(self) -> str:
+        """计算默认的 Milvus Lite 数据路径（当前文件上4层目录）。"""
+        try:
+            # 获取定义 MilvusManager 类的文件的绝对路径
+            current_file_path = pathlib.Path(__file__).resolve()
+            # parents[0] 是当前目录, parents[1] 是上一层, ..., parents[3] 是上四层
+            base_dir = current_file_path.parents[4]
+            # 在该目录下创建一个子目录存放数据
+            default_dir = base_dir / "mnemosyne_data"
+            # 使用 _prepare_lite_path 来确保最终路径是带 .db 的文件路径
+            default_path = self._prepare_lite_path(str(default_dir))
+            logger.info(f"动态计算的默认 Milvus Lite 路径为: '{default_path}'")
+            return default_path
+        except IndexError:
+            # 使用当前工作目录下的默认文件名
+            fallback_dir = "."
+            fallback_path = self._prepare_lite_path(fallback_dir)
             logger.warning(
-                f"未提供 URI 或 Host，将尝试使用默认 Host '{self._host}' 和 Port '{self._port}' (别名: {self.alias})。"
+                f"无法获取当前文件 '{__file__}' 的上4层目录结构，"
+                f"将使用当前工作目录下的 '{fallback_path}' 作为默认 Milvus Lite 路径。"
             )
-            self._connection_info["host"] = self._host
-            self._connection_info["port"] = self._port
-            self._connection_info["secure"] = (
-                self._secure if self._secure is not None else False
+            return fallback_path
+        except Exception as e:
+            fallback_dir = "."
+            fallback_path = self._prepare_lite_path(fallback_dir)
+            logger.error(
+                f"计算默认 Milvus Lite 路径时发生意外错误: {e}，"
+                f"将使用当前工作目录下的 '{fallback_path}' 作为默认路径。"
             )
-        # -- 处理认证信息 --
+            return fallback_path
+
+    def _configure_lite_explicit(self):
+        """配置使用显式指定的 Milvus Lite 路径。"""
+        self._is_lite = True
+        # self._lite_path 在 __init__ 中已通过 _prepare_lite_path 处理
+        logger.info(f"配置 Milvus Lite (别名: {self.alias})。原始输入路径: '{self._original_lite_path}', 最终数据文件路径: '{self._lite_path}'")
+
+        # 确保目录存在（基于最终的文件路径）
+        self._ensure_db_dir_exists(self._lite_path)
+
+        # 使用处理后的完整文件路径作为 URI
+        self._connection_info["uri"] = self._lite_path
+        logger.warning("在 Milvus Lite (显式路径) 模式下，将忽略 host, port, secure, user, password, token 参数。")
+
+    def _configure_lite_default(self):
+        """配置使用默认的 Milvus Lite 路径。"""
+        self._is_lite = True
+        # 调用 _get_default_lite_path 获取已处理好的默认文件路径
+        default_lite_path = self._get_default_lite_path()
+        logger.warning(f"未提供明确连接方式，将默认使用 Milvus Lite (别名: {self.alias})。数据文件路径: '{default_lite_path}'")
+
+        # 确保目录存在（基于最终的文件路径）
+        self._ensure_db_dir_exists(default_lite_path)
+
+        # 使用处理后的完整文件路径作为 URI
+        self._connection_info["uri"] = default_lite_path
+        logger.warning("在默认 Milvus Lite 模式下，将忽略 host, port, secure, user, password, token 参数。")
+
+
+
+    def _configure_uri(self):
+        """配置使用标准网络 URI 连接。"""
+        self._is_lite = False
+        logger.info(f"配置标准 Milvus (别名: {self.alias}) 使用 URI: '{self._uri}'。")
+        self._connection_info["uri"] = self._uri
+        parsed_uri = urlparse(self._uri)
+
+        # 处理认证 (Token 优先)
         if self._token:
-            # Milvus 2.2.9+ / PyMilvus 2.2.9+
-            if (
-                hasattr(connections, "connect")
-                and "token" in connections.connect.__code__.co_varnames
-            ):
-                logger.info(f"使用 Token 进行认证 (别名: {self.alias})。")
-                self._connection_info["token"] = self._token
-            else:
-                logger.warning(
-                    "当前 PyMilvus 版本可能不支持 Token 认证，将忽略 Token 参数。"
-                )
+            self._add_token_auth("URI")
         elif self._user and self._password:
-            logger.info(f"使用 User/Password 进行认证 (别名: {self.alias})。")
-            self._connection_info["user"] = self._user
-            self._connection_info["password"] = self._password
-        # -- 处理数据库名称 --
-        # Milvus 2.2+ / PyMilvus 2.2+
-        if (
-            hasattr(connections, "connect")
-            and "db_name" in connections.connect.__code__.co_varnames
-        ):
+            self._add_user_password_auth("URI")
+        elif parsed_uri.username and parsed_uri.password: # 从 URI 提取
+            logger.info(f"从 URI 中提取 User/Password 进行认证 (别名: {self.alias})。")
+            self._connection_info["user"] = parsed_uri.username
+            self._connection_info["password"] = parsed_uri.password
+
+        # 处理 secure
+        if self._secure is None: # 如果未显式设置
+            self._secure = (parsed_uri.scheme == "https")
+            logger.info(f"根据 URI scheme ('{parsed_uri.scheme}') 推断 secure={self._secure} (别名: {self.alias})。")
+        else:
+            logger.info(f"使用显式设置的 secure={self._secure} (URI 连接, 别名: {self.alias})。")
+        self._connection_info["secure"] = self._secure
+
+    def _configure_host_port(self):
+        """配置使用 Host/Port 连接标准 Milvus。"""
+        self._is_lite = False
+        # host 已在 _configure_connection_mode 中检查过不为 None 且非 'localhost'
+        logger.info(f"配置标准 Milvus (别名: {self.alias}) 使用 Host: '{self._host}', Port: '{self._port}'。")
+        self._connection_info["host"] = self._host
+        self._connection_info["port"] = self._port
+
+        # 处理认证 (Token 优先)
+        if self._token:
+            self._add_token_auth("Host/Port")
+        elif self._user and self._password:
+            self._add_user_password_auth("Host/Port")
+
+        # 处理 secure
+        if self._secure is not None:
+            self._connection_info["secure"] = self._secure
+            logger.info(f"使用显式设置的 secure={self._secure} (Host/Port 连接, 别名: {self.alias})。")
+        else:
+            self._connection_info["secure"] = False # 默认不安全
+            logger.info(f"未设置 secure，默认为 False (Host/Port 连接, 别名: {self.alias})。")
+
+    def _add_token_auth(self, context: str):
+        """辅助方法：添加 Token 认证信息。"""
+        if hasattr(connections, 'connect') and 'token' in connections.connect.__code__.co_varnames:
+            logger.info(f"使用 Token 进行认证 ({context} 连接, 别名: {self.alias})。")
+            self._connection_info["token"] = self._token
+        else:
+            logger.warning(f"当前 PyMilvus 版本可能不支持 Token 认证，将忽略 Token 参数 ({context} 连接)。")
+
+    def _add_user_password_auth(self, context: str):
+        """辅助方法：添加 User/Password 认证信息。"""
+        logger.info(f"使用提供的 User/Password 进行认证 ({context} 连接, 别名: {self.alias})。")
+        self._connection_info["user"] = self._user
+        self._connection_info["password"] = self._password
+
+    def _add_common_config(self):
+        """添加对所有连接模式都可能适用的通用配置，如 db_name。"""
+        # 处理 db_name (Milvus 2.2+, 对 Lite 和 Standard 都有效)
+        if hasattr(connections, 'connect') and 'db_name' in connections.connect.__code__.co_varnames:
             if self._db_name != "default":
-                logger.info(f"连接到数据库 '{self._db_name}' (别名: {self.alias})。")
-            self._connection_info["db_name"] = self._db_name
+                logger.info(f"将连接到数据库 '{self._db_name}' (别名: {self.alias})。")
+                self._connection_info["db_name"] = self._db_name
+            # else: 不需要记录使用默认库
         elif self._db_name != "default":
-            logger.warning(
-                f"当前 PyMilvus 版本可能不支持多数据库，将忽略 db_name='{self._db_name}' 参数。"
-            )
-        # 合并额外参数，显式参数优先
-        self._connection_info.update(self.connect_kwargs)
-        # 尝试在初始化时连接
+            mode_name = "Milvus Lite" if self._is_lite else "Standard Milvus"
+            logger.warning(f"当前 PyMilvus 版本可能不支持多数据库，将忽略 db_name='{self._db_name}' (模式: {mode_name})。")
+
+        # 注意：alias 不放入 _connection_info，它是 connections.connect 的独立参数
+
+    def _merge_kwargs(self):
+        """合并用户传入的额外 kwargs 参数，让显式参数优先。"""
+        # final_kwargs = self.connect_kwargs.copy()
+        # final_kwargs.update(self._connection_info) # 让 _connection_info 的设置优先
+        # self._connection_info = final_kwargs
+        # 改为： 让kwargs补充，不覆盖已设置的参数
+        for key, value in self.connect_kwargs.items():
+            if key not in self._connection_info:
+                self._connection_info[key] = value
+            else:
+                logger.warning(f"忽略 kwargs 中的参数 '{key}'，因为它已被显式参数或内部逻辑设置。")
+
+
+    def _attempt_initial_connect(self):
+        """尝试在初始化时建立连接。"""
         try:
             self.connect()
         except Exception as e:
-            logger.error(f"初始化时连接 Milvus (别名: {self.alias}) 失败: {e}")
-            # 允许在连接失败的情况下创建实例
+            mode = "Milvus Lite" if self._is_lite else "Standard Milvus"
+            logger.error(f"初始化时连接 {mode} (别名: {self.alias}) 失败: {e}", exc_info=True)
+            # 允许在连接失败的情况下创建实例，后续操作会尝试重连或报错
 
+
+
+
+
+
+    # ------- 公共方法 -------
     def connect(self) -> None:
-        """建立到 Milvus 服务器的连接。"""
+        """建立到 Milvus 的连接 (根据初始化时确定的模式)。"""
         if self._is_connected:
-            logger.info(f"已连接到 Milvus (别名: {self.alias})。")
+            mode = "Milvus Lite" if self._is_lite else "Standard Milvus"
+            logger.info(f"已连接到 {mode} (别名: {self.alias})。")
             return
+
+        mode = "Milvus Lite" if self._is_lite else "Standard Milvus"
+        # 从 _connection_info 中移除 alias，因为它要作为 connect 的第一个参数
+        connect_params = self._connection_info.copy()
+        # connect_params.pop('alias', None) # pymilvus>2.4 不接受 alias in kwargs
+
         logger.info(
-            f"尝试连接到 Milvus (别名: {self.alias}) 使用参数: {self._connection_info}"
+            f"尝试连接到 {mode} (别名: {self.alias}) 使用参数: {connect_params}"
         )
         try:
-            connections.connect(
-                alias=self.alias,
-                **self._connection_info,  # 使用构建好的参数字典
-            )
+            # connections.connect(alias=self.alias, **connect_params) # Older pymilvus
+            connections.connect(**{"alias": self.alias, **connect_params}) # Works for pymilvus >= 2.4
             self._is_connected = True
-            logger.info(f"成功连接到 Milvus (别名: {self.alias})。")
+            logger.info(f"成功连接到 {mode} (别名: {self.alias})。")
         except MilvusException as e:
-            logger.error(f"连接 Milvus (别名: {self.alias}) 失败: {e}")
+            logger.error(f"连接 {mode} (别名: {self.alias}) 失败: {e}")
             self._is_connected = False
-            raise
-        except Exception as e:  # 捕获其他潜在错误，如网络错误
-            logger.error(f"连接 Milvus (别名: {self.alias}) 时发生非 Milvus 异常: {e}")
+            raise # 保留原始异常类型
+        except Exception as e: # 捕获其他潜在错误
+            logger.error(f"连接 {mode} (别名: {self.alias}) 时发生非 Milvus 异常: {e}")
             self._is_connected = False
-            raise ConnectionError(f"连接 Milvus (别名: {self.alias}) 失败: {e}") from e
+            # 将其包装成更通用的连接错误可能更好
+            raise ConnectionError(f"连接 {mode} (别名: {self.alias}) 失败: {e}") from e
 
     def disconnect(self) -> None:
-        """断开与 Milvus 服务器的连接。"""
+        """断开与 Milvus 服务器或 Lite 实例的连接。"""
         if not self._is_connected:
-            logger.info(f"尚未连接到 Milvus (alias: {self.alias})，无需断开。")
+            logger.info(f"尚未连接到 Milvus (别名: {self.alias})，无需断开。")
             return
-        logger.info(f"尝试断开 Milvus 连接 (alias: {self.alias})。")
+        mode = "Milvus Lite" if self._is_lite else "Standard Milvus"
+        logger.info(f"尝试断开 {mode} 连接 (别名: {self.alias})。")
         try:
             connections.disconnect(self.alias)
             self._is_connected = False
-            logger.info(f"成功断开 Milvus 连接 (alias: {self.alias})。")
+            logger.info(f"成功断开 {mode} 连接 (别名: {self.alias})。")
         except MilvusException as e:
-            logger.error(f"断开 Milvus 连接 (alias: {self.alias}) 时出错: {e}")
-            # 即使出错，也假设连接已断开或处于不良状态
+            logger.error(f"断开 {mode} 连接 (别名: {self.alias}) 时出错: {e}")
+            self._is_connected = False # 即使出错，也标记为未连接
+            raise
+        except Exception as e:
+            logger.error(f"断开 {mode} 连接 (别名: {self.alias}) 时发生意外错误: {e}")
             self._is_connected = False
             raise
 
     def is_connected(self) -> bool:
-        """检查当前连接状态。"""
-        # 可以添加一个 ping 或类似的操作来验证连接是否仍然活跃
-        # utility.get_server_version(using=self.alias) 可以在某种程度上验证
-        try:
-            # 简单的检查方式是尝试获取服务器版本
-            if self._is_connected:
-                utility.get_server_version(using=self.alias)
+        """检查当前连接状态 (使用 has_collection 作为 ping)。"""
+        if not self._is_connected:
+            return False
+
+        if self._is_lite:
+            # Milvus Lite 是本地文件，连接通常更稳定，简单返回标志即可
+            return True
+        else:
+            # 对于标准 Milvus 网络连接，执行一次轻量级检查
+            try:
+                # 使用 has_collection 或 list_collections
+                utility.has_collection("__ping_test_collection__", using=self.alias)
                 return True
-            return False
-        except Exception:
-            self._is_connected = False  # 如果检查失败，更新状态
-            return False
+            except MilvusException as e:
+                logger.warning(f"Standard Milvus 连接检查失败 (alias: {self.alias}): {e}")
+                self._is_connected = False
+                return False
+            except Exception as e:
+                logger.warning(f"Standard Milvus 连接检查时发生意外错误 (alias: {self.alias}): {e}")
+                self._is_connected = False
+                return False
 
     def _ensure_connected(self):
         """内部方法，确保在执行操作前已连接。"""
         if not self.is_connected():
-            logger.warning(f"Milvus (alias: {self.alias}) 未连接。尝试重新连接...")
-            self.connect()  # 尝试重新连接
+            mode = "Milvus Lite" if self._is_lite else "Standard Milvus"
+            logger.warning(f"{mode} (别名: {self.alias}) 未连接。尝试重新连接...")
+            try:
+                self.connect() # 尝试重新连接
+            except Exception as conn_err:
+                # 如果重连失败，is_connected 仍然是 False
+                logger.error(f"重新连接 {mode} (别名: {self.alias}) 失败: {conn_err}")
+                raise ConnectionError(
+                    f"无法连接到 {mode} (别名: {self.alias})。请检查连接参数和实例状态。"
+                ) from conn_err
+
+        # 再次检查以防万一 connect() 内部逻辑问题
         if not self._is_connected:
+            mode = "Milvus Lite" if self._is_lite else "Standard Milvus"
             raise ConnectionError(
-                f"无法连接到 Milvus (alias: {self.alias})。请检查连接参数和服务器状态。"
+                f"未能建立到 {mode} (别名: {self.alias}) 的连接。请检查配置。"
             )
 
     # --- Collection Management ---
@@ -333,13 +505,16 @@ class MilvusManager:
             collection = Collection(name=collection_name, using=self.alias)
             # 尝试调用一个简单的方法来确认句柄有效，如 describe()
             # 这会验证连接和集合存在性
-            collection.describe()
+            # collection.describe()
             return collection
-        except CollectionNotExistException:  # 再次捕获以防万一
-            logger.error(f"获取集合 '{collection_name}' 句柄时确认其不存在。")
+        except CollectionNotExistException: # 如果 has_collection 和 Collection 构造之间状态变化
+            logger.warning(f"获取集合 '{collection_name}' 句柄时发现其不存在 (可能刚被删除)。")
             return None
         except MilvusException as e:
             logger.error(f"获取集合 '{collection_name}' 句柄时出错: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"获取集合 '{collection_name}' 句柄时发生意外错误: {e}")
             return None
 
     def get_collection_stats(self, collection_name: str) -> Dict[str, Any]:
@@ -351,7 +526,6 @@ class MilvusManager:
         if not collection:
             return {"error": f"Collection '{collection_name}' not found."}
         try:
-            # Milvus 2.2.9+ 推荐使用 utility.get_collection_stats
             # 确保连接有效
             self._ensure_connected()
             # 先 flush 获取最新数据
@@ -466,8 +640,8 @@ class MilvusManager:
             logger.info(
                 f"成功从集合 '{collection_name}' 发送删除请求。删除数量: {delete_count} (注意: 实际删除需flush后生效)"
             )
-            # 考虑是否在这里自动 flush
-            # self.flush([collection_name])
+            # TODO 考虑是否在这里自动 flush
+            self.flush([collection_name])
             return mutation_result
         except MilvusException as e:
             logger.error(f"从集合 '{collection_name}' 删除实体失败: {e}")
@@ -489,6 +663,7 @@ class MilvusManager:
             logger.warning("Flush 操作需要指定至少一个集合名称。")
             return
         logger.info(f"尝试刷新集合: {collection_names}...")
+
         try:
             for collection_name in collection_names:
                 collection = Collection(collection_name, using=self.alias)
@@ -967,7 +1142,7 @@ class MilvusManager:
     def __enter__(self):
         """支持 with 语句，进入时确保连接。"""
         try:
-            self.connect()  # 确保连接，如果失败会抛异常
+            self._ensure_connected()  # 确保连接，如果失败会抛异常
         except Exception as e:
             logger.error(f"进入 MilvusManager 上下文管理器时连接失败: {e}")
             raise  # 重新抛出异常，阻止进入 with 块
@@ -975,7 +1150,10 @@ class MilvusManager:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """支持 with 语句，退出时断开连接。"""
-        self.disconnect()
+        try:
+            self.disconnect()
+        except Exception as e:
+            logger.error(f"退出 MilvusManager 上下文管理器时断开连接失败: {e}")
         # 可以根据 exc_type 等参数决定是否记录异常信息
         if exc_type:
             logger.error(
