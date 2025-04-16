@@ -53,6 +53,7 @@ class Mnemosyne(Star):
         self.msg_counter: Optional[MessageCounter] = None
         # self.context_manager: Optional[ConversationContextManager] = None
         self.ebd: Optional[OpenAIEmbeddingAPI] = None
+        self.provider = None
 
         # 是否需要刷新
         self.flush_after_insert = False
