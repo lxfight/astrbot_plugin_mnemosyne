@@ -75,6 +75,10 @@ class Mnemosyne(Star):
     async def query_memory(self, event: AstrMessageEvent, req: ProviderRequest):
         """[事件钩子] 在 LLM 请求前，查询并注入长期记忆。"""
         try:
+            if not self.provider:
+                provider_id = self.config.get("LLM_providers", "")
+                self.provider = self.context.get_provider_by_id(provider_id)
+
             await memory_operations.handle_query_memory(self, event, req)
         except Exception as e:
             self.logger.error(
