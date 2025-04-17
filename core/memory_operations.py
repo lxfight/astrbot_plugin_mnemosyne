@@ -545,9 +545,8 @@ async def _store_summary_to_milvus(
         mutation_result = await loop.run_in_executor(
             None, # 使用默认线程池
             lambda:plugin.milvus_manager.insert(
-            collection_name=plugin.config.get("collection_name","default"),
-            data = data_to_insert,
-            partition_name = collection_name,
+                collection_name = collection_name,
+                data = data_to_insert
             ),
         )
     except Exception as e:
@@ -564,8 +563,9 @@ async def _store_summary_to_milvus(
             # plugin.milvus_manager.flush([collection_name])
             await loop.run_in_executor(
                 None, # 使用默认线程池
-                plugin.milvus_manager.flush, # 要在线程池执行的同步函数
-                [collection_name]            # flush 的参数 (是一个列表)
+                lambda:plugin.milvus_manager.flush(
+                    [collection_name]
+                )
             )
             logger.debug(f"集合 '{collection_name}' 刷新完成。")
 

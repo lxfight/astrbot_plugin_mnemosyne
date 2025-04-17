@@ -14,7 +14,12 @@
 
 <div style="border: 1px solid #ddd; padding: 10px; margin-bottom: 15px; border-radius: 5px; background-color: #f8f8f8;">
 <h2>🎉 更新速览 🎉</h2>
-
+<div style="border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 5px;">
+    <h4>🚀 v0.3.14</h4>
+    <ul>
+        <li>✨ <strong>🔧 bug修复</strong> 修复了v0.3.13版本中，插入数据失败的问题，强烈建议使用最新的v0.3.14版本</li>
+    </ul>
+</div>
 <div style="border-bottom: 1px solid #eee; padding-bottom: 5px; margin-bottom: 5px;">
     <h4>🚀 v0.3.13</h4>
     <ul>
