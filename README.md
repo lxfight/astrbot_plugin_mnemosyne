@@ -11,8 +11,7 @@
 ## 💬 支持与讨论
 
 遇到问题或想交流使用心得？加入我们的讨论群：
-
-[![加入QQ群](https://img.shields.io/badge/QQ群-953245617-blue?style=flat-square&logo=tencent-qq)](https://jq.qq.com/?_wv=1027&k=ifpM5s9N) **(点击或搜索群号：`953245617`)**
+[![加入QQ群](https://img.shields.io/badge/QQ群-953245617-blue?style=flat-square&logo=tencent-qq)](https://qm.qq.com/cgi-bin/qm/qr?k=WdyqoP-AOEXqGAN08lOFfVSguF2EmBeO&jump_from=webapi&authKey=tPyfv90TVYSGVhbAhsAZCcSBotJuTTLf03wnn7/lQZPUkWfoQ/J8e9nkAipkOzwh)
 
 在这里，你可以直接与开发者和其他用户交流，获取更及时的帮助。
 
