@@ -56,6 +56,11 @@ async def handle_query_memory(
         )
 
         # --- 判断是否总结 ---
+        logger.debug(f"当前会话：{session_id}的上下文消息为\n{req.contexts}")
+        # TEST 删除插入的记忆
+        clean_contexts(plugin, req)
+        logger.debug(f"当前会话删除长期记忆后的：{session_id}的上下文消息为\n{req.contexts}")
+
         await _check_and_trigger_summary(plugin, session_id, req, persona_id)
         plugin.msg_counter.increment_counter(session_id)
 
@@ -63,7 +68,17 @@ async def handle_query_memory(
         detailed_results = []
         try:
             # 1. 向量化用户查询
-            query_embeddings = plugin.ebd.get_embeddings(req.prompt)
+            # query_embeddings = plugin.ebd.get_embeddings(req.prompt)
+            try:
+                query_embeddings = await asyncio.get_event_loop().run_in_executor(
+                    None,  # 使用默认线程池
+                    lambda:plugin.ebd.get_embeddings(req.prompt),
+
+                )
+            except Exception as e:
+                logger.error(f"执行 Embedding 获取时出错: {e}", exc_info=True)
+                query_embeddings = None # 确保后续能处理失败
+
             if not query_embeddings:
                 logger.error("无法获取用户查询的 Embedding 向量。")
                 return
@@ -195,24 +210,14 @@ async def _check_and_trigger_summary(
     ) and plugin.msg_counter.get_counter(session_id) >= plugin.config.get(
         "num_pairs", 10
     ):
-        # 总结前删除插入的记忆
-        injection_method = plugin.config.get("memory_injection_method", "user_prompt")
-        contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
-        # 恢复`contexts_memory_len`配置的功能
-        if injection_method == "user_prompt":
-            req.contexts = remove_mnemosyne_tags(req.contexts,contexts_memory_len)
-        elif injection_method == "system_prompt":
-            req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt,contexts_memory_len)
-        elif injection_method == "insert_system_prompt":
-            req.contexts = remove_system_content(req.contexts,contexts_memory_len)
-
         logger.info("开始总结历史对话...")
-        history_contents = format_context_to_string(req.contexts,plugin.config.get("num_pairs", 10))
-        logger.debug(f"总结的部分{history_contents}")
+        history_contents = format_context_to_string(
+            req.contexts, plugin.config.get("num_pairs", 10)
+        )
+        # logger.debug(f"总结的部分{history_contents}")
 
         asyncio.create_task(
-            handle_summary_long_memory(
-                plugin, persona_id, session_id, history_contents)
+            handle_summary_long_memory(plugin, persona_id, session_id, history_contents)
         )
         logger.info("总结历史对话任务已提交到后台执行。")
         plugin.msg_counter.reset_counter(session_id)
@@ -317,7 +322,7 @@ def _format_and_inject_memory(
         return
 
     long_memory_prefix = plugin.config.get(
-        "long_memory_prefix", "<Mnemosyne>长期记忆片段："
+        "long_memory_prefix", "<Mnemosyne> 长期记忆片段："
     )
     long_memory_suffix = plugin.config.get("long_memory_suffix", "</Mnemosyne>")
     long_memory = f"{long_memory_prefix}\n"
@@ -346,24 +351,15 @@ def _format_and_inject_memory(
 
     injection_method = plugin.config.get("memory_injection_method", "user_prompt")
 
-    # 恢复`contexts_memory_len`的功能
-    contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
+    # 清理插入的长期记忆内容
+    clean_contexts(plugin, req)
     if injection_method == "user_prompt":
-        logger.debug(f"查看contexts：{req.contexts}")
-        req.contexts = remove_mnemosyne_tags(req.contexts,contexts_memory_len)
         req.prompt = long_memory + "\n" + req.prompt
 
     elif injection_method == "system_prompt":
-        logger.debug(
-            f"查看长期记忆：{req.system_prompt}，判断是否要对里面的内容进行删除\n"
-        )
-        logger.debug(f"查看contexts：{req.contexts}")
-        req.system_prompt = remove_system_mnemosyne_tags(req.system_prompt,contexts_memory_len)
         req.system_prompt += long_memory
 
     elif injection_method == "insert_system_prompt":
-        logger.debug(f"查看contexts：{req.contexts}")
-        req.contexts = remove_system_content(req.contexts,contexts_memory_len)
         req.contexts.append({"role": "system", "content": long_memory})
 
     else:
@@ -372,7 +368,22 @@ def _format_and_inject_memory(
         )
         req.prompt = long_memory + "\n" + req.prompt
 
-
+# 删除补充的长期记忆函数
+def clean_contexts(plugin:"Mnemosyne" , req:ProviderRequest):
+    """
+    删除长期记忆中的标签
+    """
+    injection_method = plugin.config.get("memory_injection_method", "user_prompt")
+    contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
+    if injection_method == "user_prompt":
+        req.contexts = remove_mnemosyne_tags(req.contexts, contexts_memory_len)
+    elif injection_method == "system_prompt":
+        req.system_prompt = remove_system_mnemosyne_tags(
+            req.system_prompt, contexts_memory_len
+        )
+    elif injection_method == "insert_system_prompt":
+        req.contexts = remove_system_content(req.contexts, contexts_memory_len)
+    return
 # 记忆总结相关函数
 async def _check_summary_prerequisites(plugin: "Mnemosyne", memory_text: str) -> bool:
     """
@@ -412,11 +423,15 @@ async def _get_summary_llm_response(
         LLMResponse 对象，如果请求失败则为 None。
     """
     # logger = plugin.logger
+    llm_provider = plugin.provider
+    # TODO 这部分逻辑真史，回头改下
     try:
-        llm_provider = plugin.context.get_using_provider()
         if not llm_provider:
-            logger.error("无法获取用于总结记忆的 LLM Provider。")
-            return None
+            # 如果plugin.provider不正确，在这时候，使用当前使用的LLM服务商，避免错误
+            llm_provider = plugin.context.get_using_provider()
+            if not llm_provider:
+                logger.error("无法获取用于总结记忆的 LLM Provider。")
+                return None
     except Exception as e:
         logger.error(f"获取 LLM Provider 时出错: {e}", exc_info=True)
         return None
@@ -518,10 +533,24 @@ async def _store_summary_to_milvus(
     logger.info(
         f"准备向集合 '{collection_name}' 插入 1 条总结记忆 (Persona: {effective_persona_id}, Session: {session_id[:8]}...)"
     )
-    mutation_result = plugin.milvus_manager.insert(
-        collection_name=collection_name,
-        data=data_to_insert,
-    )
+    # mutation_result = plugin.milvus_manager.insert(
+    #     collection_name=collection_name,
+    #     data=data_to_insert,
+    # )
+    # --- 修改 insert 调用 ---
+    loop = asyncio.get_event_loop()
+    mutation_result = None
+    try:
+
+        mutation_result = await loop.run_in_executor(
+            None, # 使用默认线程池
+            lambda:plugin.milvus_manager.insert(
+                collection_name = collection_name,
+                data = data_to_insert
+            ),
+        )
+    except Exception as e:
+        logger.error(f"向 Milvus 插入总结记忆时出错: {e}", exc_info=True)
 
     if mutation_result and mutation_result.insert_count > 0:
         inserted_ids = mutation_result.primary_keys
@@ -531,7 +560,13 @@ async def _store_summary_to_milvus(
             logger.debug(
                 f"正在刷新 (Flush) 集合 '{collection_name}' 以确保记忆立即可用..."
             )
-            plugin.milvus_manager.flush([collection_name])
+            # plugin.milvus_manager.flush([collection_name])
+            await loop.run_in_executor(
+                None, # 使用默认线程池
+                lambda:plugin.milvus_manager.flush(
+                    [collection_name]
+                )
+            )
             logger.debug(f"集合 '{collection_name}' 刷新完成。")
 
         except Exception as flush_err:
@@ -570,7 +605,18 @@ async def handle_summary_long_memory(
             return
 
         # 3. 获取总结文本的 Embedding
-        embedding_vectors = plugin.ebd.get_embeddings(summary_text)
+        # embedding_vectors = plugin.ebd.get_embeddings(summary_text)
+        try:
+            embedding_vectors = await asyncio.get_event_loop().run_in_executor(
+                None, # 使用默认线程池
+                lambda:plugin.ebd.get_embeddings(
+                    summary_text
+                ),
+            )
+        except Exception as e:
+            logger.error(f"获取总结文本 Embedding 时出错: '{summary_text[:100]}...' - {e}", exc_info=True)
+            embedding_vectors = None # 确保后续能处理失败
+
         if not embedding_vectors:
             logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")
             return

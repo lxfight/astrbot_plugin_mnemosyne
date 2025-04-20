@@ -53,6 +53,7 @@ class Mnemosyne(Star):
         self.msg_counter: Optional[MessageCounter] = None
         # self.context_manager: Optional[ConversationContextManager] = None
         self.ebd: Optional[OpenAIEmbeddingAPI] = None
+        self.provider = None
 
         # 是否需要刷新
         self.flush_after_insert = False
@@ -74,6 +75,10 @@ class Mnemosyne(Star):
     async def query_memory(self, event: AstrMessageEvent, req: ProviderRequest):
         """[事件钩子] 在 LLM 请求前，查询并注入长期记忆。"""
         try:
+            if not self.provider:
+                provider_id = self.config.get("LLM_providers", "")
+                self.provider = self.context.get_provider_by_id(provider_id)
+
             await memory_operations.handle_query_memory(self, event, req)
         except Exception as e:
             self.logger.error(
@@ -175,14 +180,16 @@ class Mnemosyne(Star):
         self.logger.info("Mnemosyne 插件正在停止...")
         if self.milvus_manager and self.milvus_manager.is_connected():
             try:
-                if self.milvus_manager.has_collection(self.collection_name):
+                if not self.milvus_manager._is_lite and self.milvus_manager.has_collection(self.collection_name):
                     self.logger.info(
                         f"正在从内存中释放集合 '{self.collection_name}'..."
                     )
                     self.milvus_manager.release_collection(self.collection_name)
+
                 self.logger.info("正在断开与 Milvus 的连接...")
                 self.milvus_manager.disconnect()
                 self.logger.info("Milvus 连接已成功断开。")
+
             except Exception as e:
                 self.logger.error(f"停止插件时与 Milvus 交互出错: {e}", exc_info=True)
         else:

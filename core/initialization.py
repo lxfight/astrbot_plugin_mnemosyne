@@ -39,13 +39,12 @@ def initialize_config_check(plugin: "Mnemosyne"):
     astrbot_config = plugin.context.get_config()
     # ------ 检查num_pairs ------
     num_pairs = plugin.config["num_pairs"]
-        # num_pairs需要小于['provider_settings']['max_context_length']配置的数量，如果该配置为-1，则不限制。
+    # num_pairs需要小于['provider_settings']['max_context_length']配置的数量，如果该配置为-1，则不限制。
     astrbot_max_context_length = astrbot_config["provider_settings"][
         "max_context_length"
     ]
     if (
-        astrbot_max_context_length > 0
-        and num_pairs > 2 * astrbot_max_context_length
+        astrbot_max_context_length > 0 and num_pairs > 2 * astrbot_max_context_length
     ):  # 这里乘2是因为消息条数计算规则不同
         raise ValueError(
             f"\nnum_pairs不能大于astrbot的配置(最多携带对话数量(条))\
@@ -59,8 +58,11 @@ def initialize_config_check(plugin: "Mnemosyne"):
     # ------ num_pairs ------
 
     # ------ 检查contexts_memory_len ------
-    contexts_memory_len = plugin.config.get("contexts_memory_len",0)
-    if contexts_memory_len > astrbot_max_context_length:
+    contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
+    if (
+        astrbot_max_context_length > 0
+        and contexts_memory_len > astrbot_max_context_length
+    ):
         raise ValueError(
             f"\ncontexts_memory_len不能大于astrbot的配置(最多携带对话数量(条))\
                             配置的数量:{astrbot_max_context_length}。\n"
@@ -165,63 +167,144 @@ def initialize_config_and_schema(plugin: "Mnemosyne"):
 
 
 def initialize_milvus(plugin: "Mnemosyne"):
-    """初始化 MilvusManager，连接并设置集合/索引。"""
+    """
+    初始化 MilvusManager。
+    根据配置决定连接到 Milvus Lite 或标准 Milvus 服务器，
+    并进行必要的集合与索引设置。
+    """
     init_logger.debug("开始初始化 Milvus 连接和设置...")
+    connect_args = {} # 用于收集传递给 MilvusManager 的参数
+    is_lite_mode = False # 标记是否为 Lite 模式
+
     try:
+        # 1. 优先检查 Milvus Lite 配置
+        lite_path = plugin.config.get("milvus_lite_path","")
+
+        # 2. 获取标准 Milvus 的地址配置
         milvus_address = plugin.config.get("address")
-        if not milvus_address:
-            raise ValueError(
-                "Milvus 'address' (例如 'localhost:19530' 或 URI) 未在配置中指定。"
+
+        if lite_path:
+            # --- 检测到 Milvus Lite 配置 ---
+            init_logger.info(f"检测到 Milvus Lite 配置，将使用本地路径: '{lite_path}'")
+            connect_args["lite_path"] = lite_path
+            is_lite_mode = True
+            if milvus_address:
+                init_logger.warning(f"同时配置了 'milvus_lite_path' 和 'address'，将优先使用 Lite 路径，忽略 'address' ('{milvus_address}')。")
+
+        elif milvus_address:
+            # --- 未配置 Lite 路径，使用标准 Milvus 地址 ---
+            init_logger.info(f"未配置 Milvus Lite 路径，将根据 'address' 配置连接标准 Milvus: '{milvus_address}'")
+            is_lite_mode = False
+            # 判断 address 是 URI 还是 host:port
+            if milvus_address.startswith(("http://", "https://", "unix:")):
+                init_logger.debug(f"地址 '{milvus_address}' 被识别为 URI。")
+                connect_args["uri"] = milvus_address
+            else:
+                init_logger.debug(f"地址 '{milvus_address}' 将被解析为 host:port。")
+                try:
+                    host, port = parse_address(milvus_address) # 使用工具函数解析
+                    connect_args["host"] = host
+                    connect_args["port"] = port
+                except ValueError as e:
+                    raise ValueError(
+                        f"解析标准 Milvus 地址 '{milvus_address}' (host:port 格式) 失败: {e}"
+                    ) from e
+        else:
+            # --- 既没有 Lite 路径也没有标准地址 ---
+            init_logger.warning(
+                "未配置 Milvus Lite 路径和标准 Milvus 地址。请检查配置。将使用默认配置/AstrBot/data/mnemosyne_data"
             )
 
-        # 根据地址格式确定连接参数
-        if milvus_address.startswith(("http://", "https://", "unix:")):
-            connect_args = {"uri": milvus_address}
+        # 3. 添加通用参数 (对 Lite 和 Standard 都可能有效)
+        #    添加数据库名称 (db_name)
+        db_name = plugin.config.get("db_name", "default") # 提供默认值 'default'
+        # 只有当 db_name 不是 'default' 时才显式添加到参数中，以保持简洁
+        if db_name != "default":
+            connect_args["db_name"] = db_name
+            init_logger.info(f"将尝试连接到数据库: '{db_name}'。")
         else:
-            try:
-                host, port = parse_address(milvus_address)  # 使用工具函数解析
-                connect_args = {"host": host, "port": port}
-            except ValueError as e:
-                raise ValueError(
-                    f"解析 Milvus 地址 '{milvus_address}' 失败: {e}"
-                ) from e
+            init_logger.debug("将使用默认数据库 'default'。")
 
-        # 从配置中添加可选的连接参数
-        for key in [
-            "user",
-            "password",
-            "token",
-            "secure",  # 是否使用 TLS/SSL 安全连接。
-        ]:
-            if key in plugin.config["authentication"]:
-                connect_args[key] = plugin.config["authentication"].get(key, "")
-
-        # 设置连接别名，虽然 MilvusManager 内部可能不直接使用，但保持配置选项
-        connect_args["alias"] = plugin.config.get(
+        #    设置连接别名
+        #    如果未配置，生成一个基于集合名的默认别名
+        alias = plugin.config.get(
             "connection_alias", f"mnemosyne_{plugin.collection_name}"
         )
+        connect_args["alias"] = alias
+        init_logger.debug(f"设置 Milvus 连接别名为: '{alias}'。")
 
-        init_logger.info(
-            f"尝试使用参数连接到 Milvus: { {k: v for k, v in connect_args.items() if k != 'password' and k != 'token'} }"
-        )  # 不打印敏感信息
-        # init_logger.debug(f"连接参数: {connect_args}")
+        # 4. 添加仅适用于标准 Milvus 的参数 (如果不是 Lite 模式)
+        if not is_lite_mode:
+            init_logger.debug("为标准 Milvus 连接添加认证和安全设置（如果已配置）。")
+            # 安全地获取认证配置字典，如果不存在则为空字典
+            auth_config = plugin.config.get("authentication", {})
+
+            # 添加可选的认证和安全参数
+            added_auth_params = []
+            for key in ["user", "password", "token", "secure"]:
+                if key in auth_config and auth_config[key] is not None:
+                    # 特别处理 'secure'，确保它是布尔值
+                    if key == 'secure':
+                        value = auth_config[key]
+                        if isinstance(value, str):
+                            # 从字符串 'true'/'false' (不区分大小写) 转为布尔值
+                            secure_bool = value.lower() == 'true'
+                        else:
+                            # 尝试直接转为布尔值
+                            secure_bool = bool(value)
+                        connect_args[key] = secure_bool
+                        added_auth_params.append(f"{key}={secure_bool}")
+                    else:
+                        connect_args[key] = auth_config[key]
+                        # 不记录 password 和 token 的值
+                        if key not in ['password', 'token']:
+                            added_auth_params.append(f"{key}={auth_config[key]}")
+                        else:
+                            added_auth_params.append(f"{key}=******") # 隐藏敏感值
+
+            if added_auth_params:
+                init_logger.info(f"从配置中添加了标准连接参数: {', '.join(added_auth_params)}")
+            else:
+                init_logger.debug("未找到额外的认证或安全配置。")
+
+        else: # is_lite_mode is True
+            # 检查并警告：如果在 Lite 模式下配置了不适用的参数
+            auth_config = plugin.config.get("authentication", {})
+            ignored_keys = [k for k in ["user", "password", "token", "secure"] if k in auth_config and auth_config[k] is not None]
+            if ignored_keys:
+                init_logger.warning(f"当前为 Milvus Lite 模式，配置中的以下认证/安全参数将被忽略: {ignored_keys}")
+
+
+        # 5. 初始化 MilvusManager
+        loggable_connect_args = {
+            k: v for k, v in connect_args.items() if k not in ['password', 'token']
+        }
+        init_logger.info(f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}")
+
+        # 创建 MilvusManager 实例
         plugin.milvus_manager = MilvusManager(**connect_args)
 
+        # 6. 检查连接状态
         if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
+            mode_name = "Milvus Lite" if is_lite_mode else "标准 Milvus"
             raise ConnectionError(
-                "初始化 MilvusManager 或连接到 Milvus 失败。请检查配置和 Milvus 服务状态。"
+                f"初始化 MilvusManager 或连接到 {mode_name} 失败。请检查配置和 Milvus 实例状态。"
             )
 
-        init_logger.info(f"成功连接到 Milvus (Alias: {connect_args['alias']})。")
+        mode_name = "Milvus Lite" if plugin.milvus_manager._is_lite else "标准 Milvus"
+        init_logger.info(f"成功连接到 {mode_name} (别名: {alias})。")
 
-        # --- 集合和索引设置 ---
+        # 7. 设置集合和索引
+        init_logger.debug("开始设置 Milvus 集合和索引...")
         setup_milvus_collection_and_index(plugin)
-        init_logger.debug("Milvus 连接和设置完成。")
+        init_logger.info("Milvus 集合和索引设置流程已调用。")
+
+        init_logger.debug("Milvus 初始化流程成功完成。")
 
     except Exception as e:
-        init_logger.error(f"Milvus 初始化或集合/索引设置失败: {e}", exc_info=True)
-        plugin.milvus_manager = None  # 确保失败时 manager 为 None
-        raise  # 重新抛出
+        init_logger.error(f"Milvus 初始化或设置过程中发生错误: {e}", exc_info=True) # exc_info=True 会记录堆栈跟踪
+        plugin.milvus_manager = None  # 确保在初始化失败时 manager 被设为 None
+        raise # 重新抛出异常，以便上层代码可以捕获并处理
 
 
 def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
