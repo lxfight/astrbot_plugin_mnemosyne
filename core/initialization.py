@@ -5,7 +5,7 @@ Mnemosyne 插件初始化逻辑
 """
 
 from typing import TYPE_CHECKING
-
+import asyncio
 from pymilvus import CollectionSchema, FieldSchema, DataType
 
 from astrbot.core.log import LogManager
@@ -23,6 +23,7 @@ from .tools import parse_address
 from ..memory_manager.message_counter import MessageCounter
 from ..memory_manager.vector_db.milvus_manager import MilvusManager
 from ..memory_manager.embedding import OpenAIEmbeddingAPI
+from ..memory_manager.context_manager import ConversationContextManager
 
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
@@ -420,8 +421,9 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
 def initialize_components(plugin: "Mnemosyne"):
     """初始化非 Milvus 的其他组件，如上下文管理器和嵌入 API。"""
     init_logger.debug("开始初始化其他核心组件...")
-    # 1. 初始化消息计数器
+    # 1. 初始化消息计数器和上下文管理器
     try:
+        plugin.context_manager = ConversationContextManager()
         plugin.msg_counter = MessageCounter()
         init_logger.info("消息计数器初始化成功。")
     except Exception as e:

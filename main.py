@@ -3,7 +3,7 @@
 Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 负责插件注册、初始化流程调用、事件和命令的绑定。
 """
-
+import asyncio
 from typing import List, Optional
 
 # --- AstrBot 核心导入 ---
@@ -26,13 +26,13 @@ from pymilvus import CollectionSchema
 from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db.milvus_manager import MilvusManager
 from .memory_manager.embedding import OpenAIEmbeddingAPI
-
+from .memory_manager.context_manager import ConversationContextManager
 
 @register(
     "Mnemosyne",
     "lxfight",
     "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
-    "0.3.6",
+    "0.4.0",
     "https://github.com/lxfight/astrbot_plugin_mnemosyne",
 )
 class Mnemosyne(Star):
@@ -41,7 +41,6 @@ class Mnemosyne(Star):
         self.config = config
         self.context = context
         self.logger = LogManager.GetLogger(log_name="Mnemosyne")
-        self.logger.info("开始初始化 Mnemosyne 插件...")
 
         # --- 初始化核心组件状态 ---
         self.collection_schema: Optional[CollectionSchema] = None
@@ -51,18 +50,42 @@ class Mnemosyne(Star):
         self.collection_name: str = DEFAULT_COLLECTION_NAME
         self.milvus_manager: Optional[MilvusManager] = None
         self.msg_counter: Optional[MessageCounter] = None
-        # self.context_manager: Optional[ConversationContextManager] = None
+        self.context_manager: Optional[ConversationContextManager] = None
         self.ebd: Optional[OpenAIEmbeddingAPI] = None
         self.provider = None
 
+        # --- 一个该死的计时器 ---
+        self._summary_check_task: Optional[asyncio.Task] = None
+
+        summary_check_config = config.get("summary_check_task")
+        self.summary_check_interval: int = summary_check_config.get(
+            "SUMMARY_CHECK_INTERVAL_SECONDS", DEFAULT_SUMMARY_CHECK_INTERVAL_SECONDS
+        )
+        self.summary_time_threshold: int = summary_check_config.get(
+            "SUMMARY_TIME_THRESHOLD_SECONDS", DEFAULT_SUMMARY_TIME_THRESHOLD_SECONDS
+        )
+        if self.summary_time_threshold <= 0:
+            self.logger.warning(f"配置的 SUMMARY_TIME_THRESHOLD_SECONDS ({self.summary_time_threshold}) 无效，将禁用基于时间的自动总结。")
+            self.summary_time_threshold = float('inf')
         # 是否需要刷新
         self.flush_after_insert = False
-        # --- 执行初始化流程 ---
+
+        self.logger.info("开始初始化 Mnemosyne 插件...")
         try:
             initialization.initialize_config_check(self)
             initialization.initialize_config_and_schema(self)  # 初始化配置和schema
             initialization.initialize_milvus(self)  # 初始化 Milvus
             initialization.initialize_components(self)  # 初始化核心组件
+            # --- 启动后台总结检查任务 ---
+            if self.context_manager and self.summary_time_threshold != float('inf'):
+                # 确保 context_manager 已初始化且阈值有效
+                self._summary_check_task = asyncio.create_task(memory_operations._periodic_summarization_check(self))
+                self.logger.info("后台总结检查任务已启动。")
+            elif self.summary_time_threshold == float('inf'):
+                self.logger.info("基于时间的自动总结已禁用，不启动后台检查任务。")
+            else:
+                self.logger.warning("Context manager 未初始化，无法启动后台总结检查任务。")
+
             self.logger.info("Mnemosyne 插件核心组件初始化成功。")
         except Exception as e:
             self.logger.critical(
@@ -70,10 +93,12 @@ class Mnemosyne(Star):
                 exc_info=True,
             )
 
+
     # --- 事件处理钩子 (调用 memory_operations.py 中的实现) ---
     @filter.on_llm_request()
     async def query_memory(self, event: AstrMessageEvent, req: ProviderRequest):
         """[事件钩子] 在 LLM 请求前，查询并注入长期记忆。"""
+        # 当会话第一次发生时，插件会从AstrBot中获取上下文历史，之后的会话历史由插件自动管理
         try:
             if not self.provider:
                 provider_id = self.config.get("LLM_providers", "")
@@ -89,7 +114,6 @@ class Mnemosyne(Star):
     @filter.on_llm_response()
     async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse):
         """[事件钩子] 在 LLM 响应后"""
-
         try:
             await memory_operations.handle_on_llm_resp(self, event, resp)
         except Exception as e:
@@ -178,6 +202,22 @@ class Mnemosyne(Star):
     async def terminate(self):
         """插件停止时的清理逻辑"""
         self.logger.info("Mnemosyne 插件正在停止...")
+        # --- 停止后台总结检查任务 ---
+        if self._summary_check_task and not self._summary_check_task.done():
+            self.logger.info("正在取消后台总结检查任务...")
+            self._summary_check_task.cancel() # <--- 取消任务
+            try:
+                # 等待任务实际取消完成，设置一个超时避免卡住
+                await asyncio.wait_for(self._summary_check_task, timeout=5.0)
+            except asyncio.CancelledError:
+                self.logger.info("后台总结检查任务已成功取消。")
+            except asyncio.TimeoutError:
+                self.logger.warning("等待后台总结检查任务取消超时。")
+            except Exception as e:
+                # 捕获可能在任务取消过程中抛出的其他异常
+                self.logger.error(f"等待后台任务取消时发生错误: {e}", exc_info=True)
+        self._summary_check_task = None # 清理任务引用
+
         if self.milvus_manager and self.milvus_manager.is_connected():
             try:
                 if not self.milvus_manager._is_lite and self.milvus_manager.has_collection(self.collection_name):
