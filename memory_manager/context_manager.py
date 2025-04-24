@@ -1,29 +1,30 @@
 from typing import List, Dict, Optional
 import time
 from astrbot.core.log import LogManager
-
+from astrbot.api.event import AstrMessageEvent
 
 class ConversationContextManager:
     """
-    自动管理对话历史的上下文管理器
-    功能：当对话轮次达到阈值时，返回需要总结的对话内容字符串，并支持多个会话
+    会话上下文管理器
     """
 
-    def __init__(self, max_turns: int = 10, max_history_length: int = 20):
-        """
-        :param max_turns: 触发总结的对话轮次阈值
-        :param max_history_length: 记录的最大历史长度
-        """
-        self.max_turns = max_turns
-        self.max_history_length = max_history_length
+    def __init__(self):
         self.conversations: Dict[str, Dict] = {}
-        self.logger = LogManager.GetLogger(log_name="Conversation Context Manager")
 
-    def _reset_counter(self, session_id: str):
-        """重置指定会话的计数器"""
+    def init_conv(self, session_id:str, contexts:list[Dict],event:AstrMessageEvent):
+        """
+        从AstrBot获取历史消息
+        """
         if session_id in self.conversations:
-            self.conversations[session_id]["turn_count"] = 0
-            self.conversations[session_id]["last_summary_time"] = time.time()
+            return
+        self.conversations[session_id] = {}
+        self.conversations[session_id]["history"] = contexts
+        self.conversations[session_id]["event"] = event
+        # 初始化最后一次总结的时间，这里在重启的时候会丢失，但是先不管了
+        # 重启了计时器就重启，用户再一次对话再重启计时器，emmmm，之后再改了，加个TODO
+        # TODO 考虑是否需要保存到数据库中，或者保存到文件
+        self.conversations[session_id]["last_summary_time"] = time.time()
+        return
 
     def add_message(self, session_id: str, role: str, content: str) -> Optional[str]:
         """
@@ -36,7 +37,6 @@ class ConversationContextManager:
         if session_id not in self.conversations:
             self.conversations[session_id] = {
                 "history": [],
-                "turn_count": 0,
                 "last_summary_time": time.time(),
             }
 
@@ -45,72 +45,42 @@ class ConversationContextManager:
             {
                 "role": role,
                 "content": content,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),# 这个是不会被加入到总结的内容中的，应该
             }
         )
-        conversation["turn_count"] += 1
-        self.logger.debug(f"对话计数器：{conversation['turn_count']}条")
-        # 保持历史记录在最大长度内
-        if len(conversation["history"]) > self.max_history_length:
-            conversation["history"] = conversation["history"][
-                -self.max_history_length :
-            ]
 
-        if conversation["turn_count"] >= self.max_turns:
-            return self._generate_summary_content(session_id)
-        return None
-
-    def _generate_summary_content(self, session_id: str) -> str:
-        """生成待总结的对话内容字符串"""
-        conversation = self.conversations[session_id]
-        summary = "\n".join(
-            [
-                f"[{msg['timestamp']}] {msg['role']}: {msg['content']}"
-                for msg in conversation["history"][-self.max_turns :]
-            ]
-        )
-        self._reset_counter(session_id)
-        return summary
-
-    def get_full_history(self, session_id: str) -> str:
-        """获取指定会话的完整对话历史（用于调试）"""
+    def get_summary_time(self, session_id: str) -> float:
+        """
+        获取最后一次总结时间
+        """
         if session_id in self.conversations:
-            conversation = self.conversations[session_id]
-            return "\n".join(
-                [
-                    f"[{msg['timestamp']}] {msg['role']}: {msg['content']}"
-                    for msg in conversation["history"]
-                ]
-            )
+            return self.conversations[session_id]["last_summary_time"]
         else:
-            return "会话ID不存在"
+            return 0
 
-    def summarize_memory(self, session_id: str, role: str, contents: List) -> str:
+    def update_summary_time(self, session_id: str):
         """
-        通过历史上下文，格式化处理为短期上下文
+        更新最后一次总结时间
+        """
+        if session_id in self.conversations:
+            self.conversations[session_id]["last_summary_time"] = time.time()
+
+    def get_history(self, session_id: str) -> List[Dict]:
+        """
+        获取对话历史记录
         :param session_id: 会话ID
-        :param role: 角色（user/assistant）
-        :param contents: 待处理的历史上下文
-        :return: 返回短期记忆
+        :return: 对话历史记录
         """
-        # 检查 会话 是否存在于 conversations 内
-        if session_id not in self.conversations:
-            self.conversations[session_id] = {
-                "history": [],
-                "turn_count": 0,
-                "last_summary_time": time.time(),
-            }
+        if session_id in self.conversations:
+            return self.conversations[session_id]["history"]
+        else:
+            return []
 
-        conversation = self.conversations[session_id]
-        for content in contents:
-            conversation["history"].append(
-                {
-                    "role": role,
-                    "content": content,
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                }
-            )
-            conversation["turn_count"] += 1
-
-        # 返回 格式化 后的 短期上下文
-        return self._generate_summary_content(session_id)
+    def get_session_context(self, session_id: str):
+        """
+        获取session_id对应的所有信息
+        """
+        if session_id in self.conversations:
+            return self.conversations[session_id]
+        else:
+            return {}

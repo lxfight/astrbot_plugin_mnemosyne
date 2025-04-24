@@ -54,24 +54,25 @@ async def handle_query_memory(
         session_id = await plugin.context.conversation_manager.get_curr_conversation_id(
             event.unified_msg_origin
         )
+        # 判断是否在历史会话管理器中，如果不在，则进行初始化
+        if session_id not in plugin.context_manager.conversations:
+            plugin.context_manager.init_conv(session_id,req.contexts,event)
 
-        # --- 判断是否总结 ---
-        logger.debug(f"当前会话：{session_id}的上下文消息为\n{req.contexts}")
-        # TEST 删除插入的记忆
+        # 清理记忆标签
         clean_contexts(plugin, req)
-        logger.debug(f"当前会话删除长期记忆后的：{session_id}的上下文消息为\n{req.contexts}")
 
-        await _check_and_trigger_summary(plugin, session_id, req, persona_id)
+        # 添加用户消息
+        plugin.context_manager.add_message(session_id, "user", req.prompt)
+        # 计数器+1
         plugin.msg_counter.increment_counter(session_id)
 
         # --- RAG 搜索 ---
         detailed_results = []
         try:
             # 1. 向量化用户查询
-            # query_embeddings = plugin.ebd.get_embeddings(req.prompt)
             try:
                 query_embeddings = await asyncio.get_event_loop().run_in_executor(
-                    None,  # 使用默认线程池
+                    None,
                     lambda:plugin.ebd.get_embeddings(req.prompt),
 
                 )
@@ -107,7 +108,6 @@ async def handle_on_llm_resp(
     """
     处理 LLM 响应后的逻辑。更新计数器。
     """
-    # logger = plugin.logger
     if resp.role != "assistant":
         logger.warning("LLM 响应不是助手角色，不进行记录。")
         return
@@ -116,11 +116,16 @@ async def handle_on_llm_resp(
         session_id = await plugin.context.conversation_manager.get_curr_conversation_id(
             event.unified_msg_origin
         )
-
         if not session_id:
-            logger.error("无法获取当前 session_id，无法记录 LLM 响应到短期记忆。")
+            logger.error("无法获取当前 session_id,无法记录 LLM 响应到Mnemosyne。")
             return
+        persona_id = await _get_persona_id(plugin, event)
 
+        # 判断是否需要总结
+        await _check_and_trigger_summary(plugin, session_id, plugin.context_manager.get_history(session_id), persona_id)
+
+        plugin.logger.debug(f"返回的内容：{resp.completion_text}")
+        plugin.context_manager.add_message(session_id, "assistant", resp.completion_text)
         plugin.msg_counter.increment_counter(session_id)
 
     except Exception as e:
@@ -192,7 +197,7 @@ async def _get_persona_id(
 async def _check_and_trigger_summary(
     plugin: "Mnemosyne",
     session_id: str,
-    req: ProviderRequest,
+    context: List[Dict],
     persona_id: Optional[str],
 ):
     """
@@ -201,18 +206,17 @@ async def _check_and_trigger_summary(
     Args:
         plugin: Mnemosyne 插件实例。
         session_id: 会话 ID。
-        req_contexts: 请求上下文列表。
+        context: 请求上下文列表。
         persona_id: 人格 ID.
     """
-    # logger = plugin.logger
     if plugin.msg_counter.adjust_counter_if_necessary(
-        session_id, req.contexts
+        session_id, context
     ) and plugin.msg_counter.get_counter(session_id) >= plugin.config.get(
         "num_pairs", 10
     ):
         logger.info("开始总结历史对话...")
         history_contents = format_context_to_string(
-            req.contexts, plugin.config.get("num_pairs", 10)
+            context, plugin.config.get("num_pairs", 10)
         )
         # logger.debug(f"总结的部分{history_contents}")
 
@@ -629,3 +633,67 @@ async def handle_summary_long_memory(
         return
     except Exception as e:
         logger.error(f"在总结或存储长期记忆的过程中发生严重错误: {e}", exc_info=True)
+
+
+# 计时器
+async def _periodic_summarization_check(plugin: "Mnemosyne"):
+    """
+    [后台任务] 定期检查并触发超时的会话总结
+    """
+    logger.info(f"启动定期总结检查任务，检查间隔: {plugin.summary_check_interval}秒, 总结时间阈值: {plugin.summary_time_threshold}秒。")
+    while True:
+        try:
+            await asyncio.sleep(plugin.summary_check_interval) # <--- 等待指定间隔
+
+            if not plugin.context_manager or plugin.summary_time_threshold == float('inf'):
+                # 如果上下文管理器未初始化或阈值无效，则跳过本次检查
+                continue
+
+            current_time = time.time()
+            session_ids_to_check = list(plugin.context_manager.conversations.keys())
+
+            # logger.debug(f"开始检查 {len(session_ids_to_check)} 个会话的总结超时...")
+
+            for session_id in session_ids_to_check:
+                try:
+                    session_context = plugin.context_manager.get_session_context(session_id)
+                    if not session_context: # 会话可能在检查期间被移除
+                        continue
+                    if plugin.msg_counter.get_counter(session_id) <= 0:
+                        logger.debug(f"会话 {session_id} 没有新消息，跳过检查。")
+                        continue
+
+                    last_summary_time = session_context['last_summary_time']
+
+                    if current_time - last_summary_time > plugin.summary_time_threshold:
+                        # logger.debug(f"current_time {current_time} - last_summary_time {last_summary_time} : {current_time - last_summary_time}")
+                        logger.info(f"会话 {session_id} 距离上次总结已超过阈值 ({plugin.summary_time_threshold}秒)，触发强制总结。")
+                        # 运行总结
+                        logger.info("开始总结历史对话...")
+                        history_contents = format_context_to_string(
+                            session_context['history'],plugin.msg_counter.get_counter(session_id)
+                        )
+                        # logger.debug(f"总结的部分{history_contents}")
+                        persona_id = await _get_persona_id(plugin,session_context["event"])
+                        asyncio.create_task(
+                            handle_summary_long_memory(plugin, persona_id, session_id, history_contents)
+                        )
+                        logger.info("总结历史对话任务已提交到后台执行。")
+
+                        plugin.msg_counter.reset_counter(session_id)
+                        plugin.context_manager.update_summary_time(session_id)
+
+                except KeyError:
+                    # 会话在获取 keys 后、处理前被删除，是正常情况
+                    logger.debug(f"检查会话 {session_id} 时，会话已被移除。")
+                except Exception as e:
+                    logger.error(f"检查或总结会话 {session_id} 时发生错误: {e}", exc_info=True)
+
+        except asyncio.CancelledError:
+            logger.info("定期总结检查任务被取消。")
+            break # 退出循环
+        except Exception as e:
+            # 捕获循环本身的意外错误，防止任务完全停止
+            logger.error(f"定期总结检查任务主循环发生错误: {e}", exc_info=True)
+            # 可以选择在这里稍微等待一下，避免错误刷屏
+            await asyncio.sleep(plugin.summary_check_interval)
