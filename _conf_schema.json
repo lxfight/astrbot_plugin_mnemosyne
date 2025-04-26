@@ -39,6 +39,28 @@
             }
         }
     },
+    "summary_check_task":{
+        "description":"自动总结计时器设置",
+        "type":"object",
+        "hint":"实验性功能，当长时间不和bot说话时，会进行消息总结",
+        "obvious_hint":true,
+        "items":{
+            "SUMMARY_CHECK_INTERVAL_SECONDS":{
+                "description":"计时器间隔时间（秒）",
+                "type":"int",
+                "hint":"默认以每60秒（1分钟）进行检查一次，如果阈值设置为1小时，设置为10分钟应该也没有问题",
+                "obvious_hint":true,
+                "default":60
+            },
+            "SUMMARY_TIME_THRESHOLD_SECONDS":{
+                "description":"计时器总结阈值（秒）",
+                "type":"int",
+                "hint":"默认是3600秒（1小时），设置为-1关闭该功能，每个人与BOT的聊天频率是不同的，按个人需求进行设置",
+                "obvious_hint":true,
+                "default":-1
+            }
+        }
+    },
     "collection_name":{
         "description":"向量数据库的集合名称",
         "type":"string",
