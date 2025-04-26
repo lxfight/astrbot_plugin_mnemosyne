@@ -4,7 +4,6 @@ Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 负责插件注册、初始化流程调用、事件和命令的绑定。
 """
 import asyncio
-from lib2to3.fixes.fix_input import context
 from typing import List, Optional
 
 # --- AstrBot 核心导入 ---
@@ -15,7 +14,6 @@ from astrbot.api.all import *  # 导入 AstrBot API
 from astrbot.api.message_components import *  # 导入消息组件
 from astrbot.core.log import LogManager
 from astrbot.api.provider import LLMResponse, ProviderRequest
-
 
 # --- 插件内部模块导入 ---
 from .core import initialization  # 导入初始化逻辑模块
