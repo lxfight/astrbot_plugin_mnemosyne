@@ -20,6 +20,7 @@ from .core import initialization  # 导入初始化逻辑模块
 from .core import memory_operations  # 导入记忆操作逻辑模块
 from .core import commands  # 导入命令处理实现模块
 from .core.constants import *  # 导入所有常量
+from .core.tools import is_group_chat
 
 # --- 类型定义和依赖库 ---
 from pymilvus import CollectionSchema
@@ -188,6 +189,26 @@ class Mnemosyne(Star):
         ):
             yield result
         return
+
+    @permission_type(PermissionType.MEMBER)
+    @memory_group.command("reset")
+    async def reset_session_memory_cmd(self, event: AstrMessageEvent, confirm: Optional[str] = None):
+        """清除当前会话 ID 的记忆信息
+        使用示例：/memory reset [confirm]
+        """
+        if not self.context._config.get("platform_settings").get("unique_session") :
+            if is_group_chat(event):
+                yield event.plain_result("⚠️ 未开启群聊会话隔离，禁止清除群聊长期记忆")
+                return
+        session_id = await self.context.conversation_manager.get_curr_conversation_id(
+            event.unified_msg_origin
+        )
+        async for result in commands.delete_session_memory_cmd_impl(
+                self, event, session_id, confirm
+        ):
+            yield result
+        return
+
 
     @memory_group.command("get_session_id")  # type: ignore
     async def get_session_id_cmd(self, event: AstrMessageEvent):
