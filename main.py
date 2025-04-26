@@ -3,7 +3,7 @@
 Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 负责插件注册、初始化流程调用、事件和命令的绑定。
 """
-
+from lib2to3.fixes.fix_input import context
 from typing import List, Optional
 
 # --- AstrBot 核心导入 ---
@@ -15,6 +15,7 @@ from astrbot.api.message_components import *  # 导入消息组件
 from astrbot.core.log import LogManager
 from astrbot.api.provider import LLMResponse, ProviderRequest
 
+from .core.tools import is_group_chat
 # --- 插件内部模块导入 ---
 from .core import initialization  # 导入初始化逻辑模块
 from .core import memory_operations  # 导入记忆操作逻辑模块
@@ -164,6 +165,26 @@ class Mnemosyne(Star):
         ):
             yield result
         return
+
+    @permission_type(PermissionType.MEMBER)
+    @memory_group.command("reset")
+    async def reset_session_memory_cmd(self, event: AstrMessageEvent, confirm: Optional[str] = None):
+        """清除当前会话 ID 的记忆信息
+        使用示例：/memory reset [confirm]
+        """
+        if not self.context._config.get("platform_settings").get("unique_session") :
+            if is_group_chat(event):
+                yield event.plain_result("⚠️ 未开启群聊会话隔离，禁止清除群聊长期记忆")
+                return
+        session_id = await self.context.conversation_manager.get_curr_conversation_id(
+            event.unified_msg_origin
+        )
+        async for result in commands.delete_session_memory_cmd_impl(
+                self, event, session_id, confirm
+        ):
+            yield result
+        return
+
 
     @memory_group.command("get_session_id")  # type: ignore
     async def get_session_id_cmd(self, event: AstrMessageEvent):

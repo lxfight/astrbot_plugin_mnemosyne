@@ -4,6 +4,7 @@ Mnemosyne 插件工具函数
 """
 
 from urllib.parse import urlparse
+from astrbot.api.event import AstrMessageEvent
 import functools
 import re
 from typing import List, Dict, Set, Union
