@@ -239,3 +239,14 @@ def format_context_to_string(
 
     # 使用换行符连接收集到的内容
     return "\n".join(selected_contents)
+
+def is_group_chat(event: AstrMessageEvent) -> bool:
+    """
+    判断消息是否来自群聊。
+    Args:
+        event (AstrMessageEvent): 消息事件对象。
+
+    Returns:
+        bool: 如果消息来自群聊，则返回True；否则返回False。
+    """
+    return event.get_group_id() != ""
