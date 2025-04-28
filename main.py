@@ -4,7 +4,7 @@ Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 负责插件注册、初始化流程调用、事件和命令的绑定。
 """
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Union
 
 # --- AstrBot 核心导入 ---
 from astrbot.api.event import filter, AstrMessageEvent
@@ -26,7 +26,7 @@ from .core.tools import is_group_chat
 from pymilvus import CollectionSchema
 from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db.milvus_manager import MilvusManager
-from .memory_manager.embedding import OpenAIEmbeddingAPI
+from .memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
 from .memory_manager.context_manager import ConversationContextManager
 
 @register(
@@ -52,8 +52,24 @@ class Mnemosyne(Star):
         self.milvus_manager: Optional[MilvusManager] = None
         self.msg_counter: Optional[MessageCounter] = None
         self.context_manager: Optional[ConversationContextManager] = None
-        self.ebd: Optional[OpenAIEmbeddingAPI] = None
+        self.ebd: Optional[Union[OpenAIEmbeddingAPI, GeminiEmbeddingAPI]] = None
         self.provider = None
+
+        # 初始化嵌入服务
+        embedding_service = config.get("embedding_service", "openai").lower()
+        if embedding_service == "gemini":
+            self.ebd = GeminiEmbeddingAPI(
+                model=config.get("embedding_model", "gemini-embedding-exp-03-07"),
+                api_key=config.get("embedding_key"),
+            )
+            self.logger.info("已选择 Gemini 作为嵌入服务提供商")
+        else:
+            self.ebd = OpenAIEmbeddingAPI(
+                model=config.get("embedding_model", "text-embedding-3-small"),
+                api_key=config.get("embedding_key"),
+                base_url=config.get("embedding_url"),
+            )
+            self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
 
         # --- 一个该死的计时器 ---
         self._summary_check_task: Optional[asyncio.Task] = None
