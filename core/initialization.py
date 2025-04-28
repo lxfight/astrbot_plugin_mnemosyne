@@ -22,7 +22,7 @@ from .tools import parse_address
 
 from ..memory_manager.message_counter import MessageCounter
 from ..memory_manager.vector_db.milvus_manager import MilvusManager
-from ..memory_manager.embedding import OpenAIEmbeddingAPI
+from ..memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
 from ..memory_manager.context_manager import ConversationContextManager
 
 # 类型提示，避免循环导入
@@ -433,16 +433,29 @@ def initialize_components(plugin: "Mnemosyne"):
     # 2. 初始化 Embedding API
     try:
         # 检查必要的配置是否存在
-        required_keys = ["embedding_model", "embedding_key", "embedding_url"]
+        required_keys = ["embedding_model", "embedding_key"]
         missing_keys = [key for key in required_keys if not plugin.config.get(key)]
         if missing_keys:
             raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
+        
+        embedding_service = plugin.config.get("embedding_service", "openai").lower()
 
-        plugin.ebd = OpenAIEmbeddingAPI(
-            model=plugin.config.get("embedding_model"),
-            api_key=plugin.config.get("embedding_key"),
-            base_url=plugin.config.get("embedding_url"),
-        )
+        if embedding_service == "gemini":
+            plugin.ebd = GeminiEmbeddingAPI(
+                model=plugin.config.get("embedding_model", "gemini-embedding-exp-03-07"),
+                api_key=plugin.config.get("embedding_key"),
+            )
+            init_logger.info("已选择 Gemini 作为嵌入服务提供商")
+        elif embedding_service == "openai":
+            plugin.ebd = OpenAIEmbeddingAPI(
+                model=plugin.config.get("embedding_model"),
+                api_key=plugin.config.get("embedding_key"),
+                base_url=plugin.config.get("embedding_url"),
+            )
+            init_logger.info("已选择 OpenAI 作为嵌入服务提供商")
+        else:
+            raise ValueError(f"不支持的嵌入服务提供商: {embedding_service}")
+        
         # 尝试测试连接（如果API提供此功能）
         # 注意：这里假设 OpenAIEmbeddingAPI 有一个 test_connection 方法，如果没有需要调整
         try:
@@ -458,6 +471,7 @@ def initialize_components(plugin: "Mnemosyne"):
             # raise ConnectionError(f"无法连接到 Embedding API: {conn_err}") from conn_err
             init_logger.warning("将继续运行，但 Embedding 功能将不可用。")
             plugin.ebd = None  # 明确设为 None 表示不可用
+            raise ConnectionError(f"无法连接到 Embedding API: {conn_err}") from conn_err
 
     except Exception as e:
         init_logger.error(f"初始化 Embedding API 失败: {e}", exc_info=True)
