@@ -14,6 +14,8 @@ DEFAULT_OUTPUT_FIELDS = [
     "create_time",
     PRIMARY_FIELD_NAME,
 ]  # 默认查询返回字段
+# 查询记忆条数的上限
+MAX_TOTAL_FETCH_RECORDS = 10000
 
 # --- 对话上下文相关常量 ---
 DEFAULT_MAX_TURNS = 10  # 短期记忆最大对话轮数（用于总结）
@@ -24,5 +26,5 @@ DEFAULT_TOP_K = 5  # 默认检索的记忆数量
 DEFAULT_PERSONA_ON_NONE = "UNKNOWN_PERSONA"  # 当人格ID为空时使用的占位符或默认值
 
 # --- 计时器相关 ---
-DEFAULT_SUMMARY_CHECK_INTERVAL_SECONDS = 60 # 默认总结检查间隔 秒
-DEFAULT_SUMMARY_TIME_THRESHOLD_SECONDS = 3600 # 默认时间阈值
+DEFAULT_SUMMARY_CHECK_INTERVAL_SECONDS = 60  # 默认总结检查间隔 秒
+DEFAULT_SUMMARY_TIME_THRESHOLD_SECONDS = 3600  # 默认时间阈值
