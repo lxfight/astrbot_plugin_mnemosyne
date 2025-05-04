@@ -5,7 +5,7 @@ Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 """
 
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Union
 
 # --- AstrBot 核心导入 ---
 from astrbot.api.event import filter, AstrMessageEvent
@@ -21,12 +21,13 @@ from .core import initialization  # 导入初始化逻辑模块
 from .core import memory_operations  # 导入记忆操作逻辑模块
 from .core import commands  # 导入命令处理实现模块
 from .core.constants import *  # 导入所有常量
+from .core.tools import is_group_chat
 
 # --- 类型定义和依赖库 ---
 from pymilvus import CollectionSchema
 from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db.milvus_manager import MilvusManager
-from .memory_manager.embedding import OpenAIEmbeddingAPI
+from .memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
 from .memory_manager.context_manager import ConversationContextManager
 
 
@@ -53,8 +54,24 @@ class Mnemosyne(Star):
         self.milvus_manager: Optional[MilvusManager] = None
         self.msg_counter: Optional[MessageCounter] = None
         self.context_manager: Optional[ConversationContextManager] = None
-        self.ebd: Optional[OpenAIEmbeddingAPI] = None
+        self.ebd: Optional[Union[OpenAIEmbeddingAPI, GeminiEmbeddingAPI]] = None
         self.provider = None
+
+        # 初始化嵌入服务
+        embedding_service = config.get("embedding_service", "openai").lower()
+        if embedding_service == "gemini":
+            self.ebd = GeminiEmbeddingAPI(
+                model=config.get("embedding_model", "gemini-embedding-exp-03-07"),
+                api_key=config.get("embedding_key"),
+            )
+            self.logger.info("已选择 Gemini 作为嵌入服务提供商")
+        else:
+            self.ebd = OpenAIEmbeddingAPI(
+                model=config.get("embedding_model", "text-embedding-3-small"),
+                api_key=config.get("embedding_key"),
+                base_url=config.get("embedding_url"),
+            )
+            self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
 
         # --- 一个该死的计时器 ---
         self._summary_check_task: Optional[asyncio.Task] = None
@@ -194,6 +211,26 @@ class Mnemosyne(Star):
         ):
             yield result
         return
+
+    @permission_type(PermissionType.MEMBER)
+    @memory_group.command("reset")
+    async def reset_session_memory_cmd(self, event: AstrMessageEvent, confirm: Optional[str] = None):
+        """清除当前会话 ID 的记忆信息
+        使用示例：/memory reset [confirm]
+        """
+        if not self.context._config.get("platform_settings").get("unique_session") :
+            if is_group_chat(event):
+                yield event.plain_result("⚠️ 未开启群聊会话隔离，禁止清除群聊长期记忆")
+                return
+        session_id = await self.context.conversation_manager.get_curr_conversation_id(
+            event.unified_msg_origin
+        )
+        async for result in commands.delete_session_memory_cmd_impl(
+                self, event, session_id, confirm
+        ):
+            yield result
+        return
+
 
     @memory_group.command("get_session_id")  # type: ignore
     async def get_session_id_cmd(self, event: AstrMessageEvent):
