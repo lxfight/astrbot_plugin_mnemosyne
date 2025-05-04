@@ -3,8 +3,9 @@
 Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 负责插件注册、初始化流程调用、事件和命令的绑定。
 """
+
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Union
 
 # --- AstrBot 核心导入 ---
 from astrbot.api.event import filter, AstrMessageEvent
@@ -20,13 +21,15 @@ from .core import initialization  # 导入初始化逻辑模块
 from .core import memory_operations  # 导入记忆操作逻辑模块
 from .core import commands  # 导入命令处理实现模块
 from .core.constants import *  # 导入所有常量
+from .core.tools import is_group_chat
 
 # --- 类型定义和依赖库 ---
 from pymilvus import CollectionSchema
 from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db.milvus_manager import MilvusManager
-from .memory_manager.embedding import OpenAIEmbeddingAPI
+from .memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
 from .memory_manager.context_manager import ConversationContextManager
+
 
 @register(
     "Mnemosyne",
@@ -51,8 +54,24 @@ class Mnemosyne(Star):
         self.milvus_manager: Optional[MilvusManager] = None
         self.msg_counter: Optional[MessageCounter] = None
         self.context_manager: Optional[ConversationContextManager] = None
-        self.ebd: Optional[OpenAIEmbeddingAPI] = None
+        self.ebd: Optional[Union[OpenAIEmbeddingAPI, GeminiEmbeddingAPI]] = None
         self.provider = None
+
+        # 初始化嵌入服务
+        embedding_service = config.get("embedding_service", "openai").lower()
+        if embedding_service == "gemini":
+            self.ebd = GeminiEmbeddingAPI(
+                model=config.get("embedding_model", "gemini-embedding-exp-03-07"),
+                api_key=config.get("embedding_key"),
+            )
+            self.logger.info("已选择 Gemini 作为嵌入服务提供商")
+        else:
+            self.ebd = OpenAIEmbeddingAPI(
+                model=config.get("embedding_model", "text-embedding-3-small"),
+                api_key=config.get("embedding_key"),
+                base_url=config.get("embedding_url"),
+            )
+            self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
 
         # --- 一个该死的计时器 ---
         self._summary_check_task: Optional[asyncio.Task] = None
@@ -65,8 +84,10 @@ class Mnemosyne(Star):
             "SUMMARY_TIME_THRESHOLD_SECONDS", DEFAULT_SUMMARY_TIME_THRESHOLD_SECONDS
         )
         if self.summary_time_threshold <= 0:
-            self.logger.warning(f"配置的 SUMMARY_TIME_THRESHOLD_SECONDS ({self.summary_time_threshold}) 无效，将禁用基于时间的自动总结。")
-            self.summary_time_threshold = float('inf')
+            self.logger.warning(
+                f"配置的 SUMMARY_TIME_THRESHOLD_SECONDS ({self.summary_time_threshold}) 无效，将禁用基于时间的自动总结。"
+            )
+            self.summary_time_threshold = float("inf")
         # 是否需要刷新
         self.flush_after_insert = False
 
@@ -77,14 +98,18 @@ class Mnemosyne(Star):
             initialization.initialize_milvus(self)  # 初始化 Milvus
             initialization.initialize_components(self)  # 初始化核心组件
             # --- 启动后台总结检查任务 ---
-            if self.context_manager and self.summary_time_threshold != float('inf'):
+            if self.context_manager and self.summary_time_threshold != float("inf"):
                 # 确保 context_manager 已初始化且阈值有效
-                self._summary_check_task = asyncio.create_task(memory_operations._periodic_summarization_check(self))
+                self._summary_check_task = asyncio.create_task(
+                    memory_operations._periodic_summarization_check(self)
+                )
                 self.logger.info("后台总结检查任务已启动。")
-            elif self.summary_time_threshold == float('inf'):
+            elif self.summary_time_threshold == float("inf"):
                 self.logger.info("基于时间的自动总结已禁用，不启动后台检查任务。")
             else:
-                self.logger.warning("Context manager 未初始化，无法启动后台总结检查任务。")
+                self.logger.warning(
+                    "Context manager 未初始化，无法启动后台总结检查任务。"
+                )
 
             self.logger.info("Mnemosyne 插件核心组件初始化成功。")
         except Exception as e:
@@ -92,7 +117,6 @@ class Mnemosyne(Star):
                 f"Mnemosyne 插件初始化过程中发生严重错误，插件可能无法正常工作: {e}",
                 exc_info=True,
             )
-
 
     # --- 事件处理钩子 (调用 memory_operations.py 中的实现) ---
     @filter.on_llm_request()
@@ -163,14 +187,13 @@ class Mnemosyne(Star):
         self,
         event: AstrMessageEvent,
         collection_name: Optional[str] = None,
-        limit: int = 5,
-        offset: int = 0,
+        limit: int = 5
     ):
         """查询指定集合的记忆记录 (按创建时间倒序显示)
-        使用示例: /memory list_records [collection_name] [limit] [offset]
+        使用示例: /memory list_records [collection_name] [limit]
         """
         async for result in commands.list_records_cmd_impl(
-            self, event, collection_name, limit, offset
+            self, event, collection_name, limit
         ):
             yield result
         return
@@ -189,6 +212,26 @@ class Mnemosyne(Star):
             yield result
         return
 
+    @permission_type(PermissionType.MEMBER)
+    @memory_group.command("reset")
+    async def reset_session_memory_cmd(self, event: AstrMessageEvent, confirm: Optional[str] = None):
+        """清除当前会话 ID 的记忆信息
+        使用示例：/memory reset [confirm]
+        """
+        if not self.context._config.get("platform_settings").get("unique_session") :
+            if is_group_chat(event):
+                yield event.plain_result("⚠️ 未开启群聊会话隔离，禁止清除群聊长期记忆")
+                return
+        session_id = await self.context.conversation_manager.get_curr_conversation_id(
+            event.unified_msg_origin
+        )
+        async for result in commands.delete_session_memory_cmd_impl(
+                self, event, session_id, confirm
+        ):
+            yield result
+        return
+
+
     @memory_group.command("get_session_id")  # type: ignore
     async def get_session_id_cmd(self, event: AstrMessageEvent):
         """获取当前与您对话的会话 ID
@@ -205,7 +248,7 @@ class Mnemosyne(Star):
         # --- 停止后台总结检查任务 ---
         if self._summary_check_task and not self._summary_check_task.done():
             self.logger.info("正在取消后台总结检查任务...")
-            self._summary_check_task.cancel() # <--- 取消任务
+            self._summary_check_task.cancel()  # <--- 取消任务
             try:
                 # 等待任务实际取消完成，设置一个超时避免卡住
                 await asyncio.wait_for(self._summary_check_task, timeout=5.0)
@@ -216,11 +259,14 @@ class Mnemosyne(Star):
             except Exception as e:
                 # 捕获可能在任务取消过程中抛出的其他异常
                 self.logger.error(f"等待后台任务取消时发生错误: {e}", exc_info=True)
-        self._summary_check_task = None # 清理任务引用
+        self._summary_check_task = None  # 清理任务引用
 
         if self.milvus_manager and self.milvus_manager.is_connected():
             try:
-                if not self.milvus_manager._is_lite and self.milvus_manager.has_collection(self.collection_name):
+                if (
+                    not self.milvus_manager._is_lite
+                    and self.milvus_manager.has_collection(self.collection_name)
+                ):
                     self.logger.info(
                         f"正在从内存中释放集合 '{self.collection_name}'..."
                     )

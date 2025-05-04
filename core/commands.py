@@ -11,7 +11,7 @@ from datetime import datetime
 from astrbot.api.event import AstrMessageEvent
 
 # 导入必要的模块和常量
-from .constants import PRIMARY_FIELD_NAME
+from .constants import PRIMARY_FIELD_NAME, MAX_TOTAL_FETCH_RECORDS
 
 # 类型提示
 if TYPE_CHECKING:
@@ -111,9 +111,8 @@ async def list_records_cmd_impl(
     event: AstrMessageEvent,
     collection_name: Optional[str] = None,
     limit: int = 5,
-    offset: int = 0,
 ):
-    """[实现] 查询指定集合的记忆记录 (按创建时间倒序显示)"""
+    """[实现] 查询指定集合的最新记忆记录 (按创建时间倒序，自动获取最新)"""
     if not self.milvus_manager or not self.milvus_manager.is_connected():
         yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
         return
@@ -126,12 +125,10 @@ async def list_records_cmd_impl(
 
     target_collection = collection_name or self.collection_name
 
+    # 对用户输入的 limit 进行验证
     if limit <= 0 or limit > 50:
-        # 限制查询数量，防止滥用
-        yield event.plain_result("⚠️ 查询数量 (limit) 必须在 1 到 50 之间。")
-        return
-    if offset < 0:
-        yield event.plain_result("⚠️ 偏移量 (offset) 不能为负数。")
+        # 限制用户请求的显示数量
+        yield event.plain_result("⚠️ 显示数量 (limit) 必须在 1 到 50 之间。")
         return
 
     try:
@@ -139,17 +136,19 @@ async def list_records_cmd_impl(
             yield event.plain_result(f"⚠️ 集合 '{target_collection}' 不存在。")
             return
 
-        # --- 移除基于主键计算偏移量的复杂逻辑 ---
-
         # 构建查询表达式 - 仅基于 session_id (如果需要)
         if session_id:
             # 如果有会话ID，则按会话ID过滤
             expr = f'session_id in ["{session_id}"]'
-            self.logger.info(f"将按会话 ID '{session_id}' 过滤记录。")
+            self.logger.info(
+                f"将按会话 ID '{session_id}' 过滤并查询所有相关记录 (上限 {MAX_TOTAL_FETCH_RECORDS} 条)。"
+            )
         else:
             # 如果没有会话ID上下文，查询所有记录
             expr = f"{PRIMARY_FIELD_NAME} >= 0"
-            self.logger.info("未指定会话 ID，将查询集合中的所有记录。")
+            self.logger.info(
+                "未指定会话 ID，将查询集合 '{target_collection}' 中的所有记录 (上限 {MAX_TOTAL_FETCH_RECORDS} 条)。"
+            )
             # 或者，如果您的 milvus_manager 支持空表达式查询所有，则 expr = "" 或 None
 
         # self.logger.debug(f"查询集合 '{target_collection}' 记录: expr='{expr}'") # 上面已有更具体的日志
@@ -162,20 +161,28 @@ async def list_records_cmd_impl(
         ]
 
         self.logger.debug(
-            f"准备查询 Milvus: 集合='{target_collection}', 表达式='{expr}', 限制={limit}, 偏移={offset}, 输出字段={output_fields}"
+            f"准备查询 Milvus: 集合='{target_collection}', 表达式='{expr}', 限制={limit},输出字段={output_fields}, 总数上限={MAX_TOTAL_FETCH_RECORDS}"
         )
 
         # 直接使用 Milvus 的 offset 和 limit 参数进行分页查询
-        records = self.milvus_manager.query(
+        # records = self.milvus_manager.query(
+        #     collection_name=target_collection,
+        #     expression=expr,
+        #     output_fields=output_fields,
+        #     limit=limit,
+        #     offset=offset,  # 直接使用函数参数 offset
+        # )
+
+        # 重要的修改：移除 Milvus query 的 offset 和 limit 参数，使用总数上限作为 Milvus 的 limit
+        fetched_records = self.milvus_manager.query(
             collection_name=target_collection,
             expression=expr,
             output_fields=output_fields,
-            limit=limit,
-            offset=offset,  # 直接使用函数参数 offset
+            limit=MAX_TOTAL_FETCH_RECORDS,  # 使用总数上限作为 Milvus 的 limit
         )
 
         # 检查查询结果
-        if records is None:
+        if fetched_records is None:
             # 查询失败，milvus_manager.query 通常会返回 None 或抛出异常
             self.logger.error(
                 f"查询集合 '{target_collection}' 失败，milvus_manager.query 返回 None。"
@@ -185,59 +192,66 @@ async def list_records_cmd_impl(
             )
             return
 
-        if not records:
-            # 查询成功，但没有返回记录
+        if not fetched_records:
+            # 查询成功，但没有返回任何记录
             session_filter_msg = f"在会话 '{session_id}' 中" if session_id else ""
-            if offset == 0:
-                # 偏移量为0，说明集合本身为空或过滤后无结果
-                self.logger.info(
-                    f"集合 '{target_collection}' {session_filter_msg} 没有找到任何匹配的记忆记录。"
-                )
-                yield event.plain_result(
-                    f"集合 '{target_collection}' {session_filter_msg} 中没有找到任何匹配的记忆记录。"
-                )
-            else:
-                # 偏移量大于0，说明已经到达记录末尾
-                self.logger.info(
-                    f"在指定的偏移量 {offset} 之后，集合 '{target_collection}' {session_filter_msg} 没有更多记录了。"
-                )
-                yield event.plain_result(
-                    f"在指定的偏移量 {offset} 之后，集合 '{target_collection}' {session_filter_msg} 没有更多记录了。"
-                )
+            self.logger.info(
+                f"集合 '{target_collection}' {session_filter_msg} 没有找到任何匹配的记忆记录。"
+            )
+            yield event.plain_result(
+                f"集合 '{target_collection}' {session_filter_msg} 中没有找到任何匹配的记忆记录。"
+            )
             return
+        # 检查是否达到了总数上限
+        if len(fetched_records) >= MAX_TOTAL_FETCH_RECORDS:
+            self.logger.warning(
+                f"查询到的记录数量达到总数上限 ({MAX_TOTAL_FETCH_RECORDS})，可能存在更多未获取的记录，导致无法找到更旧的记录，但最新记录应该在获取范围内。"
+            )
+            yield event.plain_result(
+                f"ℹ️ 警告：查询到的记录数量已达到系统获取最新记录的上限 ({MAX_TOTAL_FETCH_RECORDS})。如果记录非常多，可能无法显示更旧的内容，但最新记录应该已包含在内。"
+            )
 
-        # --- 在获取当前页结果后进行排序 ---
-        # Milvus 的 query 结果顺序不保证，我们在获取到当前页数据后按时间倒序排序
+        self.logger.debug(f"成功获取到 {len(fetched_records)} 条原始记录用于排序。")
+        # --- 在获取全部结果后进行排序 (按创建时间倒序) ---
+        # 这确保了排序是基于所有获取到的记录，找到真正的最新记录
         try:
-            records.sort(
+            # 使用 lambda 表达式按 create_time 字段排序，如果字段不存在或为 None，默认为 0
+            fetched_records.sort(
                 key=lambda x: x.get("create_time", 0) or 0, reverse=True
-            )  # 处理 create_time 可能为 None 的情况
+            )
             self.logger.debug(
-                f"已将获取到的 {len(records)} 条记录按 create_time 降序排序。"
+                f"已将获取到的 {len(fetched_records)} 条记录按 create_time 降序排序。"
             )
         except Exception as sort_e:
             self.logger.warning(
-                f"对查询结果进行排序时出错: {sort_e}。将按 Milvus 返回的顺序显示。"
+                f"对查询结果进行排序时出错: {sort_e}。显示顺序可能不按时间排序。"
             )
-            # 可以选择不排序，或者记录错误后继续
+            # 如果排序失败，继续处理，但不保证按时间顺序
 
-        # `records` 现在是当前页（已由 Milvus 的 offset/limit 获取）并且（理想情况下）已按时间倒序排序
+        # --- 在排序后获取最前的 limit 条记录 ---
+        # 从排序后的 fetched_records 中取出最前的 limit 条记录
+        display_records = fetched_records[:limit]
+
+        # display_records 不会为空，除非 fetched_records 本身就为空，
+        # 而 fetched_records 为空的情况已经在前面处理过了。
 
         # 准备响应消息
+        total_fetched = len(fetched_records)
+        display_count = len(display_records)
+        # 消息提示用户这是最新的记录
         response_lines = [
-            f"📜 集合 '{target_collection}' 的记忆记录 (显示第 {offset + 1} 到 {offset + len(records)} 条，按时间倒序):"
+            f"📜 集合 '{target_collection}' 的最新记忆记录 (共获取 {total_fetched} 条进行排序, 显示最新的 {display_count} 条):"
         ]
 
         # 格式化每条记录以供显示
-        # 使用 enumerate 和 offset 生成正确的全局序号 (例如 #1, #2, ... #6, #7, ...)
-        for i, record in enumerate(records, start=offset + 1):
+        # 使用 enumerate 从 1 开始生成序号
+        for i, record in enumerate(display_records, start=1):
             ts = record.get("create_time")
             try:
-                # 假设 ts 是 Unix 时间戳（秒）
-                # 如果 Milvus 返回的是毫秒，需要除以 1000 (即 datetime.fromtimestamp(ts / 1000))
+                # 根据 Milvus 文档，Query 结果中的 time 是 float 类型的 Unix 时间戳（秒）。
                 time_str = (
                     datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-                    if ts is not None  # 检查 ts 是否存在
+                    if ts is not None  # 检查 ts 是否存在且不是 None
                     else "未知时间"
                 )
             except (TypeError, ValueError, OSError) as time_e:
@@ -255,7 +269,7 @@ async def list_records_cmd_impl(
             pk = record.get(PRIMARY_FIELD_NAME, "未知ID")  # 获取主键
 
             response_lines.append(
-                f"#{i} [ID: {pk}]\n"  # 使用全局序号
+                f"#{i} [ID: {pk}]\n"  # 使用从 1 开始的序号
                 f"  时间: {time_str}\n"
                 f"  人格: {persona_id}\n"
                 f"  会话: {record_session_id}\n"
@@ -271,7 +285,7 @@ async def list_records_cmd_impl(
             f"执行 'memory list_records' 命令时发生意外错误 (集合: {target_collection}): {str(e)}",
             exc_info=True,  # 记录完整的错误堆栈
         )
-        yield event.plain_result(f"⚠️ 查询记忆记录时发生内部错误，请联系管理员。")
+        yield event.plain_result("⚠️ 查询记忆记录时发生内部错误，请联系管理员。")
 
 
 async def delete_session_memory_cmd_impl(

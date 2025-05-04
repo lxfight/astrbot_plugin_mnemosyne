@@ -80,6 +80,12 @@
         "obvious_hint":false,
         "default":10
     },
+    "embedding_service": {
+        "description": "选择嵌入服务提供商 (openai 或 gemini)",
+        "type": "string",
+        "options": ["openai", "gemini"],
+        "default": "openai"
+    },
     "embedding_key":{
         "description":"embedding模型服务的apikey",
         "type":"string",
@@ -88,7 +94,7 @@
     "embedding_url":{
         "description":"embedding模型服务的端点url",
         "type":"string",
-        "hint":"目前只针对于OpenAI兼容的接口，填写到V1即可",
+        "hint":"目前只针对于OpenAI兼容的接口，填写到V1即可。如选择Gemini，则不填写",
         "obvious_hint":true
     },
     "embedding_model":{
@@ -98,7 +104,7 @@
     "embedding_dim":{
         "description":"向量模型输出的维度",
         "type":"int",
-        "hint":"注意！这个维度大小最好不要随意变动，如果一定要改变向量维度，请修改collection_name",
+        "hint":"注意！这个维度大小最好不要随意变动，如果一定要改变向量维度，请修改collection_name。Gemini修改为3072",
         "obvious_hint":true,
         "default":1024
     },
