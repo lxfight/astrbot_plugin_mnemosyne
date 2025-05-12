@@ -96,6 +96,9 @@ def remove_mnemosyne_tags(
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
                 # 只有当文本中确实包含需要处理的标签时才进行替换
+                # TODO 这里临时处理一下，如果类型是list，直接转换保留
+                if isinstance(original_text,list):
+                    cleaned_contents.append({"role": "user", "content": original_text})
                 if compiled_regex.search(original_text):
                     cleaned_text = compiled_regex.sub(replace_logic, original_text)
                     cleaned_contents.append({"role": "user", "content": cleaned_text})
