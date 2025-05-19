@@ -6,6 +6,7 @@ Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 
 import asyncio
 from typing import List, Optional, Union
+import re
 
 # --- AstrBot 核心导入 ---
 from astrbot.api.event import filter, AstrMessageEvent
@@ -29,6 +30,7 @@ from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db.milvus_manager import MilvusManager
 from .memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
 from .memory_manager.context_manager import ConversationContextManager
+
 
 
 @register(
@@ -60,10 +62,17 @@ class Mnemosyne(Star):
         # 初始化嵌入服务
         try:
             self.ebd = self.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
+            dim=self.ebd.get_dim()
+            modele_name=self.ebd.get_model_name()
+            if dim is not None and modele_name is not None:
+                self.config["embedding_dim"] = dim
+                self.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', modele_name)
+            else:
+                raise ValueError("嵌入服务适配器未正确注册或未返回有效的维度和模型名称。")
         except Exception as e:
-            init_logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
+            self.logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
             self.ebd = None
-        if self.ebd:
+        if self.ebd is None:
             embedding_service = config.get("embedding_service", "openai").lower()
             if embedding_service == "gemini":
                 self.ebd = GeminiEmbeddingAPI(

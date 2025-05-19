@@ -6,6 +6,7 @@ Mnemosyne 插件初始化逻辑
 
 from typing import TYPE_CHECKING
 import asyncio
+import re
 from pymilvus import CollectionSchema, FieldSchema, DataType
 
 from astrbot.core.log import LogManager
@@ -433,18 +434,23 @@ def initialize_components(plugin: "Mnemosyne"):
     # 2. 初始化 Embedding API
     try:
         # 检查必要的配置是否存在
-        required_keys = ["embedding_model", "embedding_key"]
-        missing_keys = [key for key in required_keys if not plugin.config.get(key)]
-        if missing_keys:
-            raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
-        
-
         try:
-            self.ebd = self.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
+            plugin.ebd = plugin.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
+            dim=plugin.ebd.get_dim()
+            modele_name=plugin.ebd.get_model_name()
+            if dim is not None and modele_name is not None:
+                plugin.config["embedding_dim"] = dim
+                plugin.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', modele_name)
         except Exception as e:
             init_logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
-            self.ebd = None
-        if self.ebd:
+            plugin.ebd = None
+
+        required_keys = ["embedding_model", "embedding_key"]
+        missing_keys = [key for key in required_keys if not plugin.config.get(key)]
+        
+        if plugin.ebd is None:
+            if missing_keys:
+                raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
             embedding_service = plugin.config.get("embedding_service")
 
             if embedding_service == "gemini":
