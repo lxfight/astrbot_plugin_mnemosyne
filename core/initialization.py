@@ -438,23 +438,30 @@ def initialize_components(plugin: "Mnemosyne"):
         if missing_keys:
             raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
         
-        embedding_service = plugin.config.get("embedding_service")
 
-        if embedding_service == "gemini":
-            plugin.ebd = GeminiEmbeddingAPI(
-                model=plugin.config.get("embedding_model"),
-                api_key=plugin.config.get("embedding_key"),
-            )
-            init_logger.info("已选择 Gemini 作为嵌入服务提供商")
-        elif embedding_service == "openai":
-            plugin.ebd = OpenAIEmbeddingAPI(
-                model=plugin.config.get("embedding_model"),
-                api_key=plugin.config.get("embedding_key"),
-                base_url=plugin.config.get("embedding_url"),
-            )
-            init_logger.info("已选择 OpenAI 作为嵌入服务提供商")
-        else:
-            raise ValueError(f"不支持的嵌入服务提供商: {embedding_service}")
+        try:
+            self.ebd = self.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
+        except Exception as e:
+            init_logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
+            self.ebd = None
+        if self.ebd:
+            embedding_service = plugin.config.get("embedding_service")
+
+            if embedding_service == "gemini":
+                plugin.ebd = GeminiEmbeddingAPI(
+                    model=plugin.config.get("embedding_model"),
+                    api_key=plugin.config.get("embedding_key"),
+                )
+                init_logger.info("已选择 Gemini 作为嵌入服务提供商")
+            elif embedding_service == "openai":
+                plugin.ebd = OpenAIEmbeddingAPI(
+                    model=plugin.config.get("embedding_model"),
+                    api_key=plugin.config.get("embedding_key"),
+                    base_url=plugin.config.get("embedding_url"),
+                )
+                init_logger.info("已选择 OpenAI 作为嵌入服务提供商")
+            else:
+                raise ValueError(f"不支持的嵌入服务提供商: {embedding_service}")
         
         # 尝试测试连接（如果API提供此功能）
         # 注意：这里假设 OpenAIEmbeddingAPI 有一个 test_connection 方法，如果没有需要调整
