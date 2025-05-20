@@ -468,9 +468,7 @@ def initialize_components(plugin: "Mnemosyne"):
                 init_logger.info("已选择 OpenAI 作为嵌入服务提供商")
             else:
                 raise ValueError(f"不支持的嵌入服务提供商: {embedding_service}")
-        
-        # 尝试测试连接（如果API提供此功能）
-        # 注意：这里假设 OpenAIEmbeddingAPI 有一个 test_connection 方法，如果没有需要调整
+
         try:
             plugin.ebd.test_connection()  # 假设此方法在失败时抛出异常
             init_logger.info("Embedding API 初始化成功，连接测试通过。")

@@ -8,6 +8,7 @@ import asyncio
 from typing import List, Optional, Union
 import re
 
+
 # --- AstrBot 核心导入 ---
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.event.filter import PermissionType, permission_type
@@ -30,7 +31,6 @@ from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db.milvus_manager import MilvusManager
 from .memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
 from .memory_manager.context_manager import ConversationContextManager
-
 
 
 @register(
@@ -87,6 +87,7 @@ class Mnemosyne(Star):
                     base_url=config.get("embedding_url"),
                 )
                 self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
+
 
         # --- 一个该死的计时器 ---
         self._summary_check_task: Optional[asyncio.Task] = None

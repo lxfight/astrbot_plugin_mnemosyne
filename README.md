@@ -25,7 +25,9 @@
 *   ✨ **指令优化:** 简化了 `/memory list_records` 指令的使用，使其更专注于查询最新的记忆记录。
     *   命令格式变更为：`/memory list_records [collection_name] [limit]`，**移除了 `offset` 参数**。
     *   现在，您只需指定需要查看的记录数量 (`limit`)，系统将自动获取符合条件的所有记录（在安全上限内），并从中选取最新的几条按时间倒序显示，无需再手动计算偏移量。
-    ✨ **Gemini嵌入模型支持：** 嵌入模型现在增加了Gemini 嵌入模型支持，感谢[@Yxiguan](https://github.com/Yxiguan)提供的代码。
+
+*   ✨ **Gemini嵌入模型支持：** 嵌入模型现在增加了Gemini 嵌入模型支持，感谢[@Yxiguan](https://github.com/Yxiguan)提供的代码。
+
 
 ### 🚀 v0.4.0
 

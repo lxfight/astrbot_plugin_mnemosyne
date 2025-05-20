@@ -76,6 +76,7 @@ async def handle_query_memory(
                 query_embeddings = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: plugin.ebd.get_embeddings([req.prompt]),
+
                 )
             except Exception as e:
                 logger.error(f"执行 Embedding 获取时出错: {e}", exc_info=True)
@@ -679,8 +680,9 @@ async def handle_summary_long_memory(
         # embedding_vectors = plugin.ebd.get_embeddings(summary_text)
         try:
             embedding_vectors = await asyncio.get_event_loop().run_in_executor(
-                None,  # 使用默认线程池
+                None,
                 lambda: plugin.ebd.get_embeddings([summary_text]),
+
             )
         except Exception as e:
             logger.error(
