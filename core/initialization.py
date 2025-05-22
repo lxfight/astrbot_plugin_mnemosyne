@@ -6,6 +6,7 @@ Mnemosyne 插件初始化逻辑
 
 from typing import TYPE_CHECKING
 import asyncio
+import re
 from pymilvus import CollectionSchema, FieldSchema, DataType
 
 from astrbot.core.log import LogManager
@@ -433,31 +434,41 @@ def initialize_components(plugin: "Mnemosyne"):
     # 2. 初始化 Embedding API
     try:
         # 检查必要的配置是否存在
+        try:
+            plugin.ebd = plugin.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
+            dim=plugin.ebd.get_dim()
+            modele_name=plugin.ebd.get_model_name()
+            if dim is not None and modele_name is not None:
+                plugin.config["embedding_dim"] = dim
+                plugin.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', modele_name)
+        except Exception as e:
+            init_logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
+            plugin.ebd = None
+
         required_keys = ["embedding_model", "embedding_key"]
         missing_keys = [key for key in required_keys if not plugin.config.get(key)]
-        if missing_keys:
-            raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
         
-        embedding_service = plugin.config.get("embedding_service")
+        if plugin.ebd is None:
+            if missing_keys:
+                raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
+            embedding_service = plugin.config.get("embedding_service")
 
-        if embedding_service == "gemini":
-            plugin.ebd = GeminiEmbeddingAPI(
-                model=plugin.config.get("embedding_model"),
-                api_key=plugin.config.get("embedding_key"),
-            )
-            init_logger.info("已选择 Gemini 作为嵌入服务提供商")
-        elif embedding_service == "openai":
-            plugin.ebd = OpenAIEmbeddingAPI(
-                model=plugin.config.get("embedding_model"),
-                api_key=plugin.config.get("embedding_key"),
-                base_url=plugin.config.get("embedding_url"),
-            )
-            init_logger.info("已选择 OpenAI 作为嵌入服务提供商")
-        else:
-            raise ValueError(f"不支持的嵌入服务提供商: {embedding_service}")
-        
-        # 尝试测试连接（如果API提供此功能）
-        # 注意：这里假设 OpenAIEmbeddingAPI 有一个 test_connection 方法，如果没有需要调整
+            if embedding_service == "gemini":
+                plugin.ebd = GeminiEmbeddingAPI(
+                    model=plugin.config.get("embedding_model"),
+                    api_key=plugin.config.get("embedding_key"),
+                )
+                init_logger.info("已选择 Gemini 作为嵌入服务提供商")
+            elif embedding_service == "openai":
+                plugin.ebd = OpenAIEmbeddingAPI(
+                    model=plugin.config.get("embedding_model"),
+                    api_key=plugin.config.get("embedding_key"),
+                    base_url=plugin.config.get("embedding_url"),
+                )
+                init_logger.info("已选择 OpenAI 作为嵌入服务提供商")
+            else:
+                raise ValueError(f"不支持的嵌入服务提供商: {embedding_service}")
+
         try:
             plugin.ebd.test_connection()  # 假设此方法在失败时抛出异常
             init_logger.info("Embedding API 初始化成功，连接测试通过。")

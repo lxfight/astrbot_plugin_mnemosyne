@@ -6,6 +6,8 @@ Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 
 import asyncio
 from typing import List, Optional, Union
+import re
+
 
 # --- AstrBot 核心导入 ---
 from astrbot.api.event import filter, AstrMessageEvent
@@ -54,24 +56,38 @@ class Mnemosyne(Star):
         self.milvus_manager: Optional[MilvusManager] = None
         self.msg_counter: Optional[MessageCounter] = None
         self.context_manager: Optional[ConversationContextManager] = None
-        self.ebd: Optional[Union[OpenAIEmbeddingAPI, GeminiEmbeddingAPI]] = None
+        self.ebd: Optional[Union[OpenAIEmbeddingAPI, GeminiEmbeddingAPI,Star]] = None
         self.provider = None
 
         # 初始化嵌入服务
-        embedding_service = config.get("embedding_service", "openai").lower()
-        if embedding_service == "gemini":
-            self.ebd = GeminiEmbeddingAPI(
-                model=config.get("embedding_model", "gemini-embedding-exp-03-07"),
-                api_key=config.get("embedding_key"),
-            )
-            self.logger.info("已选择 Gemini 作为嵌入服务提供商")
-        else:
-            self.ebd = OpenAIEmbeddingAPI(
-                model=config.get("embedding_model", "text-embedding-3-small"),
-                api_key=config.get("embedding_key"),
-                base_url=config.get("embedding_url"),
-            )
-            self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
+        try:
+            self.ebd = self.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
+            dim=self.ebd.get_dim()
+            modele_name=self.ebd.get_model_name()
+            if dim is not None and modele_name is not None:
+                self.config["embedding_dim"] = dim
+                self.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', modele_name)
+            else:
+                raise ValueError("嵌入服务适配器未正确注册或未返回有效的维度和模型名称。")
+        except Exception as e:
+            self.logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
+            self.ebd = None
+        if self.ebd is None:
+            embedding_service = config.get("embedding_service", "openai").lower()
+            if embedding_service == "gemini":
+                self.ebd = GeminiEmbeddingAPI(
+                    model=config.get("embedding_model", "gemini-embedding-exp-03-07"),
+                    api_key=config.get("embedding_key"),
+                )
+                self.logger.info("已选择 Gemini 作为嵌入服务提供商")
+            else:
+                self.ebd = OpenAIEmbeddingAPI(
+                    model=config.get("embedding_model", "text-embedding-3-small"),
+                    api_key=config.get("embedding_key"),
+                    base_url=config.get("embedding_url"),
+                )
+                self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
+
 
         # --- 一个该死的计时器 ---
         self._summary_check_task: Optional[asyncio.Task] = None
