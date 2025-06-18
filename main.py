@@ -37,7 +37,7 @@ from .memory_manager.context_manager import ConversationContextManager
     "Mnemosyne",
     "lxfight",
     "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
-    "0.4.0",
+    "0.5.1",
     "https://github.com/lxfight/astrbot_plugin_mnemosyne",
 )
 class Mnemosyne(Star):
@@ -56,22 +56,31 @@ class Mnemosyne(Star):
         self.milvus_manager: Optional[MilvusManager] = None
         self.msg_counter: Optional[MessageCounter] = None
         self.context_manager: Optional[ConversationContextManager] = None
-        self.ebd: Optional[Union[OpenAIEmbeddingAPI, GeminiEmbeddingAPI,Star]] = None
+        self.ebd: Optional[Union[OpenAIEmbeddingAPI, GeminiEmbeddingAPI, Star]] = None
         self.provider = None
 
         # 初始化嵌入服务
         try:
-            self.ebd = self.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
-            dim=self.ebd.get_dim()
-            modele_name=self.ebd.get_model_name()
-            if dim is not None and modele_name is not None:
-                self.config["embedding_dim"] = dim
-                self.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', modele_name)
+            embedding_plugin = self.context.get_registered_star(
+                "astrbot_plugin_embedding_adapter"
+            )
+            if embedding_plugin:
+                self.ebd = embedding_plugin.star_cls
+                dim = self.ebd.get_dim()
+                modele_name = self.ebd.get_model_name()
+                if dim is not None and modele_name is not None:
+                    self.config["embedding_dim"] = dim
+                    self.config["collection_name"] = "ea_" + re.sub(
+                        r"[^a-zA-Z0-9]", "_", modele_name
+                    )
             else:
-                raise ValueError("嵌入服务适配器未正确注册或未返回有效的维度和模型名称。")
+                raise ValueError(
+                    "嵌入服务适配器未正确注册或未返回有效的维度和模型名称。"
+                )
         except Exception as e:
             self.logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
             self.ebd = None
+
         if self.ebd is None:
             embedding_service = config.get("embedding_service", "openai").lower()
             if embedding_service == "gemini":
@@ -87,7 +96,6 @@ class Mnemosyne(Star):
                     base_url=config.get("embedding_url"),
                 )
                 self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
-
 
         # --- 一个该死的计时器 ---
         self._summary_check_task: Optional[asyncio.Task] = None
@@ -203,7 +211,7 @@ class Mnemosyne(Star):
         self,
         event: AstrMessageEvent,
         collection_name: Optional[str] = None,
-        limit: int = 5
+        limit: int = 5,
     ):
         """查询指定集合的记忆记录 (按创建时间倒序显示)
         使用示例: /memory list_records [collection_name] [limit]
@@ -230,11 +238,13 @@ class Mnemosyne(Star):
 
     @permission_type(PermissionType.MEMBER)
     @memory_group.command("reset")
-    async def reset_session_memory_cmd(self, event: AstrMessageEvent, confirm: Optional[str] = None):
+    async def reset_session_memory_cmd(
+        self, event: AstrMessageEvent, confirm: Optional[str] = None
+    ):
         """清除当前会话 ID 的记忆信息
         使用示例：/memory reset [confirm]
         """
-        if not self.context._config.get("platform_settings").get("unique_session") :
+        if not self.context._config.get("platform_settings").get("unique_session"):
             if is_group_chat(event):
                 yield event.plain_result("⚠️ 未开启群聊会话隔离，禁止清除群聊长期记忆")
                 return
@@ -242,11 +252,10 @@ class Mnemosyne(Star):
             event.unified_msg_origin
         )
         async for result in commands.delete_session_memory_cmd_impl(
-                self, event, session_id, confirm
+            self, event, session_id, confirm
         ):
             yield result
         return
-
 
     @memory_group.command("get_session_id")  # type: ignore
     async def get_session_id_cmd(self, event: AstrMessageEvent):
