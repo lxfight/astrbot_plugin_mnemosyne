@@ -82,20 +82,27 @@ class Mnemosyne(Star):
             self.ebd = None
 
         if self.ebd is None:
-            embedding_service = config.get("embedding_service", "openai").lower()
-            if embedding_service == "gemini":
-                self.ebd = GeminiEmbeddingAPI(
-                    model=config.get("embedding_model", "gemini-embedding-exp-03-07"),
-                    api_key=config.get("embedding_key"),
+            try:
+                embedding_service = config.get("embedding_service", "openai").lower()
+                if embedding_service == "gemini":
+                    self.ebd = GeminiEmbeddingAPI(
+                        model=config.get("embedding_model", "gemini-embedding-exp-03-07"),
+                        api_key=config.get("embedding_key"),
+                    )
+                    self.logger.info("已选择 Gemini 作为嵌入服务提供商")
+                else:
+                    self.ebd = OpenAIEmbeddingAPI(
+                        model=config.get("embedding_model", "text-embedding-3-small"),
+                        api_key=config.get("embedding_key"),
+                        base_url=config.get("embedding_url"),
+                    )
+                    self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
+            except Exception as e:
+                self.logger.error(
+                    f"初始化嵌入服务失败: {e}. 请检查配置或嵌入服务插件是否正确安装。",
+                    exc_info=True,
                 )
-                self.logger.info("已选择 Gemini 作为嵌入服务提供商")
-            else:
-                self.ebd = OpenAIEmbeddingAPI(
-                    model=config.get("embedding_model", "text-embedding-3-small"),
-                    api_key=config.get("embedding_key"),
-                    base_url=config.get("embedding_url"),
-                )
-                self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
+                self.ebd = None
 
         # --- 一个该死的计时器 ---
         self._summary_check_task: Optional[asyncio.Task] = None
