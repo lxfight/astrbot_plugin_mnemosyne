@@ -4,23 +4,23 @@
         "type":"string"
     },
     "milvus_lite_path":{
-        "description":"Milvus数据库的lite模式路径",
+        "description":"milvus数据库的lite模式路径",
         "type":"string",
-        "hint":"仅当选择 Milvus 时有效。相对路径将基于插件数据目录。只使用milvus_lite_path或者address其中一个即可，milvus_lite_path优先级较高",
+        "hint":"注意！！！只使用milvus_lite_path或者address其中一个即可，milvus_lite_path优先级较高",
         "obvious_hint":true,
         "default":""
     },
     "address":{
-        "description":"Milvus数据库地址",
+        "description":"milvus数据库地址",
         "type":"string",
-        "hint":"仅当选择 Milvus 时有效。支持格式如:http://localhost:19530，https://localhost:19530，localhost:19530",
+        "hint":"支持支持格式如:http://localhost:19530，https://localhost:19530，localhost:19530",
         "obvious_hint":true,
         "default":""
     },
     "authentication":{
-        "description":"Milvus数据库的认证信息",
+        "description":"milvus数据库的认证信息",
         "type":"object",
-        "hint":"仅当选择 Milvus 时有效。如果milvus开启了服务器认证，请填写对应的信息",
+        "hint":"如果milvus开启了服务器认证，请填写对应的信息",
         "obvious_hint":true,
         "items":{
             "token":{
@@ -36,44 +36,6 @@
             "password":{
                 "description":"milvus数据库的认证密码",
                 "type":"string"
-            }
-        }
-    },
-    "vector_database_type":{
-        "description":"向量数据库类型",
-        "type":"string",
-        "options":["milvus", "faiss"],
-        "hint":"选择向量数据库后端：Milvus（支持分布式）或 FAISS（本地高性能）",
-        "obvious_hint":true,
-        "default":"milvus"
-    },
-    "faiss_config":{
-        "description":"Faiss 数据库相关配置",
-        "type":"object",
-        "hint":"仅当选择 FAISS 时有效",
-        "obvious_hint":true,
-        "items":{
-            "faiss_data_path":{
-                "description":"FAISS数据存储路径",
-                "type":"string",
-                "hint":"相对路径将基于插件数据目录，绝对路径将直接使用",
-                "obvious_hint":true,
-                "default":"faiss_data"
-            },
-            "faiss_index_type":{
-                "description":"FAISS索引类型",
-                "type":"string",
-                "options":["IndexFlatL2", "IndexFlatIP", "IndexIVFFlat", "IndexHNSWFlat"],
-                "hint":"IndexFlatL2(精确搜索)，IndexIVFFlat(快速搜索)，IndexHNSWFlat(高性能)",
-                "obvious_hint":true,
-                "default":"IndexHNSWFlat"
-            },
-            "faiss_nlist":{
-                "description":"FAISS IVF索引的聚类中心数量",
-                "type":"int",
-                "hint":"仅当选择 IndexIVFFlat 时有效。数值越大搜索越精确但速度越慢",
-                "obvious_hint":true,
-                "default":100
             }
         }
     },
@@ -118,36 +80,26 @@
         "obvious_hint":false,
         "default":10
     },
-    "embedding_provider_id":{
-        "description":"AstrBot原生嵌入服务提供商ID",
-        "type":"string",
-        "hint":"优先使用AstrBot配置的嵌入服务。如果留空，将使用下面的传统配置",
-        "obvious_hint":true,
-        "default":""
-    },
     "embedding_service": {
-        "description": "传统嵌入服务提供商 (openai 或 gemini)",
+        "description": "选择嵌入服务提供商 (openai 或 gemini)",
         "type": "string",
         "options": ["openai", "gemini"],
-        "hint":"仅当未配置embedding_provider_id时使用",
         "default": "openai"
     },
     "embedding_key":{
-        "description":"传统embedding模型服务的apikey",
+        "description":"embedding模型服务的apikey",
         "type":"string",
-        "hint":"仅当未配置embedding_provider_id时使用",
         "obvious_hint":false
     },
     "embedding_url":{
-        "description":"传统embedding模型服务的端点url",
+        "description":"embedding模型服务的端点url",
         "type":"string",
-        "hint":"仅当未配置embedding_provider_id时使用。目前只针对于OpenAI兼容的接口，填写到V1即可。如选择Gemini，则不填写",
+        "hint":"目前只针对于OpenAI兼容的接口，填写到V1即可。如选择Gemini，则不填写",
         "obvious_hint":true
     },
     "embedding_model":{
-        "description":"传统embedding模型模型名称",
-        "type":"string",
-        "hint":"仅当未配置embedding_provider_id时使用"
+        "description":"embedding模型模型名称",
+        "type":"string"
     },
     "embedding_dim":{
         "description":"向量模型输出的维度",

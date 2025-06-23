@@ -6,7 +6,6 @@ Mnemosyne 插件的命令处理函数实现
 
 from typing import TYPE_CHECKING, Optional
 from datetime import datetime
-import asyncio
 
 # 导入 AstrBot API 和类型 (仅需要事件和消息段)
 from astrbot.api.event import AstrMessageEvent
@@ -14,32 +13,25 @@ from astrbot.api.event import AstrMessageEvent
 # 导入必要的模块和常量
 from .constants import PRIMARY_FIELD_NAME, MAX_TOTAL_FETCH_RECORDS
 
-# 导入迁移相关模块
-from ..memory_manager.vector_db import VectorDatabaseFactory
-from ..memory_manager.embedding_adapter import EmbeddingServiceFactory
-
 # 类型提示
 if TYPE_CHECKING:
     from ..main import Mnemosyne
 
 
 async def list_collections_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
-    """[实现] 列出当前向量数据库实例中的所有集合"""
-    if not self.vector_db or not self.vector_db.is_connected():
-        db_type = self.vector_db.get_database_type().value if self.vector_db else "向量数据库"
-        yield event.plain_result(f"⚠️ {db_type} 服务未初始化或未连接。")
+    """[实现] 列出当前 Milvus 实例中的所有集合"""
+    if not self.milvus_manager or not self.milvus_manager.is_connected():
+        yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
         return
     try:
-        collections = self.vector_db.list_collections()
+        collections = self.milvus_manager.list_collections()
         if collections is None:
             yield event.plain_result("⚠️ 获取集合列表失败，请检查日志。")
             return
         if not collections:
-            db_type = self.vector_db.get_database_type().value
-            response = f"当前 {db_type} 实例中没有找到任何集合。"
+            response = "当前 Milvus 实例中没有找到任何集合。"
         else:
-            db_type = self.vector_db.get_database_type().value
-            response = f"当前 {db_type} 实例中的集合列表：\n" + "\n".join(
+            response = "当前 Milvus 实例中的集合列表：\n" + "\n".join(
                 [f"📚 {col}" for col in collections]
             )
             if self.collection_name in collections:
@@ -60,10 +52,9 @@ async def delete_collection_cmd_impl(
     collection_name: str,
     confirm: Optional[str] = None,
 ):
-    """[实现] 删除指定的向量数据库集合及其所有数据"""
-    if not self.vector_db or not self.vector_db.is_connected():
-        db_type = self.vector_db.get_database_type().value if self.vector_db else "向量数据库"
-        yield event.plain_result(f"⚠️ {db_type} 服务未初始化或未连接。")
+    """[实现] 删除指定的 Milvus 集合及其所有数据"""
+    if not self.milvus_manager or not self.milvus_manager.is_connected():
+        yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
         return
 
     is_current_collection = collection_name == self.collection_name
@@ -71,11 +62,10 @@ async def delete_collection_cmd_impl(
     if is_current_collection:
         warning_msg = f"\n\n🔥🔥🔥 警告：您正在尝试删除当前插件正在使用的集合 '{collection_name}'！这将导致插件功能异常，直到重新创建或更改配置！ 🔥🔥🔥"
 
-    db_type = self.vector_db.get_database_type().value
     if confirm != "--confirm":
         yield event.plain_result(
             f"⚠️ 操作确认 ⚠️\n"
-            f"此操作将永久删除 {db_type} 集合 '{collection_name}' 及其包含的所有数据！此操作无法撤销！\n"
+            f"此操作将永久删除 Milvus 集合 '{collection_name}' 及其包含的所有数据！此操作无法撤销！\n"
             f"{warning_msg}\n\n"
             f"如果您确定要继续，请再次执行命令并添加 `--confirm` 参数:\n"
             f"`/memory drop_collection {collection_name} --confirm`"
@@ -92,9 +82,9 @@ async def delete_collection_cmd_impl(
                 f"管理员 {sender_id} 正在删除当前插件使用的集合 '{collection_name}'！"
             )
 
-        success = self.vector_db.drop_collection(collection_name)
+        success = self.milvus_manager.drop_collection(collection_name)
         if success:
-            msg = f"✅ 已成功删除 {db_type} 集合 '{collection_name}'。"
+            msg = f"✅ 已成功删除 Milvus 集合 '{collection_name}'。"
             if is_current_collection:
                 msg += "\n插件使用的集合已被删除，请尽快处理！"
             yield event.plain_result(msg)
@@ -105,7 +95,7 @@ async def delete_collection_cmd_impl(
                 )
         else:
             yield event.plain_result(
-                f"⚠️ 删除集合 '{collection_name}' 的请求已发送，但 {db_type} 返回失败。请检查日志获取详细信息。"
+                f"⚠️ 删除集合 '{collection_name}' 的请求已发送，但 Milvus 返回失败。请检查 Milvus 日志获取详细信息。"
             )
 
     except Exception as e:
@@ -123,9 +113,8 @@ async def list_records_cmd_impl(
     limit: int = 5,
 ):
     """[实现] 查询指定集合的最新记忆记录 (按创建时间倒序，自动获取最新)"""
-    if not self.vector_db or not self.vector_db.is_connected():
-        db_type = self.vector_db.get_database_type().value if self.vector_db else "向量数据库"
-        yield event.plain_result(f"⚠️ {db_type} 服务未初始化或未连接。")
+    if not self.milvus_manager or not self.milvus_manager.is_connected():
+        yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
         return
 
     # 获取当前会话的 session_id (如果需要按会话过滤)
@@ -143,7 +132,7 @@ async def list_records_cmd_impl(
         return
 
     try:
-        if not self.vector_db.has_collection(target_collection):
+        if not self.milvus_manager.has_collection(target_collection):
             yield event.plain_result(f"⚠️ 集合 '{target_collection}' 不存在。")
             return
 
@@ -184,19 +173,19 @@ async def list_records_cmd_impl(
         #     offset=offset,  # 直接使用函数参数 offset
         # )
 
-        # 重要的修改：移除向量数据库 query 的 offset 和 limit 参数，使用总数上限作为 limit
-        fetched_records = self.vector_db.query(
+        # 重要的修改：移除 Milvus query 的 offset 和 limit 参数，使用总数上限作为 Milvus 的 limit
+        fetched_records = self.milvus_manager.query(
             collection_name=target_collection,
             expression=expr,
             output_fields=output_fields,
-            limit=MAX_TOTAL_FETCH_RECORDS,  # 使用总数上限作为向量数据库的 limit
+            limit=MAX_TOTAL_FETCH_RECORDS,  # 使用总数上限作为 Milvus 的 limit
         )
 
         # 检查查询结果
         if fetched_records is None:
-            # 查询失败，vector_db.query 通常会返回 None 或抛出异常
+            # 查询失败，milvus_manager.query 通常会返回 None 或抛出异常
             self.logger.error(
-                f"查询集合 '{target_collection}' 失败，vector_db.query 返回 None。"
+                f"查询集合 '{target_collection}' 失败，milvus_manager.query 返回 None。"
             )
             yield event.plain_result(
                 f"⚠️ 查询集合 '{target_collection}' 记录失败，请检查日志。"
@@ -306,9 +295,8 @@ async def delete_session_memory_cmd_impl(
     confirm: Optional[str] = None,
 ):
     """[实现] 删除指定会话 ID 相关的所有记忆信息"""
-    if not self.vector_db or not self.vector_db.is_connected():
-        db_type = self.vector_db.get_database_type().value if self.vector_db else "向量数据库"
-        yield event.plain_result(f"⚠️ {db_type} 服务未初始化或未连接。")
+    if not self.milvus_manager or not self.milvus_manager.is_connected():
+        yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
         return
 
     if not session_id or not session_id.strip():
@@ -334,7 +322,7 @@ async def delete_session_memory_cmd_impl(
             f"管理员 {sender_id} 请求删除会话 '{session_id_to_delete}' 的所有记忆 (集合: {collection_name}, 表达式: '{expr}') (确认执行)"
         )
 
-        mutation_result = self.vector_db.delete(
+        mutation_result = self.milvus_manager.delete(
             collection_name=collection_name, expression=expr
         )
 
@@ -349,11 +337,9 @@ async def delete_session_memory_cmd_impl(
             )
             try:
                 self.logger.info(
-                    f"正在刷新集合 '{collection_name}' 以应用删除操作..."
+                    f"正在刷新 (Flush) 集合 '{collection_name}' 以应用删除操作..."
                 )
-                # 对于 FAISS，flush 操作可能不需要，但保持接口一致性
-                if hasattr(self.vector_db, 'flush'):
-                    self.vector_db.flush([collection_name])
+                self.milvus_manager.flush([collection_name])
                 self.logger.info(f"集合 '{collection_name}' 刷新完成。删除操作已生效。")
                 yield event.plain_result(
                     f"✅ 已成功删除会话 ID '{session_id_to_delete}' 的所有记忆信息。"
@@ -367,9 +353,8 @@ async def delete_session_memory_cmd_impl(
                     f"⚠️ 已发送删除请求，但在刷新集合使更改生效时出错: {flush_err}。删除可能未完全生效。"
                 )
         else:
-            db_type = self.vector_db.get_database_type().value
             yield event.plain_result(
-                f"⚠️ 删除会话 ID '{session_id_to_delete}' 记忆的请求失败。请检查 {db_type} 日志。"
+                f"⚠️ 删除会话 ID '{session_id_to_delete}' 记忆的请求失败。请检查 Milvus 日志。"
             )
 
     except Exception as e:
@@ -400,366 +385,3 @@ async def get_session_id_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
             f"执行 'memory get_session_id' 命令失败: {str(e)}", exc_info=True
         )
         yield event.plain_result(f"⚠️ 获取当前会话 ID 时发生错误: {str(e)}")
-
-
-# === 迁移相关命令实现 ===
-
-
-async def migration_status_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
-    """[实现] 查看当前插件配置和迁移状态"""
-    try:
-        # 获取当前配置信息
-        current_db_type = self.config.get("vector_database_type", "milvus")
-        embedding_provider_id = self.config.get("embedding_provider_id", "")
-
-        # 检查数据库连接状态
-        db_status = "❌ 未连接"
-        db_info = ""
-        if self.vector_db:
-            if self.vector_db.is_connected():
-                db_status = "✅ 已连接"
-                stats = self.vector_db.get_collection_stats(self.collection_name)
-                if stats:
-                    db_info = f"\n  集合: {self.collection_name}\n  记录数: {stats.get('record_count', 0)}\n  向量维度: {stats.get('vector_dim', 'N/A')}"
-            else:
-                db_status = "⚠️ 已初始化但未连接"
-
-        # 检查嵌入服务状态
-        embedding_status = "❌ 未初始化"
-        embedding_info = ""
-        if self.embedding_adapter:
-            embedding_status = "✅ 已初始化"
-            embedding_info = f"\n  服务: {self.embedding_adapter.service_name}\n  模型: {self.embedding_adapter.get_model_name()}\n  维度: {self.embedding_adapter.get_dim()}"
-
-        # 检查是否为新版本配置
-        migration_version = self.config.get("_migration_version", "")
-        is_migrated = "✅ 已迁移到 v0.6.0" if migration_version else "⚠️ 可能需要迁移"
-
-        response = f"""📊 Mnemosyne 插件状态报告
-
-🔧 配置信息:
-  版本: v0.6.0
-  数据库类型: {current_db_type}
-  嵌入服务ID: {embedding_provider_id or "使用传统配置"}
-  迁移状态: {is_migrated}
-
-💾 数据库状态: {db_status}{db_info}
-
-🤖 嵌入服务状态: {embedding_status}{embedding_info}
-
-📝 可用迁移命令:
-  /memory migrate_config - 迁移配置到新格式
-  /memory migrate_to_faiss - 迁移到 FAISS 数据库
-  /memory migrate_to_milvus - 迁移到 Milvus 数据库
-  /memory validate_config - 验证当前配置"""
-
-        yield event.plain_result(response)
-
-    except Exception as e:
-        self.logger.error(f"获取迁移状态失败: {e}", exc_info=True)
-        yield event.plain_result(f"⚠️ 获取状态信息时发生错误: {str(e)}")
-
-
-async def migrate_config_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
-    """[实现] 迁移配置到新格式"""
-    try:
-        # 检查是否已经迁移
-        if self.config.get("_migration_version"):
-            yield event.plain_result("✅ 配置已经是新格式，无需迁移。")
-            return
-
-        yield event.plain_result("🔄 开始迁移配置到新格式...")
-
-        # 添加新的配置项
-        if "vector_database_type" not in self.config:
-            # 根据现有配置判断数据库类型
-            if self.config.get("milvus_lite_path") or self.config.get("address"):
-                self.config["vector_database_type"] = "milvus"
-                yield event.plain_result(
-                    "✓ 检测到 Milvus 配置，设置数据库类型为 milvus"
-                )
-            else:
-                self.config["vector_database_type"] = "faiss"
-                yield event.plain_result(
-                    "✓ 未检测到 Milvus 配置，设置数据库类型为 faiss"
-                )
-
-        # 添加 FAISS 默认配置
-        if "faiss_config" not in self.config:
-            self.config["faiss_config"] = {}
-
-        faiss_config = self.config["faiss_config"]
-        if "faiss_data_path" not in faiss_config:
-            faiss_config["faiss_data_path"] = "faiss_data"
-        if "faiss_index_type" not in faiss_config:
-            faiss_config["faiss_index_type"] = "IndexFlatL2"
-        if "faiss_nlist" not in faiss_config:
-            faiss_config["faiss_nlist"] = 100
-
-        # 添加嵌入服务提供商ID配置
-        if "embedding_provider_id" not in self.config:
-            self.config["embedding_provider_id"] = ""
-
-        # 标记迁移版本
-        self.config["_migration_version"] = "0.6.0"
-        self.config["_migration_date"] = datetime.now().isoformat()
-
-        yield event.plain_result("✅ 配置迁移完成！新增配置项：")
-        yield event.plain_result(
-            f"  - vector_database_type: {self.config['vector_database_type']}"
-        )
-        yield event.plain_result(
-            f"  - faiss_config.faiss_data_path: {self.config['faiss_config']['faiss_data_path']}"
-        )
-        yield event.plain_result(
-            f"  - faiss_config.faiss_index_type: {self.config['faiss_config']['faiss_index_type']}"
-        )
-        yield event.plain_result(
-            f"  - embedding_provider_id: {self.config['embedding_provider_id']}"
-        )
-        yield event.plain_result("\n⚠️ 注意：配置已更新，建议重启插件以应用更改。")
-
-    except Exception as e:
-        self.logger.error(f"配置迁移失败: {e}", exc_info=True)
-        yield event.plain_result(f"⚠️ 配置迁移失败: {str(e)}")
-
-
-async def migrate_to_faiss_cmd_impl(
-    self: "Mnemosyne", event: AstrMessageEvent, confirm: Optional[str] = None
-):
-    """[实现] 迁移数据到 FAISS 数据库"""
-    current_db_type = self.config.get("vector_database_type", "milvus")
-
-    if current_db_type == "faiss":
-        yield event.plain_result("✅ 当前已经使用 FAISS 数据库，无需迁移。")
-        return
-
-    if confirm != "--confirm":
-        yield event.plain_result(
-            f"⚠️ 数据库迁移确认 ⚠️\n"
-            f"此操作将把数据从 {current_db_type} 迁移到 FAISS 数据库。\n"
-            f"迁移过程中可能需要一些时间，请确保：\n"
-            f"1. 当前数据库连接正常\n"
-            f"2. 有足够的磁盘空间\n"
-            f"3. 迁移期间避免其他操作\n\n"
-            f"如果确认迁移，请执行：\n"
-            f"/memory migrate_to_faiss --confirm"
-        )
-        return
-
-    try:
-        yield event.plain_result("🔄 开始迁移到 FAISS 数据库...")
-
-        # 检查当前数据库连接
-        if not self.vector_db or not self.vector_db.is_connected():
-            yield event.plain_result("❌ 当前数据库未连接，无法进行迁移。")
-            return
-
-        # 创建 FAISS 数据库配置
-        current_faiss_config = self.config.get("faiss_config", {})
-        faiss_config = {
-            "faiss_config": {
-                "faiss_data_path": current_faiss_config.get("faiss_data_path", "faiss_data"),
-                "faiss_index_type": current_faiss_config.get("faiss_index_type", "IndexFlatL2"),
-                "faiss_nlist": current_faiss_config.get("faiss_nlist", 100),
-            }
-        }
-
-        # 创建目标 FAISS 数据库
-        yield event.plain_result("📦 创建 FAISS 数据库实例...")
-        target_db = VectorDatabaseFactory.create_database("faiss", faiss_config)
-        if not target_db or not target_db.connect():
-            yield event.plain_result("❌ 无法创建或连接到 FAISS 数据库。")
-            return
-
-        # 执行数据迁移
-        yield event.plain_result(f"📋 开始迁移集合 '{self.collection_name}' 的数据...")
-
-        # 在后台执行迁移
-        success = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: VectorDatabaseFactory.migrate_data(
-                source_db=self.vector_db,
-                target_db=target_db,
-                collection_name=self.collection_name,
-                batch_size=1000,
-            ),
-        )
-
-        if success:
-            # 更新配置
-            self.config["vector_database_type"] = "faiss"
-            yield event.plain_result("✅ 数据迁移成功！")
-            yield event.plain_result("⚠️ 请重启插件以使用新的 FAISS 数据库。")
-        else:
-            yield event.plain_result("❌ 数据迁移失败，请查看日志获取详细信息。")
-
-        # 断开目标数据库连接
-        target_db.disconnect()
-
-    except Exception as e:
-        self.logger.error(f"迁移到 FAISS 失败: {e}", exc_info=True)
-        yield event.plain_result(f"⚠️ 迁移过程中发生错误: {str(e)}")
-
-
-async def migrate_to_milvus_cmd_impl(
-    self: "Mnemosyne", event: AstrMessageEvent, confirm: Optional[str] = None
-):
-    """[实现] 迁移数据到 Milvus 数据库"""
-    current_db_type = self.config.get("vector_database_type", "milvus")
-
-    if current_db_type == "milvus":
-        yield event.plain_result("✅ 当前已经使用 Milvus 数据库，无需迁移。")
-        return
-
-    if confirm != "--confirm":
-        yield event.plain_result(
-            f"⚠️ 数据库迁移确认 ⚠️\n"
-            f"此操作将把数据从 {current_db_type} 迁移到 Milvus 数据库。\n"
-            f"请确保已正确配置 Milvus 连接信息：\n"
-            f"- milvus_lite_path 或 address\n"
-            f"- 认证信息（如果需要）\n\n"
-            f"如果确认迁移，请执行：\n"
-            f"/memory migrate_to_milvus --confirm"
-        )
-        return
-
-    try:
-        yield event.plain_result("🔄 开始迁移到 Milvus 数据库...")
-
-        # 检查当前数据库连接
-        if not self.vector_db or not self.vector_db.is_connected():
-            yield event.plain_result("❌ 当前数据库未连接，无法进行迁移。")
-            return
-
-        # 验证 Milvus 配置
-        is_valid, error_msg = VectorDatabaseFactory.validate_config(
-            "milvus", self.config
-        )
-        if not is_valid:
-            yield event.plain_result(f"❌ Milvus 配置验证失败: {error_msg}")
-            return
-
-        # 创建目标 Milvus 数据库
-        yield event.plain_result("📦 创建 Milvus 数据库实例...")
-        target_db = VectorDatabaseFactory.create_database("milvus", self.config)
-        if not target_db or not target_db.connect():
-            yield event.plain_result("❌ 无法创建或连接到 Milvus 数据库。")
-            return
-
-        # 执行数据迁移
-        yield event.plain_result(f"📋 开始迁移集合 '{self.collection_name}' 的数据...")
-
-        # 在后台执行迁移
-        success = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: VectorDatabaseFactory.migrate_data(
-                source_db=self.vector_db,
-                target_db=target_db,
-                collection_name=self.collection_name,
-                batch_size=1000,
-            ),
-        )
-
-        if success:
-            # 更新配置
-            self.config["vector_database_type"] = "milvus"
-            yield event.plain_result("✅ 数据迁移成功！")
-            yield event.plain_result("⚠️ 请重启插件以使用新的 Milvus 数据库。")
-        else:
-            yield event.plain_result("❌ 数据迁移失败，请查看日志获取详细信息。")
-
-        # 断开目标数据库连接
-        target_db.disconnect()
-
-    except Exception as e:
-        self.logger.error(f"迁移到 Milvus 失败: {e}", exc_info=True)
-        yield event.plain_result(f"⚠️ 迁移过程中发生错误: {str(e)}")
-
-
-async def validate_config_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
-    """[实现] 验证当前配置"""
-    try:
-        yield event.plain_result("🔍 开始验证配置...")
-
-        # 验证数据库配置
-        db_type = self.config.get("vector_database_type", "milvus")
-        db_valid, db_error = VectorDatabaseFactory.validate_config(db_type, self.config)
-
-        if db_valid:
-            yield event.plain_result(f"✅ {db_type} 数据库配置验证通过")
-        else:
-            yield event.plain_result(f"❌ {db_type} 数据库配置验证失败: {db_error}")
-
-        # 验证嵌入服务配置
-        embedding_valid, embedding_error = EmbeddingServiceFactory.validate_config(
-            self.config
-        )
-
-        if embedding_valid:
-            yield event.plain_result("✅ 嵌入服务配置验证通过")
-        else:
-            yield event.plain_result(f"❌ 嵌入服务配置验证失败: {embedding_error}")
-
-        # 检查必要的配置项
-        required_fields = ["LLM_providers"]
-        missing_fields = [
-            field for field in required_fields if not self.config.get(field)
-        ]
-
-        if missing_fields:
-            yield event.plain_result(f"⚠️ 缺少必要配置: {', '.join(missing_fields)}")
-        else:
-            yield event.plain_result("✅ 必要配置项检查通过")
-
-        # 总结
-        all_valid = db_valid and embedding_valid and not missing_fields
-        if all_valid:
-            yield event.plain_result("\n🎉 配置验证全部通过！插件应该可以正常工作。")
-        else:
-            yield event.plain_result("\n⚠️ 发现配置问题，请根据上述提示进行修复。")
-
-    except Exception as e:
-        self.logger.error(f"配置验证失败: {e}", exc_info=True)
-        yield event.plain_result(f"⚠️ 配置验证过程中发生错误: {str(e)}")
-
-
-async def help_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
-    """[实现] 显示帮助信息"""
-    # 获取当前数据库类型以提供更准确的帮助信息
-    db_type = self.vector_db.get_database_type().value if self.vector_db else "向量数据库"
-    help_text = f"""🧠 Mnemosyne 长期记忆插件 v0.6.0
-当前数据库: {db_type}
-
-📋 基础命令:
-  /memory status - 查看插件状态和配置信息
-  /memory get_session_id - 获取当前会话ID
-  /memory validate_config - 验证当前配置
-
-📊 记忆管理:
-  /memory list - 列出所有集合
-  /memory list_records [集合名] [数量] - 查看记忆记录
-  /memory reset [--confirm] - 清除当前会话记忆
-
-🔧 迁移工具 (管理员):
-  /memory migrate_config - 迁移配置到新格式
-  /memory migrate_to_faiss [--confirm] - 迁移到FAISS数据库
-  /memory migrate_to_milvus [--confirm] - 迁移到Milvus数据库
-
-🗑️ 数据管理 (管理员):
-  /memory drop_collection <集合名> [--confirm] - 删除集合
-  /memory delete_session_memory <会话ID> [--confirm] - 删除会话记忆
-
-💡 使用提示:
-- 新用户推荐使用 FAISS 数据库（简单高效）
-- 企业用户可选择 Milvus 数据库
-- 迁移前建议先查看状态：/memory status
-- 危险操作需要添加 --confirm 参数确认
-
-🆕 v0.6.0 新功能:
-✨ 支持多种向量数据库 (Milvus + FAISS)
-✨ 集成AstrBot原生嵌入服务
-✨ 一键配置和数据迁移
-✨ 改进的错误处理和日志"""
-
-    yield event.plain_result(help_text)
