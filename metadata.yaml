@@ -1,6 +1,5 @@
 name: astrbot_plugin_mnemosyne
-desc: 一个基于Milvus数据库的长期记忆存储与查询插件
-help: 输入 /memory 查看指令帮助
-version: v0.5.1
+desc: 基于RAG技术的长期记忆插件，支持Milvus和FAISS向量数据库，集成AstrBot原生嵌入服务，提供一键迁移和插件数据目录管理
+version: v0.6.0
 author: lxfight
 repo: https://github.com/lxfight/astrbot_plugin_mnemosyne

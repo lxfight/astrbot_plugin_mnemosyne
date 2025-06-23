@@ -32,7 +32,7 @@ class OpenAIEmbeddingAPI:
     def test_connection(self):
         # 测试与embedding 的连接
         try:
-            response = self.client.embeddings.create(input=["你好"], model=self.model)
+            response = self.client.embeddings.create(input=["你好"], model=self.model)  # noqa: F841
         except Exception as e:
             raise ConnectionError(
                 f"Embedding Connection error: {e}\n 请检查Embedding 模型配置是否正确，是否可以访问"
@@ -55,8 +55,8 @@ class OpenAIEmbeddingAPI:
             )
         return [data.embedding for data in response.data]
 
-class GeminiEmbeddingAPI:
 
+class GeminiEmbeddingAPI:
     def __init__(self, model: str = "gemini-embedding-exp-03-07", api_key: str = None):
         """
         :param model: 使用的嵌入模型名称
@@ -72,7 +72,7 @@ class GeminiEmbeddingAPI:
     def test_connection(self):
         # 测试与 Gemini 的连接
         try:
-            response = self.client.models.embed_content(
+            response = self.client.models.embed_content(  # noqa: F841
                 model=self.model, contents="hello world"
             )
         except Exception as e:
@@ -90,7 +90,9 @@ class GeminiEmbeddingAPI:
             if isinstance(texts, str):
                 texts = [texts]
 
-            response = self.client.models.embed_content(model=self.model, contents=texts)
+            response = self.client.models.embed_content(
+                model=self.model, contents=texts
+            )
             embeddings = [embedding.values for embedding in response.embeddings]
             return embeddings
 

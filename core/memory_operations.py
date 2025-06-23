@@ -7,11 +7,10 @@ Mnemosyne 插件核心记忆操作逻辑
 import time
 import asyncio
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Dict, Optional, Any
+from typing import TYPE_CHECKING, List, Dict, Optional
 
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.event import AstrMessageEvent
-from pymilvus.exceptions import MilvusException
 
 from .tools import (
     remove_mnemosyne_tags,
@@ -73,10 +72,8 @@ async def handle_query_memory(
         try:
             # 1. 向量化用户查询
             try:
-                query_embeddings = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: plugin.ebd.get_embeddings([req.prompt]),
-
+                query_embeddings = await plugin.embedding_adapter.get_embeddings(
+                    [req.prompt]
                 )
             except Exception as e:
                 logger.error(f"执行 Embedding 获取时出错: {e}", exc_info=True)
@@ -87,8 +84,8 @@ async def handle_query_memory(
                 return
             query_vector = query_embeddings[0]
 
-            # 2. 执行 Milvus 搜索
-            detailed_results = await _perform_milvus_search(
+            # 2. 执行向量搜索
+            detailed_results = await _perform_vector_search(
                 plugin, query_vector, session_id, persona_id
             )
 
@@ -152,12 +149,11 @@ async def _check_rag_prerequisites(plugin: "Mnemosyne") -> bool:
     Returns:
         True 如果前提条件满足，False 否则。
     """
-    # logger = plugin.logger
-    if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
-        logger.error("Milvus 服务未初始化或未连接，无法查询长期记忆。")
+    if not plugin.vector_db or not plugin.vector_db.is_connected():
+        logger.error("向量数据库未初始化或未连接，无法查询长期记忆。")
         return False
-    if not plugin.ebd:
-        logger.error("Embedding API 未初始化，无法查询长期记忆。")
+    if not plugin.embedding_adapter:
+        logger.warning("嵌入服务未初始化，跳过长期记忆查询。")
         return False
     if not plugin.msg_counter:
         logger.error("消息计数器未初始化，将无法实现记忆总结")
@@ -236,14 +232,14 @@ async def _check_and_trigger_summary(
         plugin.msg_counter.reset_counter(session_id)
 
 
-async def _perform_milvus_search(
+async def _perform_vector_search(
     plugin: "Mnemosyne",
     query_vector: List[float],
     session_id: Optional[str],
     persona_id: Optional[str],
 ) -> Optional[List[Dict]]:
     """
-    执行 Milvus 向量搜索。
+    执行向量搜索（支持多种数据库后端）。
 
     Args:
         plugin: Mnemosyne 插件实例。
@@ -252,129 +248,64 @@ async def _perform_milvus_search(
         persona_id: 人格 ID。
 
     Returns:
-        Milvus 搜索结果列表，如果没有找到或出错则为 None。
+        搜索结果列表，如果没有找到或出错则为 None。
     """
-    # logger = plugin.logger
-    # 防止没有过滤条件引发的潜在错误
-    filters = ["memory_id > 0"]
+    # 构建过滤条件
+    filters = ["memory_id >= 0"]  # 基础过滤条件
     if session_id:
         filters.append(f'session_id == "{session_id}"')
     else:
         logger.warning("无法获取当前 session_id，将不按 session 过滤记忆！")
 
     use_personality_filtering = plugin.config.get("use_personality_filtering", False)
-    effective_persona_id_for_filter = persona_id
-    if use_personality_filtering and effective_persona_id_for_filter:
-        filters.append(f'personality_id == "{effective_persona_id_for_filter}"')
-        logger.debug(f"将使用人格 '{effective_persona_id_for_filter}' 过滤记忆。")
+    if use_personality_filtering and persona_id:
+        filters.append(f'personality_id == "{persona_id}"')
+        logger.debug(f"将使用人格 '{persona_id}' 过滤记忆。")
     elif use_personality_filtering:
         logger.debug("启用了人格过滤，但当前无有效人格 ID，不按人格过滤。")
 
     search_expression = " and ".join(filters) if filters else ""
     collection_name = plugin.collection_name
     top_k = plugin.config.get("top_k", DEFAULT_TOP_K)
-    timeout_seconds = plugin.config.get("milvus_search_timeout", DEFAULT_MILVUS_TIMEOUT)
+    timeout_seconds = plugin.config.get("vector_search_timeout", DEFAULT_MILVUS_TIMEOUT)
 
     logger.info(
         f"开始在集合 '{collection_name}' 中搜索相关记忆 (TopK: {top_k}, Filter: '{search_expression or '无'}')"
     )
 
     try:
+        # 使用统一的向量数据库接口
         search_results = await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: plugin.milvus_manager.search(
+                lambda: plugin.vector_db.search(
                     collection_name=collection_name,
                     query_vectors=[query_vector],
-                    vector_field=VECTOR_FIELD_NAME,
-                    search_params=plugin.search_params,
-                    limit=top_k,
-                    expression=search_expression,
+                    top_k=top_k,
+                    filters=search_expression,
                     output_fields=plugin.output_fields_for_query,
                 ),
             ),
             timeout=timeout_seconds,
         )
     except asyncio.TimeoutError:
-        logger.error(f"Milvus 搜索超时 ({timeout_seconds} 秒)，操作已取消。")
-        return None
-    except MilvusException as me:
-        logger.error(f"Milvus 搜索操作失败: {me}", exc_info=True)
+        logger.error(f"向量搜索超时 ({timeout_seconds} 秒)，操作已取消。")
         return None
     except Exception as e:
-        logger.error(f"执行 Milvus 搜索时发生未知错误: {e}", exc_info=True)
+        logger.error(f"执行向量搜索时发生错误: {e}", exc_info=True)
         return None
 
     if not search_results or not search_results[0]:
         logger.info("向量搜索未找到相关记忆。")
         return None
     else:
-        # 从 search_results 中获取 Hits 对象
-        hits = search_results[0]
-        # 调用新的辅助函数来处理 Hits 对象并提取详细结果
-        detailed_results = _process_milvus_hits(hits)
+        # 返回第一个查询的结果
+        detailed_results = search_results[0]
+        logger.debug(f"成功获取到 {len(detailed_results)} 条搜索结果。")
         return detailed_results
 
 
-def _process_milvus_hits(hits) -> List[Dict[str, Any]]:
-    """
-    处理 Milvus SearchResults 中的 Hits 对象，使用基于索引的遍历方式
-    提取有效的记忆实体数据。
-
-    Args:
-        hits: 从 Milvus 搜索结果 search_results[0] 中获取的 Hits 对象。
-
-    Returns:
-        一个包含提取到的记忆实体字典的列表。如果没有任何有效实体被提取，
-        则返回空列表 []。
-    """
-    detailed_results: List[Dict[str, Any]] = []  # 初始化结果列表，指定类型
-
-    # 使用索引遍历 hits 对象，以绕过 SequenceIterator 的迭代问题
-    if hits:  # 确保 hits 对象不是空的或 None
-        try:
-            num_hits = len(hits)  # 获取命中数量
-            logger.debug(f"Milvus 返回了 {num_hits} 条原始命中结果。")
-
-            # 使用索引进行遍历
-            for i in range(num_hits):
-                try:
-                    hit = hits[i]  # 通过索引获取单个 Hit 对象
-
-                    # 检查 hit 对象及其 entity 属性是否存在且有效
-                    # 使用 hasattr 更健壮，避免在 entity 属性不存在时报错
-                    if hit and hasattr(hit, "entity") and hit.entity:
-                        # 提取 entity 数据，使用 .get() 避免 KeyError
-                        # 假设 entity.to_dict() 返回的字典中有 "entity" 键
-                        entity_data = hit.entity.to_dict().get("entity")
-                        # 如果成功提取到数据，则添加到结果列表
-                        if entity_data:
-                            detailed_results.append(entity_data)
-                        else:
-                            # 如果 entity 存在但提取的数据为空，可能是数据结构问题
-                            logger.warning(
-                                f"命中结果索引 {i} 处的 entity 数据为空或无效，已跳过。"
-                            )
-                    else:
-                        # 如果 hit 或 entity 无效，则跳过
-                        logger.debug(f"命中结果索引 {i} 处对象或 entity 无效，已跳过。")
-
-                except Exception as e:
-                    # 处理访问或处理单个 hit 时可能出现的错误
-                    logger.error(
-                        f"处理索引 {i} 处的命中结果时发生错误: {e}", exc_info=True
-                    )
-                    # 发生错误时继续处理下一个 hit，不中断整个流程
-
-        except Exception as e:
-            # 处理获取长度或设置循环时可能出现的更严重的错误
-            # 如果在这里发生错误，detailed_results 可能不完整或为空
-            logger.error(f"执行基于索引的命中结果处理时发生错误: {e}", exc_info=True)
-
-    # 记录成功处理并提取记忆的记录数
-    logger.debug(f"成功处理并提取记忆的记录数: {len(detailed_results)} 条。")
-
-    return detailed_results
+# 移除了 _process_milvus_hits 函数，因为现在使用统一的向量数据库接口
 
 
 # LLM 响应处理相关函数
@@ -472,12 +403,11 @@ async def _check_summary_prerequisites(plugin: "Mnemosyne", memory_text: str) ->
     Returns:
         True 如果前提条件满足，False 否则。
     """
-    # logger = plugin.logger
-    if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
-        logger.error("Milvus 服务不可用，无法存储总结后的长期记忆。")
+    if not plugin.vector_db or not plugin.vector_db.is_connected():
+        logger.error("向量数据库不可用，无法存储总结后的长期记忆。")
         return False
-    if not plugin.ebd:
-        logger.error("Embedding API 不可用，无法向量化总结记忆。")
+    if not plugin.embedding_adapter:
+        logger.warning("嵌入服务不可用，跳过记忆总结存储。")
         return False
     if not memory_text or not memory_text.strip():
         logger.warning("尝试总结空的或仅包含空白的记忆文本，跳过。")
@@ -569,7 +499,7 @@ def _extract_summary_text(
     return summary_text
 
 
-async def _store_summary_to_milvus(
+async def _store_summary_to_vector_db(
     plugin: "Mnemosyne",
     persona_id: Optional[str],
     session_id: str,
@@ -577,7 +507,7 @@ async def _store_summary_to_milvus(
     embedding_vector: List[float],
 ):
     """
-    将总结文本和向量存储到 Milvus 中。
+    将总结文本和向量存储到向量数据库中。
 
     Args:
         plugin: Mnemosyne 插件实例。
@@ -586,7 +516,6 @@ async def _store_summary_to_milvus(
         summary_text: 总结文本。
         embedding_vector: 总结文本的 Embedding 向量。
     """
-    # logger = plugin.logger
     collection_name = plugin.collection_name
     current_timestamp = int(time.time())
 
@@ -609,47 +538,27 @@ async def _store_summary_to_milvus(
     logger.info(
         f"准备向集合 '{collection_name}' 插入 1 条总结记忆 (Persona: {effective_persona_id}, Session: {session_id[:8]}...)"
     )
-    # mutation_result = plugin.milvus_manager.insert(
-    #     collection_name=collection_name,
-    #     data=data_to_insert,
-    # )
-    # --- 修改 insert 调用 ---
-    loop = asyncio.get_event_loop()
-    mutation_result = None
+
     try:
-        mutation_result = await loop.run_in_executor(
-            None,  # 使用默认线程池
-            lambda: plugin.milvus_manager.insert(
+        # 使用统一的向量数据库接口
+        success = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: plugin.vector_db.insert(
                 collection_name=collection_name, data=data_to_insert
             ),
         )
-    except Exception as e:
-        logger.error(f"向 Milvus 插入总结记忆时出错: {e}", exc_info=True)
 
-    if mutation_result and mutation_result.insert_count > 0:
-        inserted_ids = mutation_result.primary_keys
-        logger.info(f"成功插入总结记忆到 Milvus。插入 ID: {inserted_ids}")
-
-        try:
-            logger.debug(
-                f"正在刷新 (Flush) 集合 '{collection_name}' 以确保记忆立即可用..."
+        if success:
+            logger.info(
+                f"成功插入总结记忆到 {plugin.vector_db.get_database_type().value} 数据库"
             )
-            # plugin.milvus_manager.flush([collection_name])
-            await loop.run_in_executor(
-                None,  # 使用默认线程池
-                lambda: plugin.milvus_manager.flush([collection_name]),
-            )
-            logger.debug(f"集合 '{collection_name}' 刷新完成。")
-
-        except Exception as flush_err:
+        else:
             logger.error(
-                f"刷新集合 '{collection_name}' 时出错: {flush_err}",
-                exc_info=True,
+                f"插入总结记忆到向量数据库失败。LLM 回复: {summary_text[:100]}..."
             )
-    else:
-        logger.error(
-            f"插入总结记忆到 Milvus 失败。MutationResult: {mutation_result}. LLM 回复: {summary_text[:100]}..."
-        )
+
+    except Exception as e:
+        logger.error(f"向向量数据库插入总结记忆时出错: {e}", exc_info=True)
 
 
 async def handle_summary_long_memory(
@@ -677,12 +586,9 @@ async def handle_summary_long_memory(
             return
 
         # 3. 获取总结文本的 Embedding
-        # embedding_vectors = plugin.ebd.get_embeddings(summary_text)
         try:
-            embedding_vectors = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: plugin.ebd.get_embeddings([summary_text]),
-
+            embedding_vectors = await plugin.embedding_adapter.get_embeddings(
+                [summary_text]
             )
         except Exception as e:
             logger.error(
@@ -696,8 +602,8 @@ async def handle_summary_long_memory(
             return
         embedding_vector = embedding_vectors[0]
 
-        # 4. 存储到 Milvus
-        await _store_summary_to_milvus(
+        # 4. 存储到向量数据库
+        await _store_summary_to_vector_db(
             plugin, persona_id, session_id, summary_text, embedding_vector
         )
         return

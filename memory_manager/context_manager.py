@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
 import time
-from astrbot.core.log import LogManager
 from astrbot.api.event import AstrMessageEvent
+
 
 class ConversationContextManager:
     """
@@ -11,7 +11,7 @@ class ConversationContextManager:
     def __init__(self):
         self.conversations: Dict[str, Dict] = {}
 
-    def init_conv(self, session_id:str, contexts:list[Dict],event:AstrMessageEvent):
+    def init_conv(self, session_id: str, contexts: list[Dict], event: AstrMessageEvent):
         """
         从AstrBot获取历史消息
         """
@@ -45,7 +45,9 @@ class ConversationContextManager:
             {
                 "role": role,
                 "content": content,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),# 这个是不会被加入到总结的内容中的，应该
+                "timestamp": time.strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),  # 这个是不会被加入到总结的内容中的，应该
             }
         )
 

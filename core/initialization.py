@@ -5,8 +5,6 @@ Mnemosyne 插件初始化逻辑
 """
 
 from typing import TYPE_CHECKING
-import asyncio
-import re
 from pymilvus import CollectionSchema, FieldSchema, DataType
 
 from astrbot.core.log import LogManager
@@ -23,7 +21,6 @@ from .tools import parse_address
 
 from ..memory_manager.message_counter import MessageCounter
 from ..memory_manager.vector_db.milvus_manager import MilvusManager
-from ..memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
 from ..memory_manager.context_manager import ConversationContextManager
 
 # 类型提示，避免循环导入
@@ -70,6 +67,7 @@ def initialize_config_check(plugin: "Mnemosyne"):
                             配置的数量:{astrbot_max_context_length}。\n"
         )
     # ------ contexts_memory_len ------
+
 
 def initialize_config_and_schema(plugin: "Mnemosyne"):
     """解析配置、验证和定义模式/索引参数。"""
@@ -175,12 +173,12 @@ def initialize_milvus(plugin: "Mnemosyne"):
     并进行必要的集合与索引设置。
     """
     init_logger.debug("开始初始化 Milvus 连接和设置...")
-    connect_args = {} # 用于收集传递给 MilvusManager 的参数
-    is_lite_mode = False # 标记是否为 Lite 模式
+    connect_args = {}  # 用于收集传递给 MilvusManager 的参数
+    is_lite_mode = False  # 标记是否为 Lite 模式
 
     try:
         # 1. 优先检查 Milvus Lite 配置
-        lite_path = plugin.config.get("milvus_lite_path","")
+        lite_path = plugin.config.get("milvus_lite_path", "")
 
         # 2. 获取标准 Milvus 的地址配置
         milvus_address = plugin.config.get("address")
@@ -191,11 +189,15 @@ def initialize_milvus(plugin: "Mnemosyne"):
             connect_args["lite_path"] = lite_path
             is_lite_mode = True
             if milvus_address:
-                init_logger.warning(f"同时配置了 'milvus_lite_path' 和 'address'，将优先使用 Lite 路径，忽略 'address' ('{milvus_address}')。")
+                init_logger.warning(
+                    f"同时配置了 'milvus_lite_path' 和 'address'，将优先使用 Lite 路径，忽略 'address' ('{milvus_address}')。"
+                )
 
         elif milvus_address:
             # --- 未配置 Lite 路径，使用标准 Milvus 地址 ---
-            init_logger.info(f"未配置 Milvus Lite 路径，将根据 'address' 配置连接标准 Milvus: '{milvus_address}'")
+            init_logger.info(
+                f"未配置 Milvus Lite 路径，将根据 'address' 配置连接标准 Milvus: '{milvus_address}'"
+            )
             is_lite_mode = False
             # 判断 address 是 URI 还是 host:port
             if milvus_address.startswith(("http://", "https://", "unix:")):
@@ -204,7 +206,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
             else:
                 init_logger.debug(f"地址 '{milvus_address}' 将被解析为 host:port。")
                 try:
-                    host, port = parse_address(milvus_address) # 使用工具函数解析
+                    host, port = parse_address(milvus_address)  # 使用工具函数解析
                     connect_args["host"] = host
                     connect_args["port"] = port
                 except ValueError as e:
@@ -219,7 +221,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
 
         # 3. 添加通用参数 (对 Lite 和 Standard 都可能有效)
         #    添加数据库名称 (db_name)
-        db_name = plugin.config.get("db_name", "default") # 提供默认值 'default'
+        db_name = plugin.config.get("db_name", "default")  # 提供默认值 'default'
         # 只有当 db_name 不是 'default' 时才显式添加到参数中，以保持简洁
         if db_name != "default":
             connect_args["db_name"] = db_name
@@ -246,11 +248,11 @@ def initialize_milvus(plugin: "Mnemosyne"):
             for key in ["user", "password", "token", "secure"]:
                 if key in auth_config and auth_config[key] is not None:
                     # 特别处理 'secure'，确保它是布尔值
-                    if key == 'secure':
+                    if key == "secure":
                         value = auth_config[key]
                         if isinstance(value, str):
                             # 从字符串 'true'/'false' (不区分大小写) 转为布尔值
-                            secure_bool = value.lower() == 'true'
+                            secure_bool = value.lower() == "true"
                         else:
                             # 尝试直接转为布尔值
                             secure_bool = bool(value)
@@ -259,29 +261,38 @@ def initialize_milvus(plugin: "Mnemosyne"):
                     else:
                         connect_args[key] = auth_config[key]
                         # 不记录 password 和 token 的值
-                        if key not in ['password', 'token']:
+                        if key not in ["password", "token"]:
                             added_auth_params.append(f"{key}={auth_config[key]}")
                         else:
-                            added_auth_params.append(f"{key}=******") # 隐藏敏感值
+                            added_auth_params.append(f"{key}=******")  # 隐藏敏感值
 
             if added_auth_params:
-                init_logger.info(f"从配置中添加了标准连接参数: {', '.join(added_auth_params)}")
+                init_logger.info(
+                    f"从配置中添加了标准连接参数: {', '.join(added_auth_params)}"
+                )
             else:
                 init_logger.debug("未找到额外的认证或安全配置。")
 
-        else: # is_lite_mode is True
+        else:  # is_lite_mode is True
             # 检查并警告：如果在 Lite 模式下配置了不适用的参数
             auth_config = plugin.config.get("authentication", {})
-            ignored_keys = [k for k in ["user", "password", "token", "secure"] if k in auth_config and auth_config[k] is not None]
+            ignored_keys = [
+                k
+                for k in ["user", "password", "token", "secure"]
+                if k in auth_config and auth_config[k] is not None
+            ]
             if ignored_keys:
-                init_logger.warning(f"当前为 Milvus Lite 模式，配置中的以下认证/安全参数将被忽略: {ignored_keys}")
-
+                init_logger.warning(
+                    f"当前为 Milvus Lite 模式，配置中的以下认证/安全参数将被忽略: {ignored_keys}"
+                )
 
         # 5. 初始化 MilvusManager
         loggable_connect_args = {
-            k: v for k, v in connect_args.items() if k not in ['password', 'token']
+            k: v for k, v in connect_args.items() if k not in ["password", "token"]
         }
-        init_logger.info(f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}")
+        init_logger.info(
+            f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}"
+        )
 
         # 创建 MilvusManager 实例
         plugin.milvus_manager = MilvusManager(**connect_args)
@@ -304,9 +315,11 @@ def initialize_milvus(plugin: "Mnemosyne"):
         init_logger.debug("Milvus 初始化流程成功完成。")
 
     except Exception as e:
-        init_logger.error(f"Milvus 初始化或设置过程中发生错误: {e}", exc_info=True) # exc_info=True 会记录堆栈跟踪
+        init_logger.error(
+            f"Milvus 初始化或设置过程中发生错误: {e}", exc_info=True
+        )  # exc_info=True 会记录堆栈跟踪
         plugin.milvus_manager = None  # 确保在初始化失败时 manager 被设为 None
-        raise # 重新抛出异常，以便上层代码可以捕获并处理
+        raise  # 重新抛出异常，以便上层代码可以捕获并处理
 
 
 def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
@@ -431,62 +444,12 @@ def initialize_components(plugin: "Mnemosyne"):
         init_logger.error(f"消息计数器初始化失败:{e}")
         raise
 
-    # 2. 初始化 Embedding API
-    try:
-        # 检查必要的配置是否存在
-        try:
-            plugin.ebd = plugin.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
-            dim=plugin.ebd.get_dim()
-            modele_name=plugin.ebd.get_model_name()
-            if dim is not None and modele_name is not None:
-                plugin.config["embedding_dim"] = dim
-                plugin.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', modele_name)
-        except Exception as e:
-            init_logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
-            plugin.ebd = None
-
-        required_keys = ["embedding_model", "embedding_key"]
-        missing_keys = [key for key in required_keys if not plugin.config.get(key)]
-        
-        if plugin.ebd is None:
-            if missing_keys:
-                raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
-            embedding_service = plugin.config.get("embedding_service")
-
-            if embedding_service == "gemini":
-                plugin.ebd = GeminiEmbeddingAPI(
-                    model=plugin.config.get("embedding_model"),
-                    api_key=plugin.config.get("embedding_key"),
-                )
-                init_logger.info("已选择 Gemini 作为嵌入服务提供商")
-            elif embedding_service == "openai":
-                plugin.ebd = OpenAIEmbeddingAPI(
-                    model=plugin.config.get("embedding_model"),
-                    api_key=plugin.config.get("embedding_key"),
-                    base_url=plugin.config.get("embedding_url"),
-                )
-                init_logger.info("已选择 OpenAI 作为嵌入服务提供商")
-            else:
-                raise ValueError(f"不支持的嵌入服务提供商: {embedding_service}")
-
-        try:
-            plugin.ebd.test_connection()  # 假设此方法在失败时抛出异常
-            init_logger.info("Embedding API 初始化成功，连接测试通过。")
-        except AttributeError:
-            init_logger.warning(
-                "Embedding API 类没有 test_connection 方法，跳过连接测试。"
-            )
-        except Exception as conn_err:
-            init_logger.error(f"Embedding API 连接测试失败: {conn_err}", exc_info=True)
-            # 决定是否允许插件在 Embedding API 连接失败时继续运行
-            # raise ConnectionError(f"无法连接到 Embedding API: {conn_err}") from conn_err
-            init_logger.warning("将继续运行，但 Embedding 功能将不可用。")
-            plugin.ebd = None  # 明确设为 None 表示不可用
-
-    except Exception as e:
-        init_logger.error(f"初始化 Embedding API 失败: {e}", exc_info=True)
-        plugin.ebd = None  # 确保失败时 ebd 为 None
-        raise  # Embedding 是核心功能，失败则插件无法工作
+    # 2. 检查嵌入服务适配器状态
+    # 注意：嵌入服务现在在 on_astrbot_loaded 钩子中初始化
+    if plugin.embedding_adapter:
+        init_logger.info("嵌入服务适配器已在 on_astrbot_loaded 钩子中成功初始化")
+    else:
+        init_logger.warning("嵌入服务适配器尚未初始化，某些功能可能不可用")
 
     init_logger.debug("其他核心组件初始化完成。")
 
