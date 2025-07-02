@@ -47,63 +47,56 @@ def remove_mnemosyne_tags(
 ) -> List[Dict[str, str]]:
     """
     使用正则表达式去除LLM上下文中的<mnemosyne> </mnemosyne>标签对。
-    如果 contexts_memory_len > 0，则仅保留最后 contexts_memory_len 个标签对。
-
-    Args:
-        contents: 包含聊天记录的列表，每个元素是一个字典（如 {"role": "user", "content": "..."}）。
-        contexts_memory_len: 需要保留的最新的 <mnemosyne> 标签对数量。如果 <= 0，则移除所有标签对。
-
-    Returns:
-        清理或部分清理了 <mnemosyne> 标签对的聊天记录列表。
+    - contexts_memory_len > 0: 保留最新的N个标签对。
+    - contexts_memory_len == 0: 移除所有标签对。
+    - contexts_memory_len < 0: 保留所有标签对，不作任何删除。
     """
+    # --- 【核心修改】---
+    # 如果设置为负数，则直接返回原始列表，不做任何清理
+    if contexts_memory_len < 0:
+        return contents
+
     compiled_regex = re.compile(r"<Mnemosyne>.*?</Mnemosyne>", re.DOTALL)
     cleaned_contents: List[Dict[str, str]] = []
 
-    if contexts_memory_len <= 0:
-        # 移除所有标签
+    # 如果设置为0，则移除所有标签
+    if contexts_memory_len == 0:
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
-                # 强制转换为字符串
                 if not isinstance(original_text, str):
                     original_text = str(original_text)
                 cleaned_text = compiled_regex.sub("", original_text)
                 cleaned_contents.append({"role": "user", "content": cleaned_text})
             else:
                 cleaned_contents.append(content_item)
-    else:
+    else: # contexts_memory_len > 0
         # 找出所有用户消息中的所有 mnemosyne 块
         all_mnemosyne_blocks: List[str] = []
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
-                # 强制转换为字符串
                 if not isinstance(original_text, str):
                     original_text = str(original_text)
                 found_blocks = compiled_regex.findall(original_text)
                 all_mnemosyne_blocks.extend(found_blocks)
 
-        # 确定要保留的块
         blocks_to_keep: Set[str] = set(all_mnemosyne_blocks[-contexts_memory_len:])
 
-        # 定义替换函数
         def replace_logic(match: re.Match) -> str:
             block = match.group(0)
             return block if block in blocks_to_keep else ""
 
-        # 再次遍历并应用替换逻辑
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
-                # 只有当文本中确实包含需要处理的标签时才进行替换
-                # TODO 这里临时处理一下，如果类型是list，直接转换保留
                 if isinstance(original_text,list):
                     cleaned_contents.append({"role": "user", "content": original_text})
                 if compiled_regex.search(original_text):
                     cleaned_text = compiled_regex.sub(replace_logic, original_text)
                     cleaned_contents.append({"role": "user", "content": cleaned_text})
                 else:
-                    cleaned_contents.append(content_item)  # 无需处理，直接添加
+                    cleaned_contents.append(content_item)
             else:
                 cleaned_contents.append(content_item)
 
