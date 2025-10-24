@@ -126,18 +126,32 @@ class Mnemosyne(Star):
         # 是否需要刷新
         self.flush_after_insert = False
 
+        # S0 优化: 初始化状态跟踪
+        self._initialization_successful = False
+        self._initialized_components = []
+        
         self.logger.info("开始初始化 Mnemosyne 插件...")
         try:
+            # S0 优化: 扁平化异常处理，原子性初始化
             initialization.initialize_config_check(self)
-            initialization.initialize_config_and_schema(self)  # 初始化配置和schema
-            initialization.initialize_milvus(self)  # 初始化 Milvus
-            initialization.initialize_components(self)  # 初始化核心组件
+            self._initialized_components.append("config_check")
+            
+            initialization.initialize_config_and_schema(self)
+            self._initialized_components.append("config_schema")
+            
+            initialization.initialize_milvus(self)
+            self._initialized_components.append("milvus")
+            
+            initialization.initialize_components(self)
+            self._initialized_components.append("components")
+            
             # --- 启动后台总结检查任务 ---
             if self.context_manager and self.summary_time_threshold != float("inf"):
                 # 确保 context_manager 已初始化且阈值有效
                 self._summary_check_task = asyncio.create_task(
                     memory_operations._periodic_summarization_check(self)
                 )
+                self._initialized_components.append("background_task")
                 self.logger.info("后台总结检查任务已启动。")
             elif self.summary_time_threshold == float("inf"):
                 self.logger.info("基于时间的自动总结已禁用，不启动后台检查任务。")
@@ -146,12 +160,18 @@ class Mnemosyne(Star):
                     "Context manager 未初始化，无法启动后台总结检查任务。"
                 )
 
-            self.logger.info("Mnemosyne 插件核心组件初始化成功。")
+            # S0 优化: 标记初始化成功
+            self._initialization_successful = True
+            self.logger.info(f"Mnemosyne 插件初始化成功。已初始化组件: {', '.join(self._initialized_components)}")
+            
         except Exception as e:
+            # S0 优化: 初始化失败时进行资源清理
             self.logger.critical(
-                f"Mnemosyne 插件初始化过程中发生严重错误，插件可能无法正常工作: {e}",
+                f"Mnemosyne 插件初始化失败: {e}。已初始化的组件: {', '.join(self._initialized_components)}",
                 exc_info=True,
             )
+            self._cleanup_partial_initialization()
+            raise  # 重新抛出异常，让上层知道初始化失败
 
     # --- 事件处理钩子 (调用 memory_operations.py 中的实现) ---
     @filter.on_llm_request()
@@ -278,13 +298,49 @@ class Mnemosyne(Star):
         return
 
     # --- 插件生命周期方法 ---
+    def _cleanup_partial_initialization(self):
+        """
+        S0 优化: 清理部分初始化的资源
+        在初始化失败时调用，确保已分配的资源被正确释放
+        """
+        self.logger.warning("开始清理部分初始化的资源...")
+        
+        # 清理后台任务
+        if hasattr(self, '_summary_check_task') and self._summary_check_task and not self._summary_check_task.done():
+            self._summary_check_task.cancel()
+            self.logger.debug("已取消后台总结任务")
+        
+        # 清理消息计数器
+        if hasattr(self, 'msg_counter') and self.msg_counter:
+            try:
+                if hasattr(self.msg_counter, 'close'):
+                    self.msg_counter.close()
+                    self.logger.debug("已关闭消息计数器连接")
+            except Exception as e:
+                self.logger.error(f"清理消息计数器时出错: {e}")
+        
+        # 清理 Milvus 连接
+        if hasattr(self, 'milvus_manager') and self.milvus_manager:
+            try:
+                if self.milvus_manager.is_connected():
+                    self.milvus_manager.disconnect()
+                    self.logger.debug("已断开 Milvus 连接")
+            except Exception as e:
+                self.logger.error(f"清理 Milvus 连接时出错: {e}")
+        
+        self.logger.info("资源清理完成")
+    
     async def terminate(self):
-        """插件停止时的清理逻辑"""
+        """
+        S0 优化: 增强的插件停止清理逻辑
+        确保所有资源正确释放
+        """
         self.logger.info("Mnemosyne 插件正在停止...")
+        
         # --- 停止后台总结检查任务 ---
         if self._summary_check_task and not self._summary_check_task.done():
             self.logger.info("正在取消后台总结检查任务...")
-            self._summary_check_task.cancel()  # <--- 取消任务
+            self._summary_check_task.cancel()
             try:
                 # 等待任务实际取消完成，设置一个超时避免卡住
                 await asyncio.wait_for(self._summary_check_task, timeout=5.0)
@@ -293,10 +349,19 @@ class Mnemosyne(Star):
             except asyncio.TimeoutError:
                 self.logger.warning("等待后台总结检查任务取消超时。")
             except Exception as e:
-                # 捕获可能在任务取消过程中抛出的其他异常
                 self.logger.error(f"等待后台任务取消时发生错误: {e}", exc_info=True)
-        self._summary_check_task = None  # 清理任务引用
+        self._summary_check_task = None
 
+        # S0 优化: 清理消息计数器数据库连接
+        if self.msg_counter:
+            try:
+                if hasattr(self.msg_counter, 'close'):
+                    self.msg_counter.close()
+                    self.logger.info("消息计数器数据库连接已关闭。")
+            except Exception as e:
+                self.logger.error(f"关闭消息计数器时出错: {e}", exc_info=True)
+
+        # 清理 Milvus 连接
         if self.milvus_manager and self.milvus_manager.is_connected():
             try:
                 if (
@@ -316,5 +381,6 @@ class Mnemosyne(Star):
                 self.logger.error(f"停止插件时与 Milvus 交互出错: {e}", exc_info=True)
         else:
             self.logger.info("Milvus 管理器未初始化或已断开连接，无需断开。")
-        self.logger.info("Mnemosyne 插件已停止。")
+        
+        self.logger.info("Mnemosyne 插件已完全停止，所有资源已释放。")
         return

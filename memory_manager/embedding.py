@@ -2,12 +2,15 @@ import openai
 from google import genai
 from typing import List, Union
 import os
+import asyncio
 
 
 class OpenAIEmbeddingAPI:
     """
     OpenAI 兼容的 Embedding 服务封装类
     功能：支持通过环境变量或参数指定 API 密钥
+    
+    P0 优化: 添加异步方法支持，避免阻塞事件循环
     """
 
     def __init__(
@@ -30,7 +33,7 @@ class OpenAIEmbeddingAPI:
         self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def test_connection(self):
-        # 测试与embedding 的连接
+        """测试与 embedding 的连接"""
         try:
             response = self.client.embeddings.create(input=["你好"], model=self.model)
         except Exception as e:
@@ -40,7 +43,10 @@ class OpenAIEmbeddingAPI:
 
     def get_embeddings(self, texts: Union[str, List[str]]) -> List[List[float]]:
         """
-        获取文本嵌入向量
+        获取文本嵌入向量 (同步方法，保持向后兼容)
+        
+        注意：此方法会阻塞事件循环，建议在异步环境中使用 get_embeddings_async
+        
         :param texts: 输入文本（单条字符串或字符串列表）
         :return: 嵌入向量列表
         """
@@ -55,7 +61,25 @@ class OpenAIEmbeddingAPI:
             )
         return [data.embedding for data in response.data]
 
+    async def get_embeddings_async(self, texts: Union[str, List[str]]) -> List[List[float]]:
+        """
+        P0 优化: 异步获取文本嵌入向量，避免阻塞事件循环
+        
+        使用 run_in_executor 将同步 API 调用移到线程池执行
+        
+        :param texts: 输入文本（单条字符串或字符串列表）
+        :return: 嵌入向量列表
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.get_embeddings, texts)
+
+
 class GeminiEmbeddingAPI:
+    """
+    Gemini Embedding 服务封装类
+    
+    P0 优化: 添加异步方法支持，避免阻塞事件循环
+    """
 
     def __init__(self, model: str = "gemini-embedding-exp-03-07", api_key: str = None):
         """
@@ -70,7 +94,7 @@ class GeminiEmbeddingAPI:
         self.client = genai.Client(api_key=self.api_key)
 
     def test_connection(self):
-        # 测试与 Gemini 的连接
+        """测试与 Gemini 的连接"""
         try:
             response = self.client.models.embed_content(
                 model=self.model, contents="hello world"
@@ -82,7 +106,10 @@ class GeminiEmbeddingAPI:
 
     def get_embeddings(self, texts: Union[str, List[str]]) -> List[List[float]]:
         """
-        获取文本嵌入向量
+        获取文本嵌入向量 (同步方法，保持向后兼容)
+        
+        注意：此方法会阻塞事件循环，建议在异步环境中使用 get_embeddings_async
+        
         :param texts: 输入文本（单条字符串或字符串列表）
         :return: 嵌入向量列表
         """
@@ -98,3 +125,15 @@ class GeminiEmbeddingAPI:
             raise ConnectionError(
                 f"Gemini Embedding Connection error: {e}\n 请检查模型配置是否正确，是否可以访问"
             )
+
+    async def get_embeddings_async(self, texts: Union[str, List[str]]) -> List[List[float]]:
+        """
+        P0 优化: 异步获取文本嵌入向量，避免阻塞事件循环
+        
+        使用 run_in_executor 将同步 API 调用移到线程池执行
+        
+        :param texts: 输入文本（单条字符串或字符串列表）
+        :return: 嵌入向量列表
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.get_embeddings, texts)
