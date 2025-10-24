@@ -17,6 +17,7 @@ from pymilvus.exceptions import (
 # logger = logging.getLogger(__name__)
 
 from astrbot.core.log import LogManager
+from astrbot.api.star import StarTools
 
 logger = LogManager.GetLogger(log_name="Mnemosyne")
 
@@ -161,15 +162,13 @@ class MilvusManager:
                 f"提供的 lite_path '{path_input}' 未以 '.db' 结尾。假定为目录/基名，自动附加默认文件名 'mnemosyne_lite.db'。"
             )
 
-        # 计算基础目录（当前文件向上4层）
+        # 使用 AstrBot 标准 API 获取插件数据目录
         try:
-            current_file_path = pathlib.Path(__file__).resolve()
-            base_dir = current_file_path.parents[4]
-            default_data_dir = base_dir / "mnemosyne_data"
-        except IndexError:
-            # 如果无法获取上层目录，使用当前工作目录
+            default_data_dir = pathlib.Path(StarTools.get_data_dir())
+        except Exception as e:
+            # 如果无法获取标准数据目录，回退到当前工作目录
             default_data_dir = pathlib.Path.cwd() / "mnemosyne_data"
-            logger.warning(f"无法获取基础目录，使用当前工作目录: {default_data_dir}")
+            logger.warning(f"无法获取标准数据目录: {e}，使用当前工作目录: {default_data_dir}")
         
         # 安全验证路径，防止路径遍历攻击
         try:
@@ -219,32 +218,20 @@ class MilvusManager:
                 # raise # 重新抛出，让上层知道出错了
 
     def _get_default_lite_path(self) -> str:
-        """计算默认的 Milvus Lite 数据路径（当前文件上4层目录）。"""
+        """计算默认的 Milvus Lite 数据路径（使用 AstrBot 标准 API）。"""
         try:
-            # 获取定义 MilvusManager 类的文件的绝对路径
-            current_file_path = pathlib.Path(__file__).resolve()
-            # parents[0] 是当前目录, parents[1] 是上一层, ..., parents[3] 是上四层
-            base_dir = current_file_path.parents[4]
-            # 在该目录下创建一个子目录存放数据
-            default_dir = base_dir / "mnemosyne_data"
+            # 使用 AstrBot 标准 API 获取插件数据目录
+            default_dir = pathlib.Path(StarTools.get_data_dir())
             # 使用 _prepare_lite_path 来确保最终路径是带 .db 的文件路径
             default_path = self._prepare_lite_path(str(default_dir))
-            logger.info(f"动态计算的默认 Milvus Lite 路径为: '{default_path}'")
+            logger.info(f"使用标准数据目录的默认 Milvus Lite 路径: '{default_path}'")
             return default_path
-        except IndexError:
-            # 使用当前工作目录下的默认文件名
-            fallback_dir = "."
-            fallback_path = self._prepare_lite_path(fallback_dir)
-            logger.warning(
-                f"无法获取当前文件 '{__file__}' 的上4层目录结构，"
-                f"将使用当前工作目录下的 '{fallback_path}' 作为默认 Milvus Lite 路径。"
-            )
-            return fallback_path
         except Exception as e:
+            # 使用当前工作目录下的默认文件名作为回退方案
             fallback_dir = "."
             fallback_path = self._prepare_lite_path(fallback_dir)
             logger.error(
-                f"计算默认 Milvus Lite 路径时发生意外错误: {e}，"
+                f"获取标准数据目录时发生错误: {e}，"
                 f"将使用当前工作目录下的 '{fallback_path}' 作为默认路径。"
             )
             return fallback_path

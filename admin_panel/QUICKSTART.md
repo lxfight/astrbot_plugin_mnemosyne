@@ -10,7 +10,7 @@
 2. **查看日志**
    - 在日志中找到类似以下的输出：
    ```
-   🔒 已生成动态强 token 并保存到: data/admin_panel/.api_token
+   🔒 已生成动态强 token 并保存到: <插件数据目录>/admin_panel/.api_token
       Token: a1b2c3d4e5f6...（完整64字符）
    ```
 
@@ -50,7 +50,8 @@
 ## 📍 Token 位置
 
 ### 自动生成的 Token
-- 文件路径：`data/admin_panel/.api_token`
+- 文件路径：`<AstrBot插件数据目录>/admin_panel/.api_token`
+- 插件数据目录由 `StarTools.get_data_dir()` 获取
 - 可以用文本编辑器打开查看
 
 ### 自定义密钥
@@ -63,12 +64,14 @@
 
 **A: 自动生成的 Token**
 ```bash
-# Windows
-type data\admin_panel\.api_token
+# Windows（假设插件数据目录为 data/plugins/mnemosyne）
+type data\plugins_data\mnemosyne\admin_panel\.api_token
 
 # Linux/Mac
-cat data/admin_panel/.api_token
+cat data/plugins_data/mnemosyne/admin_panel/.api_token
 ```
+
+**提示**：实际路径取决于 AstrBot 的配置和 `StarTools.get_data_dir()` 的返回值。
 
 **A: 自定义密钥**
 - 查看配置文件中的 `admin_panel.api_key` 字段
@@ -76,7 +79,7 @@ cat data/admin_panel/.api_token
 ### Q: 如何重置 Token？
 
 **A: 自动生成的 Token**
-1. 删除文件：`data/admin_panel/.api_token`
+1. 删除文件：`<插件数据目录>/admin_panel/.api_token`
 2. 重启插件
 3. 在日志中查看新生成的 token
 

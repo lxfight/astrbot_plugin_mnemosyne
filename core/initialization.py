@@ -226,7 +226,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
         else:
             # --- 既没有 Lite 路径也没有标准地址 ---
             init_logger.warning(
-                "未配置 Milvus Lite 路径和标准 Milvus 地址。请检查配置。将使用默认配置/AstrBot/data/mnemosyne_data"
+                "未配置 Milvus Lite 路径和标准 Milvus 地址。将使用标准插件数据目录"
             )
 
         # 3. 添加通用参数 (对 Lite 和 Standard 都可能有效)

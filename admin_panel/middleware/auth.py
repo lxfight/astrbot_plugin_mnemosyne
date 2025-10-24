@@ -10,6 +10,7 @@ import secrets
 import hashlib
 from pathlib import Path
 from astrbot.core.log import LogManager
+from astrbot.api.star import StarTools
 
 logger = LogManager.GetLogger(log_name="AdminPanelAuth")
 
@@ -96,9 +97,12 @@ class APIKeyAuth:
         
         Args:
             api_key: API 密钥，如果为 None 或空则生成动态 token
-            data_dir: 数据目录路径，用于存储生成的 token
+            data_dir: 数据目录路径，用于存储生成的 token（使用 StarTools.get_data_dir() 获取）
         """
-        self.data_dir = data_dir or Path("./data/admin_panel")
+        # 使用 AstrBot 标准 API 获取插件数据目录
+        if data_dir is None:
+            data_dir = Path(StarTools.get_data_dir()) / "admin_panel"
+        self.data_dir = Path(data_dir)
         self.token_file = self.data_dir / ".api_token"
         self.api_key = None
         self.is_auto_generated = False

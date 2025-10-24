@@ -5,7 +5,9 @@
 """
 
 from typing import Dict, Any
+from pathlib import Path
 from astrbot.core.log import LogManager
+from astrbot.api.star import StarTools
 from ..services.monitoring_service import MonitoringService
 from ..middleware.auth import create_auth_middleware
 
@@ -25,9 +27,10 @@ def setup_monitoring_routes(app, plugin_instance):
     """
     monitoring_service = MonitoringService(plugin_instance)
     
-    # 创建认证中间件
+    # 创建认证中间件，使用标准的插件数据目录
     api_key = plugin_instance.config.get("admin_panel", {}).get("api_key")
-    auth = create_auth_middleware(api_key)
+    data_dir = Path(StarTools.get_data_dir()) / "admin_panel"
+    auth = create_auth_middleware(api_key, data_dir)
     
     # API: 获取系统状态（需要认证）
     @auth.require_auth

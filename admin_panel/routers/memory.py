@@ -6,7 +6,9 @@
 
 from typing import Dict, Any
 from datetime import datetime
+from pathlib import Path
 from astrbot.core.log import LogManager
+from astrbot.api.star import StarTools
 from ..services.memory_service import MemoryService
 from ..models.memory import MemorySearchRequest
 from ..middleware.auth import create_auth_middleware
@@ -24,9 +26,10 @@ def setup_memory_routes(app, plugin_instance):
     """
     memory_service = MemoryService(plugin_instance)
     
-    # 创建认证中间件
+    # 创建认证中间件，使用标准的插件数据目录
     api_key = plugin_instance.config.get("admin_panel", {}).get("api_key")
-    auth = create_auth_middleware(api_key)
+    data_dir = Path(StarTools.get_data_dir()) / "admin_panel"
+    auth = create_auth_middleware(api_key, data_dir)
     
     # API: 搜索记忆（需要认证）
     @auth.require_auth

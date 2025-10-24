@@ -5,6 +5,7 @@ from typing import Optional
 from pathlib import Path
 
 from astrbot.core.log import LogManager
+from astrbot.api.star import StarTools
 
 logging = LogManager.GetLogger(log_name="Message Counter")
 
@@ -53,27 +54,23 @@ class MessageCounter:
     def __init__(self, db_file: Optional[str] = None):
         """
         初始化消息计数器，使用 SQLite 数据库存储。
-        db_file 参数现在是可选的。如果为 None，则自动生成数据库文件路径。
+        db_file 参数现在是可选的。如果为 None，则自动使用 StarTools.get_data_dir() 生成路径。
 
         Args:
             db_file (str, optional): SQLite 数据库文件路径。
-                                     如果为 None，则自动生成路径。
+                                     如果为 None，则使用标准插件数据目录。
         
         Raises:
             ValueError: 如果提供的路径不安全（路径遍历攻击）
         """
-        # 获取当前文件所在目录，然后向上3层作为基础目录
-        current_file_path = Path(__file__).resolve()
-        base_dir = current_file_path.parents[3]  # 直接使用 parents 索引向上遍历
-        
-        # 构建默认的 mnemosyne_data 文件夹路径
-        default_data_dir = base_dir / "mnemosyne_data"
+        # 使用 AstrBot 标准 API 获取插件数据目录
+        default_data_dir = Path(StarTools.get_data_dir())
         
         if db_file is None:
-            # 使用默认路径
+            # 使用标准插件数据目录
             default_data_dir.mkdir(parents=True, exist_ok=True)
             self.db_file = str(default_data_dir / "message_counters.db")
-            logging.debug(f"使用默认数据库路径: {self.db_file}")
+            logging.debug(f"使用标准插件数据目录: {self.db_file}")
         else:
             # 安全验证用户提供的路径，防止路径遍历攻击
             try:
