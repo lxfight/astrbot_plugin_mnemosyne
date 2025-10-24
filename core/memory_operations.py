@@ -56,6 +56,11 @@ async def handle_query_memory(
         session_id = await plugin.context.conversation_manager.get_curr_conversation_id(
             event.unified_msg_origin
         )
+        
+        # B0 修复: 检查 session_id 是否为 None
+        if not session_id:
+            logger.error("无法获取 session_id，跳过记忆查询操作")
+            return
         # 判断是否在历史会话管理器中，如果不在，则进行初始化
         if session_id not in plugin.context_manager.conversations:
             plugin.context_manager.init_conv(session_id, req.contexts, event)
@@ -72,11 +77,17 @@ async def handle_query_memory(
         detailed_results = []
         try:
             # 1. 向量化用户查询
+            # P0 优化: 使用异步方法避免阻塞事件循环
             try:
-                query_embeddings = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: plugin.ebd.get_embeddings([req.prompt]),
-                )
+                # 检查是否有异步方法，如果有则优先使用
+                if hasattr(plugin.ebd, 'get_embeddings_async'):
+                    query_embeddings = await plugin.ebd.get_embeddings_async([req.prompt])
+                else:
+                    # 回退到使用 executor 的方式
+                    query_embeddings = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: plugin.ebd.get_embeddings([req.prompt]),
+                    )
             except ConnectionError as e:
                 logger.error(f"网络连接错误，无法获取 Embedding: {e}", exc_info=True)
                 return  # 明确返回，不继续执行
@@ -690,13 +701,17 @@ async def handle_summary_long_memory(
             return
 
         # 3. 获取总结文本的 Embedding
-        # embedding_vectors = plugin.ebd.get_embeddings(summary_text)
+        # P0 优化: 使用异步方法避免阻塞事件循环
         try:
-            embedding_vectors = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: plugin.ebd.get_embeddings([summary_text]),
-
-            )
+            # 检查是否有异步方法，如果有则优先使用
+            if hasattr(plugin.ebd, 'get_embeddings_async'):
+                embedding_vectors = await plugin.ebd.get_embeddings_async([summary_text])
+            else:
+                # 回退到使用 executor 的方式
+                embedding_vectors = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: plugin.ebd.get_embeddings([summary_text]),
+                )
         except (ConnectionError, ValueError, RuntimeError) as e:
             logger.error(
                 f"获取总结文本 Embedding 时出错: '{summary_text[:100]}...' - {e}",
@@ -722,10 +737,17 @@ async def handle_summary_long_memory(
 async def _periodic_summarization_check(plugin: "Mnemosyne"):
     """
     [后台任务] 定期检查并触发超时的会话总结
+    
+    S0 优化: 添加异常恢复机制，防止任务崩溃
     """
     logger.info(
         f"启动定期总结检查任务，检查间隔: {plugin.summary_check_interval}秒, 总结时间阈值: {plugin.summary_time_threshold}秒。"
     )
+    
+    # S0 优化: 异常恢复计数器
+    consecutive_errors = 0
+    max_consecutive_errors = 5
+    
     while True:
         try:
             await asyncio.sleep(plugin.summary_check_interval)  # <--- 等待指定间隔
@@ -785,12 +807,35 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                     logger.error(
                         f"检查或总结会话 {session_id} 时发生错误: {e}", exc_info=True
                     )
+            
+            # S0 优化: 成功完成一次循环，重置错误计数器
+            consecutive_errors = 0
 
         except asyncio.CancelledError:
             logger.info("定期总结检查任务被取消。")
             break  # 退出循环
         except Exception as e:
-            # 捕获循环本身的意外错误，防止任务完全停止
-            logger.error(f"定期总结检查任务主循环发生错误: {e}", exc_info=True)
-            # 可以选择在这里稍微等待一下，避免错误刷屏
-            await asyncio.sleep(plugin.summary_check_interval)
+            # S0 优化: 增强的异常处理和恢复机制
+            consecutive_errors += 1
+            logger.error(
+                f"定期总结检查任务主循环发生错误 (连续错误次数: {consecutive_errors}/{max_consecutive_errors}): {e}",
+                exc_info=True
+            )
+            
+            # 指数退避策略：等待时间随错误次数增加
+            backoff_time = min(plugin.summary_check_interval * (2 ** (consecutive_errors - 1)), 300)
+            logger.warning(f"将在 {backoff_time} 秒后重试后台总结任务...")
+            
+            try:
+                await asyncio.sleep(backoff_time)
+            except asyncio.CancelledError:
+                logger.info("等待重试期间任务被取消。")
+                break
+            
+            # 如果连续错误次数过多，记录严重警告但继续尝试
+            if consecutive_errors >= max_consecutive_errors:
+                logger.critical(
+                    f"后台总结任务已连续失败 {consecutive_errors} 次，系统将继续尝试但可能存在严重问题，请检查日志并考虑重启插件。"
+                )
+                # 重置计数器以避免无限增长
+                consecutive_errors = max_consecutive_errors - 1

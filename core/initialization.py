@@ -38,6 +38,8 @@ init_logger = LogManager.GetLogger(log_name="MnemosyneInit")
 def initialize_config_check(plugin: "Mnemosyne"):
     """
     一些必要的参数检查可以放在这里
+    
+    B0 修复: 修正配置验证逻辑
     """
     astrbot_config = plugin.context.get_config()
     # ------ 检查num_pairs ------
@@ -46,12 +48,14 @@ def initialize_config_check(plugin: "Mnemosyne"):
     astrbot_max_context_length = astrbot_config["provider_settings"][
         "max_context_length"
     ]
+    # B0 修复: 修正验证逻辑，num_pairs 应该直接与 astrbot_max_context_length 比较
+    # 因为 num_pairs 表示的是对话轮数，每轮包含用户和助手两条消息
     if (
-        astrbot_max_context_length > 0 and num_pairs > 2 * astrbot_max_context_length
-    ):  # 这里乘2是因为消息条数计算规则不同
+        astrbot_max_context_length > 0 and num_pairs > astrbot_max_context_length
+    ):
         raise ValueError(
-            f"\nnum_pairs不能大于astrbot的配置(最多携带对话数量(条))\
-                            配置的数量:{2 * astrbot_max_context_length}，否则可能会导致消息丢失。\n"
+            f"\nnum_pairs({num_pairs})不能大于astrbot的配置(最多携带对话数量(条))\
+                            配置的数量:{astrbot_max_context_length}，否则可能会导致消息丢失。\n"
         )
     elif astrbot_max_context_length == 0:
         raise ValueError(
