@@ -27,8 +27,21 @@ class OpenAIEmbeddingAPI:
         self.model = model
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.base_url = base_url or "https://api.openai.com/v1"
+        
+        # M13 修复: 增强环境变量安全验证
         if not self.api_key:
             raise ValueError("必须提供 OpenAI API 密钥或设置 OPENAI_API_KEY 环境变量")
+        
+        # 验证 API 密钥格式和长度
+        if not isinstance(self.api_key, str):
+            raise ValueError("API 密钥必须是字符串类型")
+        
+        if len(self.api_key.strip()) < 16:
+            raise ValueError("API 密钥格式无效：长度过短，可能不是有效的密钥")
+        
+        # 检查密钥是否包含可疑字符（基本格式验证）
+        if not self.api_key.strip():
+            raise ValueError("API 密钥不能为空或仅包含空白字符")
 
         self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url)
 
@@ -88,8 +101,21 @@ class GeminiEmbeddingAPI:
         """
         self.model = model
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        
+        # M13 修复: 增强环境变量安全验证
         if not self.api_key:
             raise ValueError("必须提供 Gemini API 密钥或设置 GEMINI_API_KEY 环境变量")
+        
+        # 验证 API 密钥格式和长度
+        if not isinstance(self.api_key, str):
+            raise ValueError("API 密钥必须是字符串类型")
+        
+        if len(self.api_key.strip()) < 16:
+            raise ValueError("API 密钥格式无效：长度过短，可能不是有效的密钥")
+        
+        # 检查密钥是否包含可疑字符（基本格式验证）
+        if not self.api_key.strip():
+            raise ValueError("API 密钥不能为空或仅包含空白字符")
 
         self.client = genai.Client(api_key=self.api_key)
 

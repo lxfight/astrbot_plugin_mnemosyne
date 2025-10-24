@@ -3,6 +3,8 @@ import pathlib
 from typing import List, Dict, Optional, Any, Union
 from urllib.parse import urlparse
 import time
+import sys
+from pathlib import Path
 
 from pymilvus import connections, utility, CollectionSchema, DataType, Collection
 from pymilvus.exceptions import (
@@ -17,6 +19,34 @@ from pymilvus.exceptions import (
 from astrbot.core.log import LogManager
 
 logger = LogManager.GetLogger(log_name="Mnemosyne")
+
+# 导入安全工具
+current_dir = Path(__file__).resolve().parent
+parent_dir = current_dir.parent.parent
+if str(parent_dir) not in sys.path:
+    sys.path.insert(0, str(parent_dir))
+
+try:
+    from core.security_utils import validate_safe_path
+except ImportError:
+    # 如果导入失败，定义一个基本的路径验证函数
+    def validate_safe_path(file_path: str, base_dir: str, allow_creation: bool = True) -> Path:
+        """基本的路径验证函数（后备方案）"""
+        base = Path(base_dir).resolve()
+        if Path(file_path).is_absolute():
+            target = Path(file_path).resolve()
+        else:
+            target = (base / file_path).resolve()
+        
+        try:
+            target.relative_to(base)
+        except ValueError:
+            raise ValueError(f"路径遍历检测: 路径试图访问基础目录之外的位置")
+        
+        if allow_creation and not target.parent.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+        
+        return target
 
 
 class MilvusManager:
@@ -108,9 +138,19 @@ class MilvusManager:
         """
         准备 Milvus Lite 路径。如果输入路径不是以 .db 结尾，
         则假定为目录，并在其后附加默认文件名。
-        返回绝对路径。
+        返回安全验证后的绝对路径。
+        
+        Args:
+            path_input: 输入的路径
+            
+        Returns:
+            str: 安全验证后的绝对路径
+            
+        Raises:
+            ValueError: 如果路径不安全（路径遍历攻击）
         """
-        path_input = os.path.normpath(path_input)  # 标准化路径分隔符
+        # 标准化路径分隔符
+        path_input = os.path.normpath(path_input)
         _, ext = os.path.splitext(path_input)
 
         final_path = path_input
@@ -121,10 +161,29 @@ class MilvusManager:
                 f"提供的 lite_path '{path_input}' 未以 '.db' 结尾。假定为目录/基名，自动附加默认文件名 'mnemosyne_lite.db'。"
             )
 
-        # 确保返回的是绝对路径，避免相对路径带来的混淆
-        absolute_path = os.path.abspath(final_path)
-        logger.debug(f"最终处理后的 Milvus Lite 绝对路径: '{absolute_path}'")
-        return absolute_path
+        # 计算基础目录（当前文件向上4层）
+        try:
+            current_file_path = pathlib.Path(__file__).resolve()
+            base_dir = current_file_path.parents[4]
+            default_data_dir = base_dir / "mnemosyne_data"
+        except IndexError:
+            # 如果无法获取上层目录，使用当前工作目录
+            default_data_dir = pathlib.Path.cwd() / "mnemosyne_data"
+            logger.warning(f"无法获取基础目录，使用当前工作目录: {default_data_dir}")
+        
+        # 安全验证路径，防止路径遍历攻击
+        try:
+            safe_path = validate_safe_path(
+                final_path,
+                str(default_data_dir),
+                allow_creation=True
+            )
+            absolute_path = str(safe_path)
+            logger.debug(f"路径安全验证通过，最终处理后的 Milvus Lite 绝对路径: '{absolute_path}'")
+            return absolute_path
+        except ValueError as e:
+            logger.error(f"Milvus Lite 路径安全验证失败: {e}")
+            raise ValueError(f"不安全的 Milvus Lite 路径: {path_input}。{e}") from e
 
     def _configure_connection_mode(self):
         """根据输入参数决定连接模式并调用相应的配置方法。"""
@@ -656,11 +715,31 @@ class MilvusManager:
             return None  # 或者返回一个空的 MutationResult
         logger.info(f"向集合 '{collection_name}' 插入 {len(data)} 条数据...")
         try:
-            # 确保 create_time 字段存在且为 INT64 时间戳
+            # M20 修复: 改进时间戳处理，避免覆盖用户提供的有效时间戳
             current_timestamp = int(time.time())
             for item in data:
-                if isinstance(item, dict) and "create_time" not in item:
-                    item["create_time"] = current_timestamp
+                if isinstance(item, dict):
+                    # 检查是否已有 create_time 字段
+                    if "create_time" not in item:
+                        # 字段不存在，添加当前时间戳
+                        item["create_time"] = current_timestamp
+                    else:
+                        # 字段存在，验证其格式是否有效
+                        existing_time = item.get("create_time")
+                        if not isinstance(existing_time, (int, float)):
+                            # 无效格式，记录警告并替换
+                            logger.warning(
+                                f"实体包含无效的 create_time 格式 (类型: {type(existing_time).__name__})，"
+                                f"将使用当前时间戳替换"
+                            )
+                            item["create_time"] = current_timestamp
+                        elif existing_time <= 0:
+                            # 时间戳为负数或零，无效
+                            logger.warning(
+                                f"实体包含无效的 create_time 值 ({existing_time})，将使用当前时间戳替换"
+                            )
+                            item["create_time"] = current_timestamp
+                        # else: 用户提供的时间戳有效，保留不变
                 # Add more checks if needed (e.g., for List[List])
 
             mutation_result = collection.insert(

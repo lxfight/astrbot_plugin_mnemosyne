@@ -2,10 +2,41 @@ import sqlite3
 import os
 import threading
 from typing import Optional
+from pathlib import Path
 
 from astrbot.core.log import LogManager
 
 logging = LogManager.GetLogger(log_name="Message Counter")
+
+# 导入安全工具
+import sys
+# 添加父目录到路径以便导入 core 模块
+current_dir = Path(__file__).resolve().parent
+parent_dir = current_dir.parent
+if str(parent_dir) not in sys.path:
+    sys.path.insert(0, str(parent_dir))
+
+try:
+    from core.security_utils import validate_safe_path
+except ImportError:
+    # 如果导入失败，定义一个基本的路径验证函数
+    def validate_safe_path(file_path: str, base_dir: str, allow_creation: bool = True) -> Path:
+        """基本的路径验证函数（后备方案）"""
+        base = Path(base_dir).resolve()
+        if Path(file_path).is_absolute():
+            target = Path(file_path).resolve()
+        else:
+            target = (base / file_path).resolve()
+        
+        try:
+            target.relative_to(base)
+        except ValueError:
+            raise ValueError(f"路径遍历检测: 路径试图访问基础目录之外的位置")
+        
+        if allow_creation and not target.parent.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+        
+        return target
 
 
 class MessageCounter:
@@ -27,26 +58,36 @@ class MessageCounter:
         Args:
             db_file (str, optional): SQLite 数据库文件路径。
                                      如果为 None，则自动生成路径。
+        
+        Raises:
+            ValueError: 如果提供的路径不安全（路径遍历攻击）
         """
+        # 获取当前文件所在目录，然后向上3层作为基础目录
+        current_file_path = Path(__file__).resolve()
+        base_dir = current_file_path.parents[3]  # 直接使用 parents 索引向上遍历
+        
+        # 构建默认的 mnemosyne_data 文件夹路径
+        default_data_dir = base_dir / "mnemosyne_data"
+        
         if db_file is None:
-            # 使用 pathlib 进行更安全的路径处理
-            from pathlib import Path
-            
-            # 获取当前文件所在目录，然后向上3层
-            current_file_path = Path(__file__).resolve()
-            base_dir = current_file_path.parents[3]  # 直接使用 parents 索引向上遍历
-
-            # 构建 mnemosyne_data 文件夹路径
-            data_dir = base_dir / "mnemosyne_data"
-
-            # 确保 mnemosyne_data 文件夹存在，如果不存在则创建
-            os.makedirs(
-                data_dir, exist_ok=True
-            )  # exist_ok=True 表示如果目录已存在，不会抛出异常
-
-            self.db_file = os.path.join(data_dir, "message_counters.db")
+            # 使用默认路径
+            default_data_dir.mkdir(parents=True, exist_ok=True)
+            self.db_file = str(default_data_dir / "message_counters.db")
+            logging.debug(f"使用默认数据库路径: {self.db_file}")
         else:
-            self.db_file = db_file  # 如果用户显式提供了 db_file，则使用用户提供的路径
+            # 安全验证用户提供的路径，防止路径遍历攻击
+            try:
+                # 验证路径安全性
+                safe_path = validate_safe_path(
+                    db_file,
+                    str(default_data_dir),
+                    allow_creation=True
+                )
+                self.db_file = str(safe_path)
+                logging.info(f"使用用户指定的安全数据库路径: {self.db_file}")
+            except ValueError as e:
+                logging.error(f"数据库路径验证失败: {e}")
+                raise ValueError(f"不安全的数据库路径: {db_file}。{e}") from e
 
         # P0 优化: 持久连接和线程安全
         self._connection: Optional[sqlite3.Connection] = None

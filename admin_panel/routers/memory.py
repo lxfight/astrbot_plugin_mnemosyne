@@ -179,11 +179,39 @@ def setup_memory_routes(app, plugin_instance):
         """
         try:
             memory_id = request.get('memory_id')
+            
+            # M15 修复: 增强 memory_id 输入验证
             if not memory_id:
                 return {
                     "success": False,
                     "error": "缺少 memory_id 参数"
                 }
+            
+            # 验证 memory_id 类型
+            if not isinstance(memory_id, (str, int)):
+                return {
+                    "success": False,
+                    "error": f"memory_id 参数类型无效，必须是字符串或整数，当前类型: {type(memory_id).__name__}"
+                }
+            
+            # 转换为字符串并验证
+            memory_id_str = str(memory_id).strip()
+            if not memory_id_str:
+                return {
+                    "success": False,
+                    "error": "memory_id 不能为空"
+                }
+            
+            # 验证格式（只允许数字、字母、下划线、连字符）
+            import re
+            if not re.match(r'^[a-zA-Z0-9_-]+$', memory_id_str):
+                return {
+                    "success": False,
+                    "error": "memory_id 格式无效，只允许字母、数字、下划线和连字符"
+                }
+            
+            # 使用验证后的 memory_id
+            memory_id = memory_id_str
             
             success = await memory_service.delete_memory(memory_id)
             

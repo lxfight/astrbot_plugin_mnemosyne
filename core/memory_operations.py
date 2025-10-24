@@ -27,6 +27,11 @@ from .constants import (
     DEFAULT_MILVUS_TIMEOUT,
     DEFAULT_PERSONA_ON_NONE,
 )
+from .security_utils import (
+    validate_session_id,
+    validate_personality_id,
+    safe_build_milvus_expression,
+)
 
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
@@ -57,9 +62,9 @@ async def handle_query_memory(
             event.unified_msg_origin
         )
         
-        # B0 修复: 检查 session_id 是否为 None
-        if not session_id:
-            logger.error("无法获取 session_id，跳过记忆查询操作")
+        # M12 修复: 加强 session_id 空值检查，确保类型和内容都有效
+        if session_id is None or not isinstance(session_id, str) or not session_id.strip():
+            logger.error(f"无法获取有效的 session_id (值: {session_id}, 类型: {type(session_id).__name__})，跳过记忆查询操作")
             return
         # 判断是否在历史会话管理器中，如果不在，则进行初始化
         if session_id not in plugin.context_manager.conversations:
@@ -247,9 +252,22 @@ async def _check_and_trigger_summary(
             context, plugin.config.get("num_pairs", 10)
         )
 
-        asyncio.create_task(
+        # M19 修复: 为后台任务添加异常处理回调
+        task = asyncio.create_task(
             handle_summary_long_memory(plugin, persona_id, session_id, history_contents)
         )
+        
+        def task_done_callback(t: asyncio.Task):
+            """后台任务完成时的回调，用于捕获未处理的异常"""
+            try:
+                # 获取任务结果，如果有异常会在这里抛出
+                t.result()
+            except asyncio.CancelledError:
+                logger.info(f"总结任务被取消 (session: {session_id})")
+            except Exception as e:
+                logger.error(f"后台总结任务执行失败 (session: {session_id}): {e}", exc_info=True)
+        
+        task.add_done_callback(task_done_callback)
         logger.info("总结历史对话任务已提交到后台执行。")
         plugin.msg_counter.reset_counter(session_id)
 
@@ -275,16 +293,37 @@ async def _perform_milvus_search(
     # logger = plugin.logger
     # 防止没有过滤条件引发的潜在错误
     filters = ["memory_id > 0"]
+    
     if session_id:
-        filters.append(f'session_id == "{session_id}"')
+        # 安全检查：验证 session_id 格式
+        if not validate_session_id(session_id):
+            logger.error(f"session_id 格式验证失败: {session_id}")
+            return None
+        
+        # 使用安全的表达式构建方法
+        try:
+            session_filter = safe_build_milvus_expression('session_id', session_id, '==')
+            filters.append(session_filter)
+        except ValueError as e:
+            logger.error(f"构建 session_id 过滤表达式失败: {e}")
+            return None
     else:
         logger.warning("无法获取当前 session_id，将不按 session 过滤记忆！")
 
     use_personality_filtering = plugin.config.get("use_personality_filtering", False)
     effective_persona_id_for_filter = persona_id
     if use_personality_filtering and effective_persona_id_for_filter:
-        filters.append(f'personality_id == "{effective_persona_id_for_filter}"')
-        logger.debug(f"将使用人格 '{effective_persona_id_for_filter}' 过滤记忆。")
+        # 安全检查：验证 personality_id 格式
+        if not validate_personality_id(effective_persona_id_for_filter):
+            logger.warning(f"personality_id 格式验证失败: {effective_persona_id_for_filter}，跳过人格过滤")
+        else:
+            # 使用安全的表达式构建方法
+            try:
+                persona_filter = safe_build_milvus_expression('personality_id', effective_persona_id_for_filter, '==')
+                filters.append(persona_filter)
+                logger.debug(f"将使用人格 '{effective_persona_id_for_filter}' 过滤记忆。")
+            except ValueError as e:
+                logger.error(f"构建 personality_id 过滤表达式失败: {e}")
     elif use_personality_filtering:
         logger.debug("启用了人格过滤，但当前无有效人格 ID，不按人格过滤。")
 

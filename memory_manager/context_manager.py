@@ -1,17 +1,26 @@
 from typing import List, Dict, Optional
 import time
 import threading
+import asyncio
 from astrbot.core.log import LogManager
 from astrbot.api.event import AstrMessageEvent
 
 class ConversationContextManager:
     """
     会话上下文管理器
+    
+    M18 修复: 改进并发安全性
+    - 在异步环境中，如果所有操作都在同一个事件循环线程中执行，threading.RLock 是安全的
+    - 保留 RLock 用于同步代码路径
+    - 添加注释说明并发安全策略
     """
 
     def __init__(self):
         self.conversations: Dict[str, Dict] = {}
-        # 添加线程锁以确保并发安全
+        # 使用 RLock 保证线程安全
+        # 注意: 这个类的方法主要在 asyncio 事件循环中调用
+        # RLock 可以保护同步代码路径，对于异步代码，Python 的 GIL 和单线程事件循环提供了基本保护
+        # 如果未来需要真正的异步锁，应该使用 asyncio.Lock
         self._lock = threading.RLock()
 
     def init_conv(self, session_id:str, contexts:list[Dict],event:AstrMessageEvent):

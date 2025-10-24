@@ -19,7 +19,7 @@
         "hint":"支持支持格式如:http://localhost:19530，https://localhost:19530，localhost:19530",
         "obvious_hint":true,
         "default":"",
-        "pattern":"^(https?://)?[a-zA-Z0-9.-]+:[0-9]+$",
+        "pattern":"^(https?://)?[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*:[0-9]{1,5}$",
         "minLength":0
     },
     "authentication":{
@@ -158,5 +158,22 @@
         "default":"请基于以下对话内容生成一段连贯的总结性文字，要求：1. 使用单段自然语言表述，不加序号或分点；2. 聚焦提取核心要素，包括但不限于参与者身份（姓名/角色）、核心事件、关键时间节点、特殊需求、争议点及解决方案；3. 保留涉及金额/数量/规格等量化信息；4.不输出多余的解释性内容；5. 用简洁书面语整合信息，确保信息完整准确。注意：避免添加解释性内容，仅客观呈现对话要素的整合结果。6.以AI的第一人称视角记录信息",
         "minLength":10,
         "maxLength":1000
+    },
+    "admin_panel":{
+        "description":"管理面板安全配置",
+        "type":"object",
+        "hint":"配置管理面板的访问控制和安全设置",
+        "obvious_hint":true,
+        "items":{
+            "api_key":{
+                "description":"管理面板 API 密钥",
+                "type":"string",
+                "hint":"用于保护管理面板 API 的访问密钥。留空则禁用认证（不推荐）。建议使用强密码或随机生成的密钥",
+                "obvious_hint":true,
+                "default":"",
+                "minLength":0,
+                "maxLength":128
+            }
+        }
     }
 }

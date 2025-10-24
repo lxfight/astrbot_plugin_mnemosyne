@@ -88,16 +88,22 @@ class Mnemosyne(Star):
         if self.ebd is None:
             try:
                 embedding_service = config.get("embedding_service", "openai").lower()
+                embedding_key = config.get("embedding_key")
+                
+                # 安全检查：避免记录敏感信息
+                if not embedding_key:
+                    self.logger.warning("未配置 embedding_key，嵌入服务可能无法正常工作")
+                
                 if embedding_service == "gemini":
                     self.ebd = GeminiEmbeddingAPI(
                         model=config.get("embedding_model", "gemini-embedding-exp-03-07"),
-                        api_key=config.get("embedding_key"),
+                        api_key=embedding_key,
                     )
                     self.logger.info("已选择 Gemini 作为嵌入服务提供商")
                 else:
                     self.ebd = OpenAIEmbeddingAPI(
                         model=config.get("embedding_model", "text-embedding-3-small"),
-                        api_key=config.get("embedding_key"),
+                        api_key=embedding_key,
                         base_url=config.get("embedding_url"),
                     )
                     self.logger.info("已选择 OpenAI 作为嵌入服务提供商")
@@ -181,7 +187,39 @@ class Mnemosyne(Star):
         try:
             if not self.provider:
                 provider_id = self.config.get("LLM_providers", "")
-                self.provider = self.context.get_provider_by_id(provider_id)
+                
+                # 验证 provider_id 的有效性
+                if not provider_id:
+                    self.logger.warning("LLM_providers 未配置，尝试使用当前正在使用的 provider")
+                    try:
+                        self.provider = self.context.get_using_provider()
+                        if not self.provider:
+                            self.logger.error("无法获取任何可用的 LLM provider")
+                            return
+                    except Exception as e:
+                        self.logger.error(f"获取当前使用的 provider 失败: {e}")
+                        return
+                else:
+                    # 验证 provider_id 格式
+                    import re
+                    if not re.match(r'^[a-zA-Z0-9_-]+$', provider_id):
+                        self.logger.error(f"provider_id 格式无效: {provider_id}")
+                        return
+                    
+                    # 尝试获取指定的 provider
+                    try:
+                        self.provider = self.context.get_provider_by_id(provider_id)
+                        if not self.provider:
+                            self.logger.error(f"无法找到 provider_id '{provider_id}' 对应的 provider")
+                            # 回退到使用当前 provider
+                            self.logger.warning("回退到使用当前正在使用的 provider")
+                            self.provider = self.context.get_using_provider()
+                            if not self.provider:
+                                self.logger.error("回退失败，无法获取任何可用的 LLM provider")
+                                return
+                    except Exception as e:
+                        self.logger.error(f"获取 provider_id '{provider_id}' 时发生错误: {e}")
+                        return
 
             await memory_operations.handle_query_memory(self, event, req)
         except Exception as e:

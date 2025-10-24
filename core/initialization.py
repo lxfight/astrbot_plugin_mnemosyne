@@ -20,6 +20,7 @@ from .constants import (
     DEFAULT_OUTPUT_FIELDS,
 )
 from .tools import parse_address
+from .security_utils import create_safe_error_response
 
 from ..memory_manager.message_counter import MessageCounter
 from ..memory_manager.vector_db.milvus_manager import MilvusManager
@@ -53,14 +54,18 @@ def initialize_config_check(plugin: "Mnemosyne"):
     if (
         astrbot_max_context_length > 0 and num_pairs > astrbot_max_context_length
     ):
+        # 安全处理：不在异常消息中暴露具体配置值
+        error_detail = f"num_pairs({num_pairs})不能大于astrbot的配置(最多携带对话数量):{astrbot_max_context_length}"
+        init_logger.error(error_detail)
         raise ValueError(
-            f"\nnum_pairs({num_pairs})不能大于astrbot的配置(最多携带对话数量(条))\
-                            配置的数量:{astrbot_max_context_length}，否则可能会导致消息丢失。\n"
+            "配置错误：num_pairs 的值超过了 AstrBot 的最大上下文长度限制。请检查配置文件并调整 num_pairs 的值。"
         )
     elif astrbot_max_context_length == 0:
+        # 安全处理：不在异常消息中暴露具体配置值
+        error_detail = f"astrbot 的最大上下文长度配置值为 {astrbot_max_context_length}，必须大于0"
+        init_logger.error(error_detail)
         raise ValueError(
-            f"\nastrbot的配置(最多携带对话数量(条))\
-                            配置的数量:{astrbot_max_context_length}必须要大于0，否则Mnemosyne插件将无法正常运行\n"
+            "配置错误：AstrBot 的最大上下文长度必须大于0。请检查 AstrBot 配置文件中的 max_context_length 设置。"
         )
     # ------ num_pairs ------
 
@@ -70,9 +75,11 @@ def initialize_config_check(plugin: "Mnemosyne"):
         astrbot_max_context_length > 0
         and contexts_memory_len > astrbot_max_context_length
     ):
+        # 安全处理：不在异常消息中暴露具体配置值
+        error_detail = f"contexts_memory_len({contexts_memory_len})不能大于astrbot的配置:{astrbot_max_context_length}"
+        init_logger.error(error_detail)
         raise ValueError(
-            f"\ncontexts_memory_len不能大于astrbot的配置(最多携带对话数量(条))\
-                            配置的数量:{astrbot_max_context_length}。\n"
+            "配置错误：contexts_memory_len 的值超过了 AstrBot 的最大上下文长度限制。请检查配置文件。"
         )
     # ------ contexts_memory_len ------
 

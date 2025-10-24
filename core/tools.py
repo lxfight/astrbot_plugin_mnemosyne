@@ -90,18 +90,26 @@ def remove_mnemosyne_tags(
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
                 
-                # --- 【核心修改】将独立的 if 改为 elif，形成互斥逻辑 ---
+                # M14 修复: 改进逻辑流程，确保正确处理各种情况
+                # 使用 elif 形成互斥逻辑，避免重复处理
                 if isinstance(original_text, list):
-                    # 1. 如果是列表，直接添加，然后处理下一个条目
+                    # 1. 如果内容是列表（多模态消息），直接保留原样
                     cleaned_contents.append({"role": "user", "content": original_text})
-                elif compiled_regex.search(original_text):
-                    # 2. 否则，如果内容匹配正则，则进行清理后添加
-                    cleaned_text = compiled_regex.sub(replace_logic, original_text)
-                    cleaned_contents.append({"role": "user", "content": cleaned_text})
+                elif isinstance(original_text, str):
+                    # 2. 如果内容是字符串，检查是否需要清理标签
+                    if compiled_regex.search(original_text):
+                        # 内容包含标签，进行清理
+                        cleaned_text = compiled_regex.sub(replace_logic, original_text)
+                        cleaned_contents.append({"role": "user", "content": cleaned_text})
+                    else:
+                        # 内容不包含标签，直接保留
+                        cleaned_contents.append(content_item)
                 else:
-                    # 3. 否则 (既不是列表，也不匹配正则)，直接添加原始条目
+                    # 3. 其他类型（不应该出现），记录警告并保留原始内容
+                    logger.warning(f"遇到意外的 content 类型: {type(original_text).__name__}，将保留原始内容")
                     cleaned_contents.append(content_item)
             else:
+                # 非 user 角色的消息，直接保留
                 cleaned_contents.append(content_item)
 
     return cleaned_contents

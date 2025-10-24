@@ -12,6 +12,7 @@ from astrbot.api.event import AstrMessageEvent
 
 # 导入必要的模块和常量
 from .constants import PRIMARY_FIELD_NAME, MAX_TOTAL_FETCH_RECORDS
+from .security_utils import validate_session_id, safe_build_milvus_expression
 
 # 类型提示
 if TYPE_CHECKING:
@@ -125,7 +126,16 @@ async def list_records_cmd_impl(
 
     target_collection = collection_name or self.collection_name
 
-    # 对用户输入的 limit 进行验证
+    # M16 修复: 增强 limit 参数类型和范围验证
+    try:
+        # 确保 limit 是整数类型
+        limit = int(limit)
+    except (ValueError, TypeError) as e:
+        yield event.plain_result(f"⚠️ limit 参数必须是有效的整数，当前值: {limit}")
+        self.logger.warning(f"用户提供了无效的 limit 参数: {limit} (类型: {type(limit).__name__})")
+        return
+    
+    # 验证范围
     if limit <= 0 or limit > 50:
         # 限制用户请求的显示数量
         yield event.plain_result("⚠️ 显示数量 (limit) 必须在 1 到 50 之间。")
@@ -138,8 +148,20 @@ async def list_records_cmd_impl(
 
         # 构建查询表达式 - 仅基于 session_id (如果需要)
         if session_id:
-            # 如果有会话ID，则按会话ID过滤
-            expr = f'session_id in ["{session_id}"]'
+            # 安全检查：验证 session_id 格式
+            if not validate_session_id(session_id):
+                yield event.plain_result("⚠️ 会话 ID 格式无效，无法查询记录。")
+                self.logger.warning(f"尝试使用无效的 session_id 查询记录: {session_id}")
+                return
+            
+            # 如果有会话ID，则按会话ID过滤（使用安全的表达式构建）
+            try:
+                expr = safe_build_milvus_expression('session_id', session_id, 'in')
+            except ValueError as e:
+                yield event.plain_result(f"⚠️ 构建查询表达式失败: {e}")
+                self.logger.error(f"构建查询表达式时出错: {e}")
+                return
+            
             self.logger.info(
                 f"将按会话 ID '{session_id}' 过滤并查询所有相关记录 (上限 {MAX_TOTAL_FETCH_RECORDS} 条)。"
             )
@@ -304,6 +326,12 @@ async def delete_session_memory_cmd_impl(
         return
 
     session_id_to_delete = session_id.strip().strip('"`')
+    
+    # 安全检查：验证 session_id 格式，防止SQL注入
+    if not validate_session_id(session_id_to_delete):
+        yield event.plain_result("⚠️ 会话 ID 格式无效，无法执行删除操作。")
+        self.logger.warning(f"尝试删除无效的 session_id: {session_id_to_delete}")
+        return
 
     if confirm != "--confirm":
         yield event.plain_result(
@@ -316,7 +344,15 @@ async def delete_session_memory_cmd_impl(
 
     try:
         collection_name = self.collection_name
-        expr = f'session_id == "{session_id_to_delete}"'
+        
+        # 使用安全的表达式构建方法，防止注入
+        try:
+            expr = safe_build_milvus_expression('session_id', session_id_to_delete, '==')
+        except ValueError as e:
+            yield event.plain_result(f"⚠️ 构建删除表达式失败: {e}")
+            self.logger.error(f"构建删除表达式时出错: {e}")
+            return
+        
         sender_id = event.get_sender_id()
         self.logger.warning(
             f"管理员 {sender_id} 请求删除会话 '{session_id_to_delete}' 的所有记忆 (集合: {collection_name}, 表达式: '{expr}') (确认执行)"
