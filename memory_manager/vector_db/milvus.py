@@ -1,3 +1,14 @@
+"""
+废弃警告: 此模块已被弃用
+请使用新的 MilvusVectorDB 适配器类，位于 memory_manager.vector_db.milvus_adapter
+迁移指南:
+1. 将 from memory_manager.vector_db.milvus import MilvusDatabase
+   改为 from memory_manager.vector_db.milvus_adapter import MilvusVectorDB
+2. 将 MilvusDatabase(host, port) 改为 MilvusVectorDB(host=host, port=port)
+3. 新适配器提供更好的错误处理、连接管理和性能优化
+"""
+
+import warnings
 from pymilvus import (
     connections,
     FieldSchema,
@@ -15,17 +26,35 @@ from ...memory_manager.vector_db_base import VectorDatabase
 from astrbot.core.log import LogManager
 
 
+def _deprecated_warning():
+    """发出废弃警告"""
+    warnings.warn(
+        "MilvusDatabase 类已被弃用，请使用 MilvusVectorDB 适配器类 "
+        "(位于 memory_manager.vector_db.milvus_adapter)。"
+        "详见模块顶部的迁移指南。",
+        DeprecationWarning,
+        stacklevel=3
+    )
+
+
 class MilvusDatabase(VectorDatabase):
     """
     Milvus 向量数据库实现
     """
 
     def __init__(self, host, port):
+        _deprecated_warning()  # 发出废弃警告
+        
         self.collections = {}  # 用于缓存已创建的集合实例
         self.connection_alias = "default"
         self.logger = LogManager.GetLogger(log_name="Mnemosyne MilvusDatabase")
         self.host = host
         self.port = port
+        
+        self.logger.warning(
+            "MilvusDatabase 类已被弃用，请考虑迁移到 MilvusVectorDB 适配器类。"
+            "新适配器提供更好的错误处理、连接管理和性能优化。"
+        )
 
     def __enter__(self):
         """上下文管理器：进入时连接数据库"""

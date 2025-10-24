@@ -87,6 +87,9 @@ class MilvusManager:
         self._connection_info = {}  # 用于存储最终传递给 connect 的参数
         self._is_connected = False
         self._is_lite = False  # 标志是否为 Lite 模式
+        self._last_connection_check = 0  # 上次连接检查时间戳
+        self._connection_check_interval = 30  # 连接检查间隔（秒）
+        self._cached_connection_status = False  # 缓存的连接状态
 
         # 3. 确定连接模式并配置参数
         self._configure_connection_mode()
@@ -395,6 +398,55 @@ class MilvusManager:
             self._is_connected = False
             raise
 
+    def check_connection(self) -> bool:
+        """
+        专门的轻量级连接检查方法，使用缓存机制避免频繁检查。
+        
+        Returns:
+            bool: 连接是否正常
+        """
+        current_time = time.time()
+        
+        # 如果距离上次检查时间不足间隔时间，返回缓存状态
+        if current_time - self._last_connection_check < self._connection_check_interval:
+            return self._cached_connection_status
+        
+        # 执行实际连接检查
+        if not self._is_connected:
+            self._cached_connection_status = False
+            self._last_connection_check = current_time
+            return False
+
+        if self._is_lite:
+            # Milvus Lite 是本地文件，连接通常更稳定
+            self._cached_connection_status = True
+            self._last_connection_check = current_time
+            return True
+        else:
+            # 对于标准 Milvus 网络连接，执行轻量级检查
+            try:
+                # 使用 list_collections 作为轻量级 ping 操作
+                utility.list_collections(using=self.alias)
+                self._cached_connection_status = True
+                self._last_connection_check = current_time
+                return True
+            except MilvusException as e:
+                logger.warning(
+                    f"Standard Milvus 连接检查失败 (alias: {self.alias}): {e}"
+                )
+                self._is_connected = False
+                self._cached_connection_status = False
+                self._last_connection_check = current_time
+                return False
+            except Exception as e:
+                logger.warning(
+                    f"Standard Milvus 连接检查时发生意外错误 (alias: {self.alias}): {e}"
+                )
+                self._is_connected = False
+                self._cached_connection_status = False
+                self._last_connection_check = current_time
+                return False
+
     def is_connected(self) -> bool:
         """检查当前连接状态 (使用 has_collection 作为 ping)。"""
         if not self._is_connected:
@@ -404,23 +456,8 @@ class MilvusManager:
             # Milvus Lite 是本地文件，连接通常更稳定，简单返回标志即可
             return True
         else:
-            # 对于标准 Milvus 网络连接，执行一次轻量级检查
-            try:
-                # 使用 has_collection 或 list_collections
-                utility.has_collection("__ping_test_collection__", using=self.alias)
-                return True
-            except MilvusException as e:
-                logger.warning(
-                    f"Standard Milvus 连接检查失败 (alias: {self.alias}): {e}"
-                )
-                self._is_connected = False
-                return False
-            except Exception as e:
-                logger.warning(
-                    f"Standard Milvus 连接检查时发生意外错误 (alias: {self.alias}): {e}"
-                )
-                self._is_connected = False
-                return False
+            # 对于标准 Milvus 网络连接，使用专门的连接检查方法
+            return self.check_connection()
 
     def _ensure_connected(self):
         """内部方法，确保在执行操作前已连接。"""
@@ -1195,3 +1232,100 @@ class MilvusManager:
                 f"MilvusManager 上下文管理器退出时捕获到异常: {exc_type.__name__}: {exc_val}"
             )
         # 返回 False 表示如果发生异常，不抑制异常的传播
+
+    def get_connection_info(self) -> Dict[str, Any]:
+        """
+        返回当前连接信息用于调试
+        
+        Returns:
+            Dict[str, Any]: 包含连接信息的字典，包括：
+                - alias: 连接别名
+                - is_connected: 是否已连接
+                - is_lite: 是否为 Lite 模式
+                - connection_params: 连接参数（不包含敏感信息）
+                - last_check_time: 上次连接检查时间戳
+        """
+        # 创建不包含敏感信息的连接参数副本
+        safe_connection_info = {}
+        for key, value in self._connection_info.items():
+            if key in ['password', 'token']:
+                safe_connection_info[key] = '******' if value else None
+            else:
+                safe_connection_info[key] = value
+        
+        return {
+            'alias': self.alias,
+            'is_connected': self._is_connected,
+            'is_lite': self._is_lite,
+            'connection_params': safe_connection_info,
+            'last_check_time': self._last_connection_check,
+            'connection_check_interval': self._connection_check_interval,
+            'cached_connection_status': self._cached_connection_status
+        }
+
+    def format_search_results(self, raw_results) -> List[Dict[str, Any]]:
+        """
+        格式化搜索结果为统一格式
+        
+        Args:
+            raw_results: Milvus 搜索返回的原始结果 (List[SearchResult])
+            
+        Returns:
+            List[Dict[str, Any]]: 格式化后的搜索结果列表，每个元素包含：
+                - id: 实体 ID
+                - distance: 相似度距离
+                - score: 相似度分数 (1 - distance，适用于 L2 距离)
+                - entity: 实体数据字典
+        """
+        if not raw_results:
+            return []
+        
+        formatted_results = []
+        
+        try:
+            # raw_results 是 List[SearchResult]，每个 SearchResult 对应一个查询向量
+            for search_result in raw_results:
+                # 每个 SearchResult 包含多个 Hit 对象
+                for hit in search_result:
+                    # 检查 hit 对象是否包含必要属性
+                    if not all(hasattr(hit, attr) for attr in ["id", "distance", "entity"]):
+                        logger.warning(f"搜索结果对象缺少必要属性: {hit}")
+                        continue
+                    
+                    try:
+                        # 获取实体数据
+                        entity_dict = {}
+                        if hasattr(hit.entity, "to_dict"):
+                            entity_dict = hit.entity.to_dict()
+                        elif hasattr(hit.entity, "__dict__"):
+                            entity_dict = vars(hit.entity)
+                        else:
+                            # 尝试将实体转换为字典
+                            try:
+                                entity_dict = dict(hit.entity)
+                            except (TypeError, ValueError):
+                                logger.warning(f"无法将实体转换为字典: {hit.entity}")
+                                entity_dict = {}
+                        
+                        # 计算相似度分数 (对于 L2 距离，分数越高越相似)
+                        distance = float(hit.distance)
+                        score = 1.0 / (1.0 + distance)  # 转换为 0-1 范围的分数
+                        
+                        formatted_result = {
+                            "id": hit.id,
+                            "distance": distance,
+                            "score": score,
+                            "entity": entity_dict
+                        }
+                        
+                        formatted_results.append(formatted_result)
+                        
+                    except Exception as e:
+                        logger.error(f"处理单个搜索结果时出错: {e}")
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"格式化搜索结果时出错: {e}")
+            return []
+        
+        return formatted_results

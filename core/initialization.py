@@ -23,6 +23,7 @@ from .tools import parse_address
 
 from ..memory_manager.message_counter import MessageCounter
 from ..memory_manager.vector_db.milvus_manager import MilvusManager
+from ..memory_manager.vector_db.milvus_adapter import MilvusVectorDB
 from ..memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
 from ..memory_manager.context_manager import ConversationContextManager
 
@@ -277,24 +278,46 @@ def initialize_milvus(plugin: "Mnemosyne"):
                 init_logger.warning(f"当前为 Milvus Lite 模式，配置中的以下认证/安全参数将被忽略: {ignored_keys}")
 
 
-        # 5. 初始化 MilvusManager
+        # 5. 选择使用 MilvusManager 或 MilvusVectorDB
+        use_adapter = plugin.config.get("use_milvus_adapter", False)
+        
         loggable_connect_args = {
             k: v for k, v in connect_args.items() if k not in ['password', 'token']
         }
-        init_logger.info(f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}")
+        
+        if use_adapter:
+            # 使用新的 MilvusVectorDB 适配器
+            init_logger.info(f"准备使用以下参数初始化 MilvusVectorDB 适配器: {loggable_connect_args}")
+            plugin.milvus_adapter = MilvusVectorDB(**connect_args)
+            
+            # 检查连接状态
+            if not plugin.milvus_adapter or not plugin.milvus_adapter._manager.is_connected():
+                mode_name = "Milvus Lite" if is_lite_mode else "标准 Milvus"
+                raise ConnectionError(
+                    f"初始化 MilvusVectorDB 适配器或连接到 {mode_name} 失败。请检查配置和 Milvus 实例状态。"
+                )
+            
+            mode_name = "Milvus Lite" if plugin.milvus_adapter._manager._is_lite else "标准 Milvus"
+            init_logger.info(f"成功通过 MilvusVectorDB 适配器连接到 {mode_name} (别名: {alias})。")
+            
+            # 为了向后兼容，将适配器的 manager 赋值给 milvus_manager
+            plugin.milvus_manager = plugin.milvus_adapter._manager
+        else:
+            # 使用原始的 MilvusManager（默认，保持向后兼容）
+            init_logger.info(f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}")
+            
+            # 创建 MilvusManager 实例
+            plugin.milvus_manager = MilvusManager(**connect_args)
 
-        # 创建 MilvusManager 实例
-        plugin.milvus_manager = MilvusManager(**connect_args)
+            # 6. 检查连接状态
+            if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
+                mode_name = "Milvus Lite" if is_lite_mode else "标准 Milvus"
+                raise ConnectionError(
+                    f"初始化 MilvusManager 或连接到 {mode_name} 失败。请检查配置和 Milvus 实例状态。"
+                )
 
-        # 6. 检查连接状态
-        if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
-            mode_name = "Milvus Lite" if is_lite_mode else "标准 Milvus"
-            raise ConnectionError(
-                f"初始化 MilvusManager 或连接到 {mode_name} 失败。请检查配置和 Milvus 实例状态。"
-            )
-
-        mode_name = "Milvus Lite" if plugin.milvus_manager._is_lite else "标准 Milvus"
-        init_logger.info(f"成功连接到 {mode_name} (别名: {alias})。")
+            mode_name = "Milvus Lite" if plugin.milvus_manager._is_lite else "标准 Milvus"
+            init_logger.info(f"成功连接到 {mode_name} (别名: {alias})。")
 
         # 7. 设置集合和索引
         init_logger.debug("开始设置 Milvus 集合和索引...")
@@ -311,24 +334,42 @@ def initialize_milvus(plugin: "Mnemosyne"):
 
 def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
     """确保 Milvus 集合和索引存在并已加载。"""
-    if not plugin.milvus_manager or not plugin.collection_schema:
+    # 检查是否使用适配器
+    use_adapter = plugin.config.get("use_milvus_adapter", False)
+    
+    # 获取管理器实例
+    manager = None
+    if use_adapter and hasattr(plugin, 'milvus_adapter'):
+        manager = plugin.milvus_adapter
+    elif hasattr(plugin, 'milvus_manager'):
+        manager = plugin.milvus_manager
+    
+    if not manager or not plugin.collection_schema:
         init_logger.error("无法设置 Milvus 集合/索引：管理器或 Schema 未初始化。")
-        raise RuntimeError("MilvusManager 或 CollectionSchema 未准备好。")
+        raise RuntimeError("MilvusManager/MilvusVectorDB 或 CollectionSchema 未准备好。")
 
     collection_name = plugin.collection_name
 
     # 检查集合是否存在
-    if plugin.milvus_manager.has_collection(collection_name):
+    if manager.has_collection(collection_name):
         init_logger.info(f"集合 '{collection_name}' 已存在。开始检查 Schema 一致性...")
         check_schema_consistency(plugin, collection_name, plugin.collection_schema)
         # 注意: check_schema_consistency 目前只记录警告，不阻止后续操作
     else:
         # 如果集合不存在，则创建集合
         init_logger.info(f"未找到集合 '{collection_name}'。正在创建...")
-        if not plugin.milvus_manager.create_collection(
-            collection_name, plugin.collection_schema
-        ):
-            raise RuntimeError(f"创建 Milvus 集合 '{collection_name}' 失败。")
+        
+        # 根据使用的类型选择创建方法
+        if use_adapter:
+            # 使用适配器创建集合（需要将 CollectionSchema 转换为字典）
+            from ..memory_manager.vector_db.schema_utils import collection_schema_to_dict
+            schema_dict = collection_schema_to_dict(plugin.collection_schema)
+            manager.create_collection(collection_name, schema_dict)
+        else:
+            # 使用管理器创建集合
+            if not manager.create_collection(collection_name, plugin.collection_schema):
+                raise RuntimeError(f"创建 Milvus 集合 '{collection_name}' 失败。")
+        
         init_logger.info(f"成功创建集合 '{collection_name}'。")
         # 创建集合后立即尝试创建索引
         ensure_milvus_index(plugin, collection_name)
@@ -338,7 +379,7 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
 
     # 确保集合已加载到内存中以供搜索
     init_logger.info(f"确保集合 '{collection_name}' 已加载到内存...")
-    if not plugin.milvus_manager.load_collection(collection_name):
+    if not manager.load_collection(collection_name):
         # 加载失败可能是资源问题或索引未就绪，打印错误但可能允许插件继续（取决于容错策略）
         init_logger.error(
             f"加载集合 '{collection_name}' 失败。搜索功能可能无法正常工作或效率低下。"
@@ -351,20 +392,30 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
 
 def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
     """检查向量字段的索引是否存在，如果不存在则创建它。"""
-    if not plugin.milvus_manager:
+    # 检查是否使用适配器
+    use_adapter = plugin.config.get("use_milvus_adapter", False)
+    
+    # 获取管理器实例
+    manager = None
+    if use_adapter and hasattr(plugin, 'milvus_adapter'):
+        manager = plugin.milvus_adapter._manager  # 适配器内部的管理器
+    elif hasattr(plugin, 'milvus_manager'):
+        manager = plugin.milvus_manager
+    
+    if not manager:
         return
 
     try:
         has_vector_index = False
         # 先检查集合是否存在，避免后续操作出错
-        if not plugin.milvus_manager.has_collection(collection_name):
+        if not manager.has_collection(collection_name):
             init_logger.warning(
                 f"尝试为不存在的集合 '{collection_name}' 检查/创建索引，跳过。"
             )
             return
 
         # 检查向量字段是否有索引
-        collection = plugin.milvus_manager.get_collection(collection_name)
+        collection = manager.get_collection(collection_name)
         if collection:
             for index in collection.indexes:
                 # 检查索引是否是为我们配置的向量字段创建的
@@ -392,7 +443,7 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
                 f"集合 '{collection_name}' 的向量字段 '{VECTOR_FIELD_NAME}' 尚未创建索引。正在尝试创建..."
             )
             # 使用配置好的索引参数创建索引
-            index_success = plugin.milvus_manager.create_index(
+            index_success = manager.create_index(
                 collection_name=collection_name,
                 field_name=VECTOR_FIELD_NAME,
                 index_params=plugin.index_params,
@@ -498,14 +549,22 @@ def check_schema_consistency(
     检查现有集合的 Schema 是否与预期一致 (简化版，主要检查字段名和类型)。
     记录警告信息，但不阻止插件运行。
     """
-    if not plugin.milvus_manager or not plugin.milvus_manager.has_collection(
-        collection_name
-    ):
+    # 检查是否使用适配器
+    use_adapter = plugin.config.get("use_milvus_adapter", False)
+    
+    # 获取管理器实例
+    manager = None
+    if use_adapter and hasattr(plugin, 'milvus_adapter'):
+        manager = plugin.milvus_adapter._manager  # 适配器内部的管理器
+    elif hasattr(plugin, 'milvus_manager'):
+        manager = plugin.milvus_manager
+    
+    if not manager or not manager.has_collection(collection_name):
         # init_logger.info(f"集合 '{collection_name}' 不存在，无需检查一致性。")
         return True  # 没有可供比较的现有集合
 
     try:
-        collection = plugin.milvus_manager.get_collection(collection_name)
+        collection = manager.get_collection(collection_name)
         if not collection:
             init_logger.error(f"无法获取集合 '{collection_name}' 以检查 Schema。")
             return False  # 视为不一致

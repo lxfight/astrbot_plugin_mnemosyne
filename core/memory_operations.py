@@ -76,11 +76,19 @@ async def handle_query_memory(
                 query_embeddings = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: plugin.ebd.get_embeddings([req.prompt]),
-
                 )
-            except (ConnectionError, ValueError, RuntimeError) as e:
-                logger.error(f"执行 Embedding 获取时出错: {e}", exc_info=True)
-                query_embeddings = None  # 确保后续能处理失败
+            except ConnectionError as e:
+                logger.error(f"网络连接错误，无法获取 Embedding: {e}", exc_info=True)
+                return  # 明确返回，不继续执行
+            except ValueError as e:
+                logger.error(f"输入参数错误，无法获取 Embedding: {e}", exc_info=True)
+                return  # 明确返回，不继续执行
+            except RuntimeError as e:
+                logger.error(f"运行时错误，无法获取 Embedding: {e}", exc_info=True)
+                return  # 明确返回，不继续执行
+            except Exception as e:
+                logger.error(f"获取 Embedding 时发生未知错误: {e}", exc_info=True)
+                return  # 明确返回，不继续执行
 
             if not query_embeddings:
                 logger.error("无法获取用户查询的 Embedding 向量。")
@@ -624,6 +632,12 @@ async def _store_summary_to_milvus(
         )
     except (MilvusException, ConnectionError, ValueError) as e:
         logger.error(f"向 Milvus 插入总结记忆时出错: {e}", exc_info=True)
+    finally:
+        # 确保资源清理和错误日志记录
+        if mutation_result is None:
+            logger.error(f"Milvus 插入操作失败，未返回结果。集合: {collection_name}, 数据: {summary_text[:100]}...")
+        else:
+            logger.debug(f"Milvus 插入操作完成，正在进行资源清理。")
 
     if mutation_result and mutation_result.insert_count > 0:
         inserted_ids = mutation_result.primary_keys
