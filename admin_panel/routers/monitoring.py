@@ -7,13 +7,14 @@
 from typing import Dict, Any
 from astrbot.core.log import LogManager
 from ..services.monitoring_service import MonitoringService
+from ..middleware.auth import create_auth_middleware
 
 logger = LogManager.GetLogger(log_name="MonitoringRoutes")
 
 
 def setup_monitoring_routes(app, plugin_instance):
     """
-    设置监控相关路由
+    设置监控相关路由（强制认证）
     
     注意：这里的路由实现是一个示例框架
     实际使用时需要根据 AstrBot 的 Web 框架进行适配
@@ -24,7 +25,12 @@ def setup_monitoring_routes(app, plugin_instance):
     """
     monitoring_service = MonitoringService(plugin_instance)
     
-    # API: 获取系统状态
+    # 创建认证中间件
+    api_key = plugin_instance.config.get("admin_panel", {}).get("api_key")
+    auth = create_auth_middleware(api_key)
+    
+    # API: 获取系统状态（需要认证）
+    @auth.require_auth
     async def get_system_status(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         GET /api/monitoring/status
@@ -58,7 +64,8 @@ def setup_monitoring_routes(app, plugin_instance):
                 "error": str(e)
             }
     
-    # API: 获取性能指标
+    # API: 获取性能指标（需要认证）
+    @auth.require_auth
     async def get_performance_metrics(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         GET /api/monitoring/metrics
@@ -90,7 +97,8 @@ def setup_monitoring_routes(app, plugin_instance):
                 "error": str(e)
             }
     
-    # API: 获取资源使用情况
+    # API: 获取资源使用情况（需要认证）
+    @auth.require_auth
     async def get_resource_usage(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         GET /api/monitoring/resources
@@ -122,7 +130,8 @@ def setup_monitoring_routes(app, plugin_instance):
                 "error": str(e)
             }
     
-    # API: 获取完整仪表板数据
+    # API: 获取完整仪表板数据（需要认证）
+    @auth.require_auth
     async def get_dashboard_data(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         GET /api/monitoring/dashboard
