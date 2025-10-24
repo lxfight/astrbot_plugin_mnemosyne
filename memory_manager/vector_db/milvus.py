@@ -220,9 +220,8 @@ class MilvusDatabase(VectorDatabase):
                     item["create_time"] = current_time
 
             # 打印调试信息
-            # self.logger.debug(f"准备插入的 field_data: {data}")
 
-            col.insert(data[0])
+            col.insert(data)
             col.flush()  # 确保数据持久化
             self.logger.info(f"插入数据成功：{len(data)} .")
 
@@ -349,13 +348,16 @@ class MilvusDatabase(VectorDatabase):
             # 使用 _get_collection 方法确保集合已加载到内存
             collection = self._get_collection(collection_name)
 
-            # 按时间戳降序获取最新记录（修正排序参数格式）
+            # 按时间戳降序获取最新记录（使用当前PyMilvus版本支持的参数）
             results = collection.query(
                 expr="",
                 output_fields=["*"],
-                sort_by=("create_time", "desc"),
                 limit=limit,
             )
+            
+            # 手动按时间戳降序排序（如果结果不为空）
+            if results:
+                results.sort(key=lambda x: x.get("create_time", 0), reverse=True)
 
             # 安全处理空结果
             return results if results else []

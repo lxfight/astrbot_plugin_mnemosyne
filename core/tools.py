@@ -9,6 +9,9 @@ from typing import List, Dict, Set, Union
 from urllib.parse import urlparse
 
 from astrbot.api.event import AstrMessageEvent
+from astrbot.core.log import LogManager
+
+logger = LogManager.GetLogger(__name__)
 
 
 def parse_address(address: str):
@@ -28,14 +31,14 @@ def parse_address(address: str):
 
 def content_to_str(func):
     """
-    实现一个装饰器，将输入的内容全部转化为字符串并打印
+    实现一个装饰器，将输入的内容全部转化为字符串
     """
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         str_args = [str(arg) for arg in args]
         str_kwargs = {k: str(v) for k, v in kwargs.items()}
-        print(
+        logger.debug(
             f"Function '{func.__name__}' called with arguments: args={str_args}, kwargs={str_kwargs}"
         )
         return func(*str_args, **str_kwargs)

@@ -355,13 +355,11 @@ class MilvusManager:
         mode = "Milvus Lite" if self._is_lite else "Standard Milvus"
         # 从 _connection_info 中移除 alias，因为它要作为 connect 的第一个参数
         connect_params = self._connection_info.copy()
-        # connect_params.pop('alias', None) # pymilvus>2.4 不接受 alias in kwargs
 
         logger.info(
             f"尝试连接到 {mode} (别名: {self.alias}) 使用参数: {connect_params}"
         )
         try:
-            # connections.connect(alias=self.alias, **connect_params) # Older pymilvus
             connections.connect(
                 **{"alias": self.alias, **connect_params}
             )  # Works for pymilvus >= 2.4
@@ -371,7 +369,7 @@ class MilvusManager:
             logger.error(f"连接 {mode} (别名: {self.alias}) 失败: {e}")
             self._is_connected = False
             raise  # 保留原始异常类型
-        except Exception as e:  # 捕获其他潜在错误
+        except (ConnectionError, OSError, TimeoutError) as e:  # 捕获其他潜在错误
             logger.error(f"连接 {mode} (别名: {self.alias}) 时发生非 Milvus 异常: {e}")
             self._is_connected = False
             # 将其包装成更通用的连接错误可能更好
@@ -392,7 +390,7 @@ class MilvusManager:
             logger.error(f"断开 {mode} 连接 (别名: {self.alias}) 时出错: {e}")
             self._is_connected = False  # 即使出错，也标记为未连接
             raise
-        except Exception as e:
+        except (ConnectionError, OSError) as e:
             logger.error(f"断开 {mode} 连接 (别名: {self.alias}) 时发生意外错误: {e}")
             self._is_connected = False
             raise
@@ -635,7 +633,6 @@ class MilvusManager:
                 f"成功向集合 '{collection_name}' 插入数据。PKs: {mutation_result.primary_keys}"
             )
             # 考虑是否在这里自动 flush，或者让调用者决定
-            # self.flush([collection_name])
             return mutation_result
         except MilvusException as e:
             logger.error(f"向集合 '{collection_name}' 插入数据失败: {e}")
@@ -685,7 +682,6 @@ class MilvusManager:
             logger.info(
                 f"成功从集合 '{collection_name}' 发送删除请求。删除数量: {delete_count} (注意: 实际删除需flush后生效)"
             )
-            # TODO 考虑是否在这里自动 flush
             self.flush([collection_name])
             return mutation_result
         except MilvusException as e:
@@ -713,7 +709,6 @@ class MilvusManager:
             for collection_name in collection_names:
                 collection = Collection(collection_name, using=self.alias)
                 collection.flush(timeout=timeout)
-            # utility.flush(collection_names, timeout=timeout, using=self.alias)
             logger.info(f"成功刷新集合: {collection_names}。")
         except MilvusException as e:
             logger.error(f"刷新集合 {collection_names} 失败: {e}")
@@ -994,7 +989,7 @@ class MilvusManager:
             if progress and progress.get("loading_progress") == 0:
                 logger.info(f"集合 '{collection_name}' 未加载，无需释放。")
                 return True
-        except Exception as e:
+        except (MilvusException, ConnectionError, TimeoutError) as e:
             logger.warning(
                 f"检查集合 '{collection_name}' 加载状态时出错: {e}。将尝试释放。"
             )
@@ -1084,11 +1079,6 @@ class MilvusManager:
             # 每个搜索结果都包含一个命中列表
             num_results = len(search_result) if search_result else 0
             logger.info(f"搜索完成。返回 {num_results} 组结果。")
-
-            # # 示例：记录第一个查询的命中数
-            # if search_result and len(search_result[0]) > 0:
-            #     logger.debug(f"第一个查询向量命中 {len(search_result[0])} 个结果。")
-            # logger.debug(f"第一个结果示例 - ID: {search_result[0][0].id}, 距离: {search_result[0][0].distance}")
 
             return search_result  # 返回原始的 SearchResult 列表
         except MilvusException as e:

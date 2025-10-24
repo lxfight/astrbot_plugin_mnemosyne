@@ -13,8 +13,8 @@ import re
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.event.filter import PermissionType, permission_type
 from astrbot.api.star import Context, Star, register
-from astrbot.api.all import *  # 导入 AstrBot API
-from astrbot.api.message_components import *  # 导入消息组件
+from astrbot.api.all import command_group  # 导入 AstrBot API
+from astrbot.api.message_components import PlainResult  # 导入消息组件
 from astrbot.core.log import LogManager
 from astrbot.api.provider import LLMResponse, ProviderRequest
 
@@ -22,7 +22,11 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from .core import initialization  # 导入初始化逻辑模块
 from .core import memory_operations  # 导入记忆操作逻辑模块
 from .core import commands  # 导入命令处理实现模块
-from .core.constants import *  # 导入所有常量
+from .core.constants import (
+    DEFAULT_COLLECTION_NAME,
+    DEFAULT_SUMMARY_CHECK_INTERVAL_SECONDS,
+    DEFAULT_SUMMARY_TIME_THRESHOLD_SECONDS
+)  # 导入使用的常量
 from .core.tools import is_group_chat
 
 # --- 类型定义和依赖库 ---
@@ -67,11 +71,11 @@ class Mnemosyne(Star):
             if embedding_plugin:
                 self.ebd = embedding_plugin.star_cls
                 dim = self.ebd.get_dim()
-                modele_name = self.ebd.get_model_name()
-                if dim is not None and modele_name is not None:
+                model_name = self.ebd.get_model_name()
+                if dim is not None and model_name is not None:
                     self.config["embedding_dim"] = dim
                     self.config["collection_name"] = "ea_" + re.sub(
-                        r"[^a-zA-Z0-9]", "_", modele_name
+                        r"[^a-zA-Z0-9]", "_", model_name
                     )
             else:
                 raise ValueError(
@@ -104,7 +108,7 @@ class Mnemosyne(Star):
                 )
                 self.ebd = None
 
-        # --- 一个该死的计时器 ---
+        # --- 消息计时器 ---
         self._summary_check_task: Optional[asyncio.Task] = None
 
         summary_check_config = config.get("summary_check_task")

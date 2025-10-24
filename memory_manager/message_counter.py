@@ -21,20 +21,15 @@ class MessageCounter:
                                      如果为 None，则自动生成路径。
         """
         if db_file is None:
-            # 获取当前文件所在目录
-            current_file_dir = os.path.dirname(os.path.abspath(__file__))
-
-            base_dir = current_file_dir
-            for _ in range(3):
-                base_dir = os.path.dirname(base_dir)
-                # 避免一直向上到根目录之上，可以添加一个检查，如果已经是根目录，则停止
-                if (
-                    os.path.dirname(base_dir) == base_dir
-                ):  # 检查是否已经到达根目录 (dirname(root) == root)
-                    break  # 停止向上
+            # 使用 pathlib 进行更安全的路径处理
+            from pathlib import Path
+            
+            # 获取当前文件所在目录，然后向上3层
+            current_file_path = Path(__file__).resolve()
+            base_dir = current_file_path.parents[3]  # 直接使用 parents 索引向上遍历
 
             # 构建 mnemosyne_data 文件夹路径
-            data_dir = os.path.join(base_dir, "mnemosyne_data")
+            data_dir = base_dir / "mnemosyne_data"
 
             # 确保 mnemosyne_data 文件夹存在，如果不存在则创建
             os.makedirs(
@@ -64,7 +59,7 @@ class MessageCounter:
             """)
             conn.commit()
             logging.debug(f"SQLite 数据库初始化完成，文件路径: {self.db_file}")
-        except sqlite3.Error as e:
+        except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
             logging.error(f"初始化 SQLite 数据库失败: {e}")
             if conn:
                 conn.rollback()  # 回滚事务

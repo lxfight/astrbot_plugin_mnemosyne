@@ -78,7 +78,7 @@ async def handle_query_memory(
                     lambda: plugin.ebd.get_embeddings([req.prompt]),
 
                 )
-            except Exception as e:
+            except (ConnectionError, ValueError, RuntimeError) as e:
                 logger.error(f"执行 Embedding 获取时出错: {e}", exc_info=True)
                 query_embeddings = None  # 确保后续能处理失败
 
@@ -131,7 +131,7 @@ async def handle_on_llm_resp(
             persona_id,
         )
 
-        plugin.logger.debug(f"返回的内容：{resp.completion_text}")
+        logger.debug(f"返回的内容：{resp.completion_text}")
         plugin.context_manager.add_message(
             session_id, "assistant", resp.completion_text
         )
@@ -227,7 +227,6 @@ async def _check_and_trigger_summary(
         history_contents = format_context_to_string(
             context, plugin.config.get("num_pairs", 10)
         )
-        # logger.debug(f"总结的部分{history_contents}")
 
         asyncio.create_task(
             handle_summary_long_memory(plugin, persona_id, session_id, history_contents)
@@ -500,7 +499,7 @@ async def _get_summary_llm_response(
     """
     # logger = plugin.logger
     llm_provider = plugin.provider
-    # TODO 这部分逻辑真史，回头改下
+    # TODO: 优化LLM Provider获取逻辑，确保在plugin.provider不可用时能正确回退到当前使用的Provider
     try:
         if not llm_provider:
             # 如果plugin.provider不正确，在这时候，使用当前使用的LLM服务商，避免错误
@@ -623,7 +622,7 @@ async def _store_summary_to_milvus(
                 collection_name=collection_name, data=data_to_insert
             ),
         )
-    except Exception as e:
+    except (MilvusException, ConnectionError, ValueError) as e:
         logger.error(f"向 Milvus 插入总结记忆时出错: {e}", exc_info=True)
 
     if mutation_result and mutation_result.insert_count > 0:
@@ -684,7 +683,7 @@ async def handle_summary_long_memory(
                 lambda: plugin.ebd.get_embeddings([summary_text]),
 
             )
-        except Exception as e:
+        except (ConnectionError, ValueError, RuntimeError) as e:
             logger.error(
                 f"获取总结文本 Embedding 时出错: '{summary_text[:100]}...' - {e}",
                 exc_info=True,
@@ -752,7 +751,6 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                             session_context["history"],
                             plugin.msg_counter.get_counter(session_id),
                         )
-                        # logger.debug(f"总结的部分{history_contents}")
                         persona_id = await _get_persona_id(
                             plugin, session_context["event"]
                         )

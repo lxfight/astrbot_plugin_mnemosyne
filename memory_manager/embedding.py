@@ -49,7 +49,7 @@ class OpenAIEmbeddingAPI:
                 texts = [texts]
 
             response = self.client.embeddings.create(input=texts, model=self.model)
-        except Exception as e:
+        except (ConnectionError, ValueError, RuntimeError) as e:
             raise ConnectionError(
                 f"Embedding Connection error: {e}\n 请检查Embedding 模型配置是否正确，是否可以访问"
             )
@@ -94,7 +94,7 @@ class GeminiEmbeddingAPI:
             embeddings = [embedding.values for embedding in response.embeddings]
             return embeddings
 
-        except Exception as e:
+        except (ConnectionError, ValueError, RuntimeError) as e:
             raise ConnectionError(
                 f"Gemini Embedding Connection error: {e}\n 请检查模型配置是否正确，是否可以访问"
             )

@@ -1,21 +1,26 @@
 {
     "LLM_providers":{
         "description":"记忆总结使用的LLM服务商ID",
-        "type":"string"
+        "type":"string",
+        "pattern":"^[a-zA-Z0-9_-]+$",
+        "minLength":1
     },
     "milvus_lite_path":{
         "description":"milvus数据库的lite模式路径",
         "type":"string",
         "hint":"注意！！！只使用milvus_lite_path或者address其中一个即可，milvus_lite_path优先级较高",
         "obvious_hint":true,
-        "default":""
+        "default":"",
+        "minLength":0
     },
     "address":{
         "description":"milvus数据库地址",
         "type":"string",
         "hint":"支持支持格式如:http://localhost:19530，https://localhost:19530，localhost:19530",
         "obvious_hint":true,
-        "default":""
+        "default":"",
+        "pattern":"^(https?://)?[a-zA-Z0-9.-]+:[0-9]+$",
+        "minLength":0
     },
     "authentication":{
         "description":"milvus数据库的认证信息",
@@ -27,15 +32,18 @@
                 "description":"milvus数据库的认证token",
                 "type":"string",
                 "hint":"token优先于账户密码",
-                "obvious_hint":true
+                "obvious_hint":true,
+                "minLength":0
             },
             "user":{
                 "description":"milvus数据库的认证用户名",
-                "type":"string"
+                "type":"string",
+                "minLength":1
             },
             "password":{
                 "description":"milvus数据库的认证密码",
-                "type":"string"
+                "type":"string",
+                "minLength":0
             }
         }
     },
@@ -50,14 +58,17 @@
                 "type":"int",
                 "hint":"默认以每60秒（1分钟）进行检查一次，如果阈值设置为1小时，设置为10分钟应该也没有问题",
                 "obvious_hint":true,
-                "default":60
+                "default":60,
+                "minimum":10,
+                "maximum":3600
             },
             "SUMMARY_TIME_THRESHOLD_SECONDS":{
                 "description":"计时器总结阈值（秒）",
                 "type":"int",
                 "hint":"默认是3600秒（1小时），设置为-1关闭该功能，每个人与BOT的聊天频率是不同的，按个人需求进行设置",
                 "obvious_hint":true,
-                "default":-1
+                "default":-1,
+                "minimum":-1
             }
         }
     },
@@ -66,7 +77,10 @@
         "type":"string",
         "hint":"长期记忆存储在向量数据库的哪个集合中,请使用英文命名",
         "obvious_hint":true,
-        "default":"default"
+        "default":"default",
+        "pattern":"^[a-zA-Z][a-zA-Z0-9_]*$",
+        "minLength":1,
+        "maxLength":64
     },
     "use_personality_filtering":{
         "description":"记忆查询时是否使用人格过滤",
@@ -78,7 +92,9 @@
         "type":"int",
         "hint":"一问一答长度为2，对话长度达到这个阈值时会进行记忆总结",
         "obvious_hint":false,
-        "default":10
+        "default":10,
+        "minimum":2,
+        "maximum":50
     },
     "embedding_service": {
         "description": "选择嵌入服务提供商 (openai 或 gemini)",
@@ -89,36 +105,45 @@
     "embedding_key":{
         "description":"embedding模型服务的apikey",
         "type":"string",
-        "obvious_hint":false
+        "obvious_hint":false,
+        "minLength":0
     },
     "embedding_url":{
         "description":"embedding模型服务的端点url",
         "type":"string",
         "hint":"目前只针对于OpenAI兼容的接口，填写到V1即可。如选择Gemini，则不填写",
-        "obvious_hint":true
+        "obvious_hint":true,
+        "pattern":"^https?://[a-zA-Z0-9.-]+/.*$",
+        "minLength":0
     },
     "embedding_model":{
         "description":"embedding模型模型名称",
-        "type":"string"
+        "type":"string",
+        "minLength":1
     },
     "embedding_dim":{
         "description":"向量模型输出的维度",
         "type":"int",
         "hint":"注意！这个维度大小最好不要随意变动，如果一定要改变向量维度，请修改collection_name。Gemini修改为3072",
         "obvious_hint":true,
-        "default":1024
+        "default":1024,
+        "minimum":128,
+        "maximum":4096
     },
     "top_k":{
         "description":"返回的长期记忆的数量",
         "type":"int",
-        "default":3
+        "default":3,
+        "minimum":1,
+        "maximum":20
     },
     "contexts_memory_len": {
         "description":"历史上下文中保留的长期记忆数量",
         "type":"int",
         "hint":"小于0表示完全保留，大于等于0表示保留最新的对应条",
         "obvious_hint":true,
-        "default":0
+        "default":0,
+        "minimum":-1
     },
     "memory_injection_method":{
         "description":"记忆插入方式",
@@ -130,6 +155,8 @@
     "long_memory_prompt":{
         "description":"对话总结提示词",
         "type":"string",
-        "default":"请基于以下对话内容生成一段连贯的总结性文字，要求：1. 使用单段自然语言表述，不加序号或分点；2. 聚焦提取核心要素，包括但不限于参与者身份（姓名/角色）、核心事件、关键时间节点、特殊需求、争议点及解决方案；3. 保留涉及金额/数量/规格等量化信息；4.不输出多余的解释性内容；5. 用简洁书面语整合信息，确保信息完整准确。注意：避免添加解释性内容，仅客观呈现对话要素的整合结果。6.以AI的第一人称视角记录信息"
+        "default":"请基于以下对话内容生成一段连贯的总结性文字，要求：1. 使用单段自然语言表述，不加序号或分点；2. 聚焦提取核心要素，包括但不限于参与者身份（姓名/角色）、核心事件、关键时间节点、特殊需求、争议点及解决方案；3. 保留涉及金额/数量/规格等量化信息；4.不输出多余的解释性内容；5. 用简洁书面语整合信息，确保信息完整准确。注意：避免添加解释性内容，仅客观呈现对话要素的整合结果。6.以AI的第一人称视角记录信息",
+        "minLength":10,
+        "maxLength":1000
     }
 }

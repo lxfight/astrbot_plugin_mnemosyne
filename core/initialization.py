@@ -437,10 +437,10 @@ def initialize_components(plugin: "Mnemosyne"):
         try:
             plugin.ebd = plugin.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
             dim=plugin.ebd.get_dim()
-            modele_name=plugin.ebd.get_model_name()
-            if dim is not None and modele_name is not None:
+            model_name=plugin.ebd.get_model_name()
+            if dim is not None and model_name is not None:
                 plugin.config["embedding_dim"] = dim
-                plugin.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', modele_name)
+                plugin.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', model_name)
         except Exception as e:
             init_logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
             plugin.ebd = None
