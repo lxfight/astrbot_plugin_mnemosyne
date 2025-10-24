@@ -62,13 +62,24 @@ function renderLogsList(logs) {
 // 创建单个日志项
 function createLogItem(log) {
     const div = document.createElement('div');
-    div.className = `log-item log-${log.level.toLowerCase()}`;
+    div.className = `log-item log-${escapeHtml(log.level.toLowerCase())}`;
     
-    div.innerHTML = `
-        <div class="log-time">${formatTime(log.timestamp)}</div>
-        <div class="log-level">${log.level}</div>
-        <div class="log-message">${escapeHtml(log.message)}</div>
-    `;
+    // 使用 textContent 而不是 innerHTML 来设置文本内容，防止 XSS
+    const timeEl = document.createElement('div');
+    timeEl.className = 'log-time';
+    timeEl.textContent = formatTime(log.timestamp);
+    
+    const levelEl = document.createElement('div');
+    levelEl.className = 'log-level';
+    levelEl.textContent = log.level;
+    
+    const messageEl = document.createElement('div');
+    messageEl.className = 'log-message';
+    messageEl.textContent = log.message;  // 使用 textContent 自动转义
+    
+    div.appendChild(timeEl);
+    div.appendChild(levelEl);
+    div.appendChild(messageEl);
     
     return div;
 }

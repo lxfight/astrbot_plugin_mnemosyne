@@ -80,13 +80,25 @@ function renderComponentsHealth(componentsData) {
         
         const componentEl = document.createElement('div');
         componentEl.className = 'component-item';
-        componentEl.innerHTML = `
-            <div class="component-status ${indicator.class}"></div>
-            <div class="component-info">
-                <h4>${getComponentDisplayName(name)}</h4>
-                <p>${component.message || indicator.text}</p>
-            </div>
-        `;
+        
+        // 使用 DOM 方法创建元素，避免 XSS 风险
+        const statusDiv = document.createElement('div');
+        statusDiv.className = `component-status ${indicator.class}`;
+        
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'component-info';
+        
+        const h4 = document.createElement('h4');
+        h4.textContent = getComponentDisplayName(name);
+        
+        const p = document.createElement('p');
+        p.textContent = component.message || indicator.text;
+        
+        infoDiv.appendChild(h4);
+        infoDiv.appendChild(p);
+        
+        componentEl.appendChild(statusDiv);
+        componentEl.appendChild(infoDiv);
         
         container.appendChild(componentEl);
     }
@@ -143,11 +155,23 @@ function renderPerformanceMetrics(metricsData) {
 function addMetricItem(container, title, value, label) {
     const metricEl = document.createElement('div');
     metricEl.className = 'metric-item';
-    metricEl.innerHTML = `
-        <h4>${title}</h4>
-        <div class="metric-value">${value}</div>
-        <div class="metric-label">${label}</div>
-    `;
+    
+    // 使用 DOM 方法创建元素，避免 XSS 风险
+    const h4 = document.createElement('h4');
+    h4.textContent = title;
+    
+    const valueDiv = document.createElement('div');
+    valueDiv.className = 'metric-value';
+    valueDiv.textContent = value;
+    
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'metric-label';
+    labelDiv.textContent = label;
+    
+    metricEl.appendChild(h4);
+    metricEl.appendChild(valueDiv);
+    metricEl.appendChild(labelDiv);
+    
     container.appendChild(metricEl);
 }
 

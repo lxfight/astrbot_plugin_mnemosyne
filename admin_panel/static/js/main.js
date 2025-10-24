@@ -12,6 +12,53 @@ const AppState = {
     sessionsData: null,
 };
 
+// ==================== 安全函数 ====================
+
+/**
+ * HTML 转义函数 - 防止 XSS 攻击
+ * 将特殊字符转换为 HTML 实体
+ *
+ * @param {string} unsafe - 未转义的字符串
+ * @returns {string} - 转义后的安全字符串
+ */
+function escapeHtml(unsafe) {
+    if (typeof unsafe !== 'string') {
+        return String(unsafe);
+    }
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+/**
+ * 格式化时间 - 安全版本
+ * @param {string|number} timestamp - 时间戳或日期字符串
+ * @returns {string} - 格式化后的时间字符串
+ */
+function formatTime(timestamp) {
+    if (!timestamp) return '-';
+    
+    try {
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) {
+            return escapeHtml(String(timestamp));
+        }
+        return date.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+    } catch (error) {
+        return escapeHtml(String(timestamp));
+    }
+}
+
 // 初始化应用
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Mnemosyne 管理面板初始化...');
@@ -137,23 +184,9 @@ function showToast(message, type = 'success') {
     }, 3000);
 }
 
-// 格式化时间
+// 格式化日期时间（向后兼容）
 function formatDateTime(dateTimeStr) {
-    if (!dateTimeStr) return '-';
-    
-    try {
-        const date = new Date(dateTimeStr);
-        return date.toLocaleString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-        });
-    } catch (error) {
-        return dateTimeStr;
-    }
+    return formatTime(dateTimeStr);
 }
 
 // 格式化数字
@@ -217,6 +250,8 @@ window.AppState = AppState;
 window.apiCall = apiCall;
 window.showLoading = showLoading;
 window.showToast = showToast;
+window.escapeHtml = escapeHtml;  // 导出 XSS 防护函数
+window.formatTime = formatTime;  // 导出安全的时间格式化函数
 window.formatDateTime = formatDateTime;
 window.formatNumber = formatNumber;
 window.formatBytes = formatBytes;

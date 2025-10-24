@@ -263,11 +263,12 @@ def initialize_milvus(plugin: "Mnemosyne"):
                         added_auth_params.append(f"{key}={secure_bool}")
                     else:
                         connect_args[key] = auth_config[key]
-                        # 不记录 password 和 token 的值
+                        # 安全处理：永远不记录 password 和 token 的真实值
                         if key not in ['password', 'token']:
                             added_auth_params.append(f"{key}={auth_config[key]}")
                         else:
-                            added_auth_params.append(f"{key}=******") # 隐藏敏感值
+                            # 使用脱敏处理，只显示配置项存在
+                            added_auth_params.append(f"{key}=***") # 隐藏敏感值
 
             if added_auth_params:
                 init_logger.info(f"从配置中添加了标准连接参数: {', '.join(added_auth_params)}")
@@ -285,9 +286,13 @@ def initialize_milvus(plugin: "Mnemosyne"):
         # 5. 选择使用 MilvusManager 或 MilvusVectorDB
         use_adapter = plugin.config.get("use_milvus_adapter", False)
         
-        loggable_connect_args = {
-            k: v for k, v in connect_args.items() if k not in ['password', 'token']
-        }
+        # 安全处理：创建用于日志记录的参数副本，敏感信息脱敏
+        loggable_connect_args = {}
+        for k, v in connect_args.items():
+            if k in ['password', 'token']:
+                loggable_connect_args[k] = '***'  # 完全隐藏敏感值
+            else:
+                loggable_connect_args[k] = v
         
         if use_adapter:
             # 使用新的 MilvusVectorDB 适配器
@@ -507,17 +512,22 @@ def initialize_components(plugin: "Mnemosyne"):
             if missing_keys:
                 raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
             embedding_service = plugin.config.get("embedding_service")
+            embedding_key = plugin.config.get("embedding_key")
+            
+            # 安全检查：确保不会在日志中泄露 API 密钥
+            if not embedding_key:
+                init_logger.warning("embedding_key 未配置或为空")
 
             if embedding_service == "gemini":
                 plugin.ebd = GeminiEmbeddingAPI(
                     model=plugin.config.get("embedding_model"),
-                    api_key=plugin.config.get("embedding_key"),
+                    api_key=embedding_key,
                 )
                 init_logger.info("已选择 Gemini 作为嵌入服务提供商")
             elif embedding_service == "openai":
                 plugin.ebd = OpenAIEmbeddingAPI(
                     model=plugin.config.get("embedding_model"),
-                    api_key=plugin.config.get("embedding_key"),
+                    api_key=embedding_key,
                     base_url=plugin.config.get("embedding_url"),
                 )
                 init_logger.info("已选择 OpenAI 作为嵌入服务提供商")

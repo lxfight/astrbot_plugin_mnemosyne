@@ -73,33 +73,72 @@ function createMemoryItem(memory) {
     
     const isSelected = selectedMemoryIds.has(memory.memory_id);
     
-    div.innerHTML = `
-        <div class="memory-checkbox">
-            <input type="checkbox" 
-                   ${isSelected ? 'checked' : ''} 
-                   onchange="toggleMemorySelection('${memory.memory_id}')">
-        </div>
-        <div class="memory-content">
-            <div class="memory-header">
-                <span class="memory-session">会话: ${memory.session_id}</span>
-                <span class="memory-time">${formatTime(memory.timestamp)}</span>
-            </div>
-            <div class="memory-text">${escapeHtml(memory.content)}</div>
-            <div class="memory-footer">
-                <span class="memory-type">${getMemoryTypeText(memory.memory_type)}</span>
-                ${memory.similarity_score !== null ? 
-                    `<span class="memory-score">相似度: ${memory.similarity_score.toFixed(3)}</span>` : ''}
-            </div>
-        </div>
-        <div class="memory-actions">
-            <button class="btn-icon" onclick="viewMemoryDetail('${memory.memory_id}')" title="查看详情">
-                👁️
-            </button>
-            <button class="btn-icon" onclick="deleteMemory('${memory.memory_id}')" title="删除">
-                🗑️
-            </button>
-        </div>
-    `;
+    // 使用 DOM 方法创建元素，避免 innerHTML 导致的 XSS 风险
+    const checkboxDiv = document.createElement('div');
+    checkboxDiv.className = 'memory-checkbox';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = isSelected;
+    checkbox.onchange = () => toggleMemorySelection(memory.memory_id);
+    checkboxDiv.appendChild(checkbox);
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'memory-content';
+    
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'memory-header';
+    const sessionSpan = document.createElement('span');
+    sessionSpan.className = 'memory-session';
+    sessionSpan.textContent = `会话: ${memory.session_id}`;
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'memory-time';
+    timeSpan.textContent = formatTime(memory.timestamp);
+    headerDiv.appendChild(sessionSpan);
+    headerDiv.appendChild(timeSpan);
+    
+    const textDiv = document.createElement('div');
+    textDiv.className = 'memory-text';
+    textDiv.textContent = memory.content;  // 使用 textContent 自动转义
+    
+    const footerDiv = document.createElement('div');
+    footerDiv.className = 'memory-footer';
+    const typeSpan = document.createElement('span');
+    typeSpan.className = 'memory-type';
+    typeSpan.textContent = getMemoryTypeText(memory.memory_type);
+    footerDiv.appendChild(typeSpan);
+    
+    if (memory.similarity_score !== null) {
+        const scoreSpan = document.createElement('span');
+        scoreSpan.className = 'memory-score';
+        scoreSpan.textContent = `相似度: ${memory.similarity_score.toFixed(3)}`;
+        footerDiv.appendChild(scoreSpan);
+    }
+    
+    contentDiv.appendChild(headerDiv);
+    contentDiv.appendChild(textDiv);
+    contentDiv.appendChild(footerDiv);
+    
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'memory-actions';
+    
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'btn-icon';
+    viewBtn.title = '查看详情';
+    viewBtn.textContent = '👁️';
+    viewBtn.onclick = () => viewMemoryDetail(memory.memory_id);
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-icon';
+    deleteBtn.title = '删除';
+    deleteBtn.textContent = '🗑️';
+    deleteBtn.onclick = () => deleteMemory(memory.memory_id);
+    
+    actionsDiv.appendChild(viewBtn);
+    actionsDiv.appendChild(deleteBtn);
+    
+    div.appendChild(checkboxDiv);
+    div.appendChild(contentDiv);
+    div.appendChild(actionsDiv);
     
     return div;
 }
@@ -286,50 +325,77 @@ function viewMemoryDetail(memoryId) {
         return;
     }
     
-    // 创建模态框显示详情
+    // 使用 DOM 方法创建模态框，避免 XSS 风险
     const modal = document.createElement('div');
     modal.className = 'modal';
-    modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>记忆详情</h3>
-                <button class="btn-close" onclick="this.closest('.modal').remove()">✕</button>
-            </div>
-            <div class="modal-body">
-                <div class="detail-item">
-                    <label>记忆ID:</label>
-                    <span>${memory.memory_id}</span>
-                </div>
-                <div class="detail-item">
-                    <label>会话ID:</label>
-                    <span>${memory.session_id}</span>
-                </div>
-                <div class="detail-item">
-                    <label>时间:</label>
-                    <span>${formatTime(memory.timestamp)}</span>
-                </div>
-                <div class="detail-item">
-                    <label>类型:</label>
-                    <span>${getMemoryTypeText(memory.memory_type)}</span>
-                </div>
-                ${memory.similarity_score !== null ? `
-                <div class="detail-item">
-                    <label>相似度:</label>
-                    <span>${memory.similarity_score.toFixed(3)}</span>
-                </div>
-                ` : ''}
-                <div class="detail-item">
-                    <label>内容:</label>
-                    <div style="white-space: pre-wrap; margin-top: 0.5rem; padding: 1rem; background: var(--bg-secondary); border-radius: 4px;">
-                        ${escapeHtml(memory.content)}
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">关闭</button>
-            </div>
-        </div>
-    `;
+    
+    const modalContent = document.createElement('div');
+    modalContent.className = 'modal-content';
+    
+    const modalHeader = document.createElement('div');
+    modalHeader.className = 'modal-header';
+    const title = document.createElement('h3');
+    title.textContent = '记忆详情';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn-close';
+    closeBtn.textContent = '✕';
+    closeBtn.onclick = () => modal.remove();
+    modalHeader.appendChild(title);
+    modalHeader.appendChild(closeBtn);
+    
+    const modalBody = document.createElement('div');
+    modalBody.className = 'modal-body';
+    
+    // 添加各个详情项
+    const addDetailItem = (label, value) => {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'detail-item';
+        const labelEl = document.createElement('label');
+        labelEl.textContent = label + ':';
+        const valueEl = document.createElement('span');
+        valueEl.textContent = value;
+        itemDiv.appendChild(labelEl);
+        itemDiv.appendChild(valueEl);
+        modalBody.appendChild(itemDiv);
+    };
+    
+    addDetailItem('记忆ID', memory.memory_id);
+    addDetailItem('会话ID', memory.session_id);
+    addDetailItem('时间', formatTime(memory.timestamp));
+    addDetailItem('类型', getMemoryTypeText(memory.memory_type));
+    
+    if (memory.similarity_score !== null) {
+        addDetailItem('相似度', memory.similarity_score.toFixed(3));
+    }
+    
+    // 内容项特殊处理
+    const contentItem = document.createElement('div');
+    contentItem.className = 'detail-item';
+    const contentLabel = document.createElement('label');
+    contentLabel.textContent = '内容:';
+    const contentValue = document.createElement('div');
+    contentValue.style.whiteSpace = 'pre-wrap';
+    contentValue.style.marginTop = '0.5rem';
+    contentValue.style.padding = '1rem';
+    contentValue.style.background = 'var(--bg-secondary)';
+    contentValue.style.borderRadius = '4px';
+    contentValue.textContent = memory.content;  // 使用 textContent 自动转义
+    contentItem.appendChild(contentLabel);
+    contentItem.appendChild(contentValue);
+    modalBody.appendChild(contentItem);
+    
+    const modalFooter = document.createElement('div');
+    modalFooter.className = 'modal-footer';
+    const closeFooterBtn = document.createElement('button');
+    closeFooterBtn.className = 'btn btn-secondary';
+    closeFooterBtn.textContent = '关闭';
+    closeFooterBtn.onclick = () => modal.remove();
+    modalFooter.appendChild(closeFooterBtn);
+    
+    modalContent.appendChild(modalHeader);
+    modalContent.appendChild(modalBody);
+    modalContent.appendChild(modalFooter);
+    modal.appendChild(modalContent);
     
     document.body.appendChild(modal);
     

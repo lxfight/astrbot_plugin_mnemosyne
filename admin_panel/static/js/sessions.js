@@ -49,30 +49,64 @@ function createSessionItem(session) {
     div.className = 'session-item';
     div.dataset.sessionId = session.session_id;
     
-    div.innerHTML = `
-        <div class="session-header">
-            <h4>${session.session_id}</h4>
-            <span class="badge">${session.memory_count} 条记忆</span>
-        </div>
-        <div class="session-info">
-            <div class="info-row">
-                <span class="info-label">最后活跃:</span>
-                <span class="info-value">${formatTime(session.last_activity)}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">首次记录:</span>
-                <span class="info-value">${formatTime(session.first_activity)}</span>
-            </div>
-        </div>
-        <div class="session-actions">
-            <button class="btn btn-secondary btn-sm" onclick="viewSessionMemories('${session.session_id}')">
-                查看记忆
-            </button>
-            <button class="btn btn-danger btn-sm" onclick="deleteSession('${session.session_id}')">
-                删除会话
-            </button>
-        </div>
-    `;
+    // 使用 DOM 方法创建元素，避免 XSS 风险
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'session-header';
+    const h4 = document.createElement('h4');
+    h4.textContent = session.session_id;
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = `${session.memory_count} 条记忆`;
+    headerDiv.appendChild(h4);
+    headerDiv.appendChild(badge);
+    
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'session-info';
+    
+    const lastActivityRow = document.createElement('div');
+    lastActivityRow.className = 'info-row';
+    const lastLabel = document.createElement('span');
+    lastLabel.className = 'info-label';
+    lastLabel.textContent = '最后活跃:';
+    const lastValue = document.createElement('span');
+    lastValue.className = 'info-value';
+    lastValue.textContent = formatTime(session.last_activity);
+    lastActivityRow.appendChild(lastLabel);
+    lastActivityRow.appendChild(lastValue);
+    
+    const firstActivityRow = document.createElement('div');
+    firstActivityRow.className = 'info-row';
+    const firstLabel = document.createElement('span');
+    firstLabel.className = 'info-label';
+    firstLabel.textContent = '首次记录:';
+    const firstValue = document.createElement('span');
+    firstValue.className = 'info-value';
+    firstValue.textContent = formatTime(session.first_activity);
+    firstActivityRow.appendChild(firstLabel);
+    firstActivityRow.appendChild(firstValue);
+    
+    infoDiv.appendChild(lastActivityRow);
+    infoDiv.appendChild(firstActivityRow);
+    
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'session-actions';
+    
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'btn btn-secondary btn-sm';
+    viewBtn.textContent = '查看记忆';
+    viewBtn.onclick = () => viewSessionMemories(session.session_id);
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn btn-danger btn-sm';
+    deleteBtn.textContent = '删除会话';
+    deleteBtn.onclick = () => deleteSession(session.session_id);
+    
+    actionsDiv.appendChild(viewBtn);
+    actionsDiv.appendChild(deleteBtn);
+    
+    div.appendChild(headerDiv);
+    div.appendChild(infoDiv);
+    div.appendChild(actionsDiv);
     
     return div;
 }

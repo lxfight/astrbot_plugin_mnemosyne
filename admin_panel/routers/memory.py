@@ -9,6 +9,7 @@ from datetime import datetime
 from astrbot.core.log import LogManager
 from ..services.memory_service import MemoryService
 from ..models.memory import MemorySearchRequest
+from ..middleware.auth import create_auth_middleware
 
 logger = LogManager.GetLogger(log_name="MemoryRoutes")
 
@@ -23,7 +24,12 @@ def setup_memory_routes(app, plugin_instance):
     """
     memory_service = MemoryService(plugin_instance)
     
-    # API: 搜索记忆
+    # 创建认证中间件
+    api_key = plugin_instance.config.get("admin_panel", {}).get("api_key")
+    auth = create_auth_middleware(api_key)
+    
+    # API: 搜索记忆（需要认证）
+    @auth.require_auth
     async def search_memories(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         POST /api/memories/search
@@ -81,7 +87,8 @@ def setup_memory_routes(app, plugin_instance):
                 "error": str(e)
             }
     
-    # API: 获取记忆统计
+    # API: 获取记忆统计（需要认证）
+    @auth.require_auth
     async def get_memory_statistics(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         GET /api/memories/statistics
@@ -115,7 +122,8 @@ def setup_memory_routes(app, plugin_instance):
                 "error": str(e)
             }
     
-    # API: 获取会话列表
+    # API: 获取会话列表（需要认证）
+    @auth.require_auth
     async def get_session_list(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         GET /api/memories/sessions
@@ -153,7 +161,8 @@ def setup_memory_routes(app, plugin_instance):
                 "error": str(e)
             }
     
-    # API: 删除单条记忆
+    # API: 删除单条记忆（需要认证）
+    @auth.require_auth
     async def delete_memory(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         DELETE /api/memories/{memory_id}
@@ -195,7 +204,8 @@ def setup_memory_routes(app, plugin_instance):
                 "error": str(e)
             }
     
-    # API: 删除会话的所有记忆
+    # API: 删除会话的所有记忆（需要认证）
+    @auth.require_auth
     async def delete_session_memories(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         DELETE /api/memories/session/{session_id}
@@ -233,7 +243,8 @@ def setup_memory_routes(app, plugin_instance):
                 "error": str(e)
             }
     
-    # API: 导出记忆
+    # API: 导出记忆（需要认证）
+    @auth.require_auth
     async def export_memories(request: Dict[str, Any]) -> Dict[str, Any]:
         """
         POST /api/memories/export
