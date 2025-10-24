@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mnemosyne 管理面板</title>
+    <link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h1>🧠 Mnemosyne</h1>
+                <p class="subtitle">记忆管理系统</p>
+            </div>
+            <nav class="nav-menu">
+                <a href="#dashboard" class="nav-item active" data-page="dashboard">
+                    <span class="icon">📊</span>
+                    <span>系统监控</span>
+                </a>
+                <a href="#memories" class="nav-item" data-page="memories">
+                    <span class="icon">💭</span>
+                    <span>记忆管理</span>
+                </a>
+                <a href="#sessions" class="nav-item" data-page="sessions">
+                    <span class="icon">👥</span>
+                    <span>会话列表</span>
+                </a>
+                <a href="#statistics" class="nav-item" data-page="statistics">
+                    <span class="icon">📈</span>
+                    <span>统计分析</span>
+                </a>
+                <a href="#logs" class="nav-item" data-page="logs">
+                    <span class="icon">📝</span>
+                    <span>日志查看</span>
+                </a>
+                <a href="#config" class="nav-item" data-page="config">
+                    <span class="icon">⚙️</span>
+                    <span>系统配置</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 页面容器 -->
+            <div id="page-container">
+                <!-- 系统监控页面 -->
+                <div id="dashboard-page" class="page active">
+                    <div class="page-header">
+                        <h2>系统监控仪表板</h2>
+                        <button class="btn btn-primary" onclick="refreshDashboard()">
+                            🔄 刷新
+                        </button>
+                    </div>
+
+                    <!-- 系统状态卡片 -->
+                    <div class="status-cards">
+                        <div class="status-card" id="overall-status">
+                            <div class="card-icon">🟢</div>
+                            <div class="card-content">
+                                <h3>系统状态</h3>
+                                <p class="status-text">加载中...</p>
+                            </div>
+                        </div>
+                        <div class="status-card">
+                            <div class="card-icon">💾</div>
+                            <div class="card-content">
+                                <h3>记忆总数</h3>
+                                <p class="status-value" id="total-memories">-</p>
+                            </div>
+                        </div>
+                        <div class="status-card">
+                            <div class="card-icon">👥</div>
+                            <div class="card-content">
+                                <h3>活跃会话</h3>
+                                <p class="status-value" id="active-sessions">-</p>
+                            </div>
+                        </div>
+                        <div class="status-card">
+                            <div class="card-icon">🧠</div>
+                            <div class="card-content">
+                                <h3>内存使用</h3>
+                                <p class="status-value" id="memory-usage">-</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 组件健康状态 -->
+                    <div class="section">
+                        <h3>组件健康状态</h3>
+                        <div id="components-health" class="components-grid">
+                            <!-- 动态加载 -->
+                        </div>
+                    </div>
+
+                    <!-- 性能指标 -->
+                    <div class="section">
+                        <h3>性能指标</h3>
+                        <div id="performance-metrics" class="metrics-grid">
+                            <!-- 动态加载 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 记忆管理页面 -->
+                <div id="memories-page" class="page">
+                    <div class="page-header">
+                        <h2>记忆管理</h2>
+                        <button class="btn btn-primary" onclick="showSearchModal()">
+                            🔍 搜索记忆
+                        </button>
+                    </div>
+
+                    <!-- 搜索过滤器 -->
+                    <div class="search-box">
+                        <input type="text" id="memory-keyword" placeholder="输入关键词搜索..." class="input">
+                        <button class="btn" onclick="searchMemories()">搜索</button>
+                    </div>
+
+                    <!-- 记忆列表 -->
+                    <div id="memories-list" class="list-container">
+                        <p class="placeholder">请使用搜索功能查找记忆</p>
+                    </div>
+
+                    <!-- 分页控件 -->
+                    <div id="memories-pagination" class="pagination">
+                        <!-- 动态加载 -->
+                    </div>
+                </div>
+
+                <!-- 会话列表页面 -->
+                <div id="sessions-page" class="page">
+                    <div class="page-header">
+                        <h2>会话列表</h2>
+                        <button class="btn btn-primary" onclick="loadSessions()">
+                            🔄 刷新
+                        </button>
+                    </div>
+
+                    <div id="sessions-list" class="list-container">
+                        <p class="placeholder">加载中...</p>
+                    </div>
+                </div>
+
+                <!-- 统计分析页面 -->
+                <div id="statistics-page" class="page">
+                    <div class="page-header">
+                        <h2>统计分析</h2>
+                        <button class="btn btn-primary" onclick="loadStatistics()">
+                            🔄 刷新
+                        </button>
+                    </div>
+
+                    <div id="statistics-content">
+                        <p class="placeholder">加载中...</p>
+                    </div>
+                </div>
+
+                <!-- 日志查看页面 -->
+                <div id="logs-page" class="page">
+                    <div class="page-header">
+                        <h2>系统日志</h2>
+                        <div class="btn-group">
+                            <select id="log-level" class="input">
+                                <option value="all">全部级别</option>
+                                <option value="debug">DEBUG</option>
+                                <option value="info">INFO</option>
+                                <option value="warning">WARNING</option>
+                                <option value="error">ERROR</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="loadLogs()">刷新</button>
+                        </div>
+                    </div>
+
+                    <div id="logs-content" class="logs-container">
+                        <p class="placeholder">日志查看功能正在开发中...</p>
+                    </div>
+                </div>
+
+                <!-- 系统配置页面 -->
+                <div id="config-page" class="page">
+                    <div class="page-header">
+                        <h2>系统配置</h2>
+                        <button class="btn btn-primary" onclick="saveConfig()">
+                            💾 保存配置
+                        </button>
+                    </div>
+
+                    <div id="config-content">
+                        <p class="placeholder">配置管理功能正在开发中...</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 加载提示 -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <p>加载中...</p>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="../static/js/main.js"></script>
+    <script src="../static/js/dashboard.js"></script>
+    <script src="../static/js/memories.js"></script>
+</body>
+</html>
