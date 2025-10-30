@@ -10,10 +10,15 @@ import re
 
 
 # --- AstrBot 核心导入 ---
-from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.event.filter import PermissionType, permission_type
+from astrbot.api.event import AstrMessageEvent
+from astrbot.api.event.filter import (
+    on_llm_request,
+    on_llm_response,
+    command_group,
+    permission_type,
+    PermissionType,
+)
 from astrbot.api.star import Context, Star, register
-from astrbot.api.all import command_group  # 导入 AstrBot API
 from astrbot.api.message_components import PlainResult  # 导入消息组件
 from astrbot.core.log import LogManager
 from astrbot.api.provider import LLMResponse, ProviderRequest
@@ -68,7 +73,10 @@ class Mnemosyne(Star):
             embedding_plugin = self.context.get_registered_star(
                 "astrbot_plugin_embedding_adapter"
             )
-            if embedding_plugin:
+            # 安全访问embedding_adapter：检查激活状态和star_cls是否存在
+            if (embedding_plugin
+                and embedding_plugin.activated
+                and embedding_plugin.star_cls is not None):
                 self.ebd = embedding_plugin.star_cls
                 dim = self.ebd.get_dim()
                 model_name = self.ebd.get_model_name()
@@ -79,7 +87,7 @@ class Mnemosyne(Star):
                     )
             else:
                 raise ValueError(
-                    "嵌入服务适配器未正确注册或未返回有效的维度和模型名称。"
+                    "嵌入服务适配器未正确注册、激活或未返回有效的维度和模型名称。"
                 )
         except Exception as e:
             self.logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
@@ -180,19 +188,20 @@ class Mnemosyne(Star):
             raise  # 重新抛出异常，让上层知道初始化失败
 
     # --- 事件处理钩子 (调用 memory_operations.py 中的实现) ---
-    @filter.on_llm_request()
+    @on_llm_request()
     async def query_memory(self, event: AstrMessageEvent, req: ProviderRequest):
         """[事件钩子] 在 LLM 请求前，查询并注入长期记忆。"""
         # 当会话第一次发生时，插件会从AstrBot中获取上下文历史，之后的会话历史由插件自动管理
         try:
             if not self.provider:
                 provider_id = self.config.get("LLM_providers", "")
-                
+
                 # 验证 provider_id 的有效性
                 if not provider_id:
                     self.logger.warning("LLM_providers 未配置，尝试使用当前正在使用的 provider")
                     try:
-                        self.provider = self.context.get_using_provider()
+                        # 支持会话隔离：传入umo参数
+                        self.provider = self.context.get_using_provider(umo=event.unified_msg_origin)
                         if not self.provider:
                             self.logger.error("无法获取任何可用的 LLM provider")
                             return
@@ -205,15 +214,15 @@ class Mnemosyne(Star):
                     if not re.match(r'^[a-zA-Z0-9_-]+$', provider_id):
                         self.logger.error(f"provider_id 格式无效: {provider_id}")
                         return
-                    
+
                     # 尝试获取指定的 provider
                     try:
                         self.provider = self.context.get_provider_by_id(provider_id)
                         if not self.provider:
                             self.logger.error(f"无法找到 provider_id '{provider_id}' 对应的 provider")
-                            # 回退到使用当前 provider
+                            # 回退到使用当前 provider（支持会话隔离）
                             self.logger.warning("回退到使用当前正在使用的 provider")
-                            self.provider = self.context.get_using_provider()
+                            self.provider = self.context.get_using_provider(umo=event.unified_msg_origin)
                             if not self.provider:
                                 self.logger.error("回退失败，无法获取任何可用的 LLM provider")
                                 return
@@ -228,7 +237,7 @@ class Mnemosyne(Star):
             )
         return
 
-    @filter.on_llm_response()
+    @on_llm_response()
     async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse):
         """[事件钩子] 在 LLM 响应后"""
         try:
@@ -313,7 +322,9 @@ class Mnemosyne(Star):
         """清除当前会话 ID 的记忆信息
         使用示例：/memory reset [confirm]
         """
-        if not self.context._config.get("platform_settings").get("unique_session"):
+        # 使用get_config()而不是直接访问私有属性_config
+        config = self.context.get_config()
+        if not config.get("platform_settings", {}).get("unique_session"):
             if is_group_chat(event):
                 yield event.plain_result("⚠️ 未开启群聊会话隔离，禁止清除群聊长期记忆")
                 return
