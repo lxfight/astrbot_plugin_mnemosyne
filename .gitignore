@@ -107,3 +107,16 @@ pytest.ini
 requirements-dev.txt
 requirements-test.txt
 docs/update_log.md
+docs/技术文档.md
+docs/astr_message_event.md
+docs/astrbot_message.md
+docs/context.md
+docs/course_Milvus.md
+docs/message_member.md
+docs/message_type.md
+docs/overall_architecture.md
+docs/overall_operation_process.md
+docs/platform_metadata.md
+docs/plugin.md
+docs/star_metadata.md
+docs/star.md
