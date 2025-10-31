@@ -65,20 +65,27 @@ class MessageCounter:
         Raises:
             ValueError: 如果提供的路径不安全（路径遍历攻击）
         """
+        # P0 优化: 尽早初始化关键属性，防止析构函数中的 AttributeError
+        self._closed = False
+        self._connection: Optional[sqlite3.Connection] = None
+        self._lock = threading.Lock()  # 线程锁，确保并发安全
+
         # 确定默认数据目录
         if plugin_data_dir:
             # 外部提供了数据目录，直接使用
             default_data_dir = Path(plugin_data_dir)
             logging.debug(f"使用外部提供的插件数据目录: {default_data_dir}")
         else:
-            # 尝试使用 StarTools.get_data_dir() 获取插件数据目录
+            # 必须使用 StarTools.get_data_dir() 获取插件数据目录
             try:
                 default_data_dir = Path(StarTools.get_data_dir())
                 logging.debug(f"使用 StarTools 获取的插件数据目录: {default_data_dir}")
             except RuntimeError as e:
-                # 获取失败，使用当前工作目录下的默认位置
-                logging.warning(f"无法通过 StarTools 获取数据目录: {e}，将使用默认路径")
-                default_data_dir = Path.cwd() / "mnemosyne_data"
+                # 获取失败时，输出错误日志但不使用硬编码路径
+                # 让调用者处理 RuntimeError
+                logging.error(f"无法通过 StarTools 获取数据目录: {e}")
+                logging.error("插件数据目录必须通过 StarTools.get_data_dir() 获取，不允许使用硬编码路径")
+                raise RuntimeError(f"无法初始化消息计数器：{e}")
 
         if db_file is None:
             # 使用标准插件数据目录
@@ -99,11 +106,6 @@ class MessageCounter:
             except ValueError as e:
                 logging.error(f"数据库路径验证失败: {e}")
                 raise ValueError(f"不安全的数据库路径: {db_file}。{e}") from e
-
-        # P0 优化: 持久连接和线程安全
-        self._connection: Optional[sqlite3.Connection] = None
-        self._lock = threading.Lock()  # 线程锁，确保并发安全
-        self._closed = False
 
         self._initialize_db()
 
@@ -331,7 +333,8 @@ class MessageCounter:
         S0 优化: 析构函数，确保资源被清理。
         注意：不应依赖此方法进行关键清理，应显式调用 close()
         """
-        if not self._closed:
+        # P0 优化: 使用 getattr 进行安全的属性访问，防止初始化失败导致的 AttributeError
+        if not getattr(self, '_closed', True):
             try:
                 self.close()
             except Exception:

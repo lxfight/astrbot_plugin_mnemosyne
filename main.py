@@ -154,12 +154,21 @@ class Mnemosyne(Star):
         非阻塞的异步初始化流程
         """
         try:
+            # 0. 先在主模块中获取数据目录
+            plugin_data_dir = None
+            try:
+                from astrbot.api.star import StarTools
+                plugin_data_dir = StarTools.get_data_dir()
+                logger.info(f"已获取插件数据目录: {plugin_data_dir}")
+            except Exception as e:
+                logger.warning(f"无法获取插件数据目录: {e}，将使用后备方案")
+
             # 1. 非阻塞初始化 Embedding Provider
             embedding_ready = await self._initialize_embedding_provider_async(max_wait=10.0)
 
             if not embedding_ready:
                 logger.warning(
-                    "⚠️ Embedding Provider 未就绪，将以降级模式运行。"
+                    "���️ Embedding Provider 未就绪，将以降级模式运行。"
                     "搜索功能可能受限。"
                 )
                 # 不返回，继续初始化其他组件
@@ -197,7 +206,7 @@ class Mnemosyne(Star):
 
             # 初始化其他核心组件（消息计数器、上下文管理器）
             try:
-                initialization.initialize_components(self)
+                initialization.initialize_components(self, plugin_data_dir)
                 self._initialized_components.append("components")
             except Exception as e:
                 logger.warning(

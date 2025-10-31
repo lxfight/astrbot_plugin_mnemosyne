@@ -530,16 +530,20 @@ def _migrate_data_if_needed(old_dir: str, new_dir: str):
             init_logger.warning(f"数据迁移失败: {e}，继续使用新位置")
 
 
-def initialize_components(plugin: "Mnemosyne"):
+def initialize_components(plugin: "Mnemosyne", plugin_data_dir=None):
     """初始化非 Milvus 的其他组件，如上下文管理器和消息计数器。"""
     init_logger.debug("开始初始化其他核心组件...")
     # 1. 初始化消息计数器和上下文管理器
     try:
         plugin.context_manager = ConversationContextManager()
 
-        # 使用 StarTools.get_data_dir() 获取插件数据目录
+        # 使用传入的 plugin_data_dir，或回退到 StarTools.get_data_dir()
         try:
-            plugin_data_dir = StarTools.get_data_dir()
+            if plugin_data_dir is None:
+                plugin_data_dir = StarTools.get_data_dir()
+                init_logger.debug(f"从 StarTools 获取插件数据目录: {plugin_data_dir}")
+            else:
+                init_logger.debug(f"使用传入的插件数据目录: {plugin_data_dir}")
 
             # 检查是否需要迁移旧数据
             # 旧的相对路径：./mnemosyne_data 或 mnemosyne_data
@@ -550,10 +554,10 @@ def initialize_components(plugin: "Mnemosyne"):
                 _migrate_data_if_needed(str(old_relative_dir), plugin_data_dir)
 
             plugin.msg_counter = MessageCounter(plugin_data_dir=plugin_data_dir)
-            init_logger.debug(f"使用 StarTools 获取的插件数据目录初始化 MessageCounter: {plugin_data_dir}")
+            init_logger.debug(f"使用插件数据目录初始化 MessageCounter: {plugin_data_dir}")
         except RuntimeError as e:
             # 如果获取失败，使用 MessageCounter 的后备机制
-            init_logger.warning(f"无法通过 StarTools 获取数据目录，将使用 MessageCounter 的后备方案: {e}")
+            init_logger.warning(f"无法获取数据目录，将使用 MessageCounter 的后备方案: {e}")
             plugin.msg_counter = MessageCounter()
 
         init_logger.info("消息计数器和上下文管理器初始化成功。")
