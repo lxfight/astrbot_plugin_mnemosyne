@@ -61,11 +61,17 @@ async def handle_query_memory(
         session_id = await plugin.context.conversation_manager.get_curr_conversation_id(
             event.unified_msg_origin
         )
-        
+
         # M12 修复: 加强 session_id 空值检查，确保类型和内容都有效
         if session_id is None or not isinstance(session_id, str) or not session_id.strip():
             logger.error(f"无法获取有效的 session_id (值: {session_id}, 类型: {type(session_id).__name__})，跳过记忆查询操作")
             return
+
+        # 检查 context_manager 和 msg_counter 是否可用
+        if not plugin.context_manager or not plugin.msg_counter:
+            logger.warning("context_manager 或 msg_counter 不可用，跳过记忆查询")
+            return
+
         # 判断是否在历史会话管理器中，如果不在，则进行初始化
         if session_id not in plugin.context_manager.conversations:
             plugin.context_manager.init_conv(session_id, req.contexts, event)
@@ -82,34 +88,31 @@ async def handle_query_memory(
         detailed_results = []
         try:
             # 1. 向量化用户查询
-            # P0 优化: 使用异步方法避免阻塞事件循环
+            # 使用 AstrBot EmbeddingProvider（异步）
             try:
-                # 检查是否有异步方法，如果有则优先使用
-                if hasattr(plugin.ebd, 'get_embeddings_async'):
-                    query_embeddings = await plugin.ebd.get_embeddings_async([req.prompt])
-                else:
-                    # 回退到使用 executor 的方式
-                    query_embeddings = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda: plugin.ebd.get_embeddings([req.prompt]),
-                    )
+                if not plugin.embedding_provider:
+                    logger.warning("Embedding Provider 不可用，无法执行 RAG 搜索")
+                    return
+
+                # 使用 AstrBot EmbeddingProvider 的 embed 方法
+                query_vector = await plugin.embedding_provider.embed(req.prompt)
+
+                if not query_vector:
+                    logger.error("无法获取用户查询的 Embedding 向量。")
+                    return
+
             except ConnectionError as e:
                 logger.error(f"网络连接错误，无法获取 Embedding: {e}", exc_info=True)
-                return  # 明确返回，不继续执行
+                return
             except ValueError as e:
                 logger.error(f"输入参数错误，无法获取 Embedding: {e}", exc_info=True)
-                return  # 明确返回，不继续执行
+                return
             except RuntimeError as e:
                 logger.error(f"运行时错误，无法获取 Embedding: {e}", exc_info=True)
-                return  # 明确返回，不继续执行
+                return
             except Exception as e:
                 logger.error(f"获取 Embedding 时发生未知错误: {e}", exc_info=True)
-                return  # 明确返回，不继续执行
-
-            if not query_embeddings:
-                logger.error("无法获取用户查询的 Embedding 向量。")
                 return
-            query_vector = query_embeddings[0]
 
             # 2. 执行 Milvus 搜索
             detailed_results = await _perform_milvus_search(
@@ -136,6 +139,11 @@ async def handle_on_llm_resp(
     """
     if resp.role != "assistant":
         logger.warning("LLM 响应不是助手角色，不进行记录。")
+        return
+
+    # 检查是否有 context_manager 和 msg_counter
+    if not plugin.context_manager or not plugin.msg_counter:
+        logger.warning("context_manager 或 msg_counter 不可用，跳过记忆记录")
         return
 
     try:
@@ -177,11 +185,14 @@ async def _check_rag_prerequisites(plugin: "Mnemosyne") -> bool:
         True 如果前提条件满足，False 否则。
     """
     # logger = plugin.logger
-    if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
-        logger.error("Milvus 服务未初始化或未连接，无法查询长期记忆。")
+    if not plugin.milvus_manager:
+        logger.warning("Milvus 管理器未初始化，无法查询长期记忆。")
         return False
-    if not plugin.ebd:
-        logger.error("Embedding API 未初始化，无法查询长期记忆。")
+    if not plugin.milvus_manager.is_connected():
+        logger.warning("Milvus 服务未连接，无法查询长期记忆。")
+        return False
+    if not plugin.embedding_provider:
+        logger.warning("Embedding Provider 未初始化，部分功能可能受限。")
         return False
     if not plugin.msg_counter:
         logger.error("消息计数器未初始化，将无法实现记忆总结")
@@ -539,8 +550,8 @@ async def _check_summary_prerequisites(plugin: "Mnemosyne", memory_text: str) ->
     if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
         logger.error("Milvus 服务不可用，无法存储总结后的长期记忆。")
         return False
-    if not plugin.ebd:
-        logger.error("Embedding API 不可用，无法向量化总结记忆。")
+    if not plugin.embedding_provider:
+        logger.error("Embedding Provider 不可用，无法向量化总结记忆。")
         return False
     if not memory_text or not memory_text.strip():
         logger.warning("尝试总结空的或仅包含空白的记忆文本，跳过。")
@@ -746,28 +757,31 @@ async def handle_summary_long_memory(
             return
 
         # 3. 获取总结文本的 Embedding
-        # P0 优化: 使用异步方法避免阻塞事件循环
+        # 使用 AstrBot EmbeddingProvider（异步）
         try:
-            # 检查是否有异步方法，如果有则优先使用
-            if hasattr(plugin.ebd, 'get_embeddings_async'):
-                embedding_vectors = await plugin.ebd.get_embeddings_async([summary_text])
-            else:
-                # 回退到使用 executor 的方式
-                embedding_vectors = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: plugin.ebd.get_embeddings([summary_text]),
-                )
+            if not plugin.embedding_provider:
+                logger.error("Embedding Provider 不可用，无法获取总结的 Embedding")
+                return
+
+            # 使用 AstrBot EmbeddingProvider 的 embed 方法
+            embedding_vector = await plugin.embedding_provider.embed(summary_text)
+
+            if not embedding_vector:
+                logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")
+                return
+
         except (ConnectionError, ValueError, RuntimeError) as e:
             logger.error(
                 f"获取总结文本 Embedding 时出错: '{summary_text[:100]}...' - {e}",
                 exc_info=True,
             )
-            embedding_vectors = None  # 确保后续能处理失败
-
-        if not embedding_vectors:
-            logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")
             return
-        embedding_vector = embedding_vectors[0]
+        except Exception as e:
+            logger.error(
+                f"获取总结文本 Embedding 时发生未知错误: '{summary_text[:100]}...' - {e}",
+                exc_info=True,
+            )
+            return
 
         # 4. 存储到 Milvus
         await _store_summary_to_milvus(

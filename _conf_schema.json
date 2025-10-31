@@ -1,9 +1,10 @@
 {
     "LLM_providers":{
-        "description":"记忆总结使用的LLM服务商ID",
+        "description":"记忆总结使用的LLM服务商",
         "type":"string",
-        "pattern":"^[a-zA-Z0-9_-]+$",
-        "minLength":1
+        "hint":"选择用于记忆总结的大语言模型提供商。留空则使用当前会话的默认提供商",
+        "_special":"select_provider",
+        "default":""
     },
     "milvus_lite_path":{
         "description":"milvus数据库的lite模式路径",

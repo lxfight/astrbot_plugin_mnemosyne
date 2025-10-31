@@ -7,9 +7,11 @@ Mnemosyne 插件初始化逻辑
 from typing import TYPE_CHECKING
 import asyncio
 import re
+import platform
 from pymilvus import CollectionSchema, FieldSchema, DataType
 
 from astrbot.core.log import LogManager
+from astrbot.api.star import StarTools
 
 # 导入必要的类型和模块
 from .constants import (
@@ -185,20 +187,27 @@ def initialize_milvus(plugin: "Mnemosyne"):
     初始化 MilvusManager。
     根据配置决定连接到 Milvus Lite 或标准 Milvus 服务器，
     并进行必要的集合与索引设置。
+
+    注意：Windows 系统不支持 Milvus Lite，自动使用标准 Milvus。
     """
     init_logger.debug("开始初始化 Milvus 连接和设置...")
     connect_args = {} # 用于收集传递给 MilvusManager 的参数
     is_lite_mode = False # 标记是否为 Lite 模式
 
+    # 检测操作系统：Windows 不支持 Milvus Lite
+    is_windows = platform.system() == "Windows"
+    if is_windows:
+        init_logger.info("检测到 Windows 系统，Milvus Lite 不支持 Windows，将使用标准 Milvus")
+
     try:
-        # 1. 优先检查 Milvus Lite 配置
-        lite_path = plugin.config.get("milvus_lite_path","")
+        # 1. 优先检查 Milvus Lite 配置（仅在非 Windows 系统上）
+        lite_path = plugin.config.get("milvus_lite_path","") if not is_windows else ""
 
         # 2. 获取标准 Milvus 的地址配置
         milvus_address = plugin.config.get("address")
 
-        if lite_path:
-            # --- 检测到 Milvus Lite 配置 ---
+        if lite_path and not is_windows:
+            # --- 检测到 Milvus Lite 配置（非 Windows）---
             init_logger.info(f"检测到 Milvus Lite 配置，将使用本地路径: '{lite_path}'")
             connect_args["lite_path"] = lite_path
             is_lite_mode = True
@@ -206,8 +215,8 @@ def initialize_milvus(plugin: "Mnemosyne"):
                 init_logger.warning(f"同时配置了 'milvus_lite_path' 和 'address'，将优先使用 Lite 路径，忽略 'address' ('{milvus_address}')。")
 
         elif milvus_address:
-            # --- 未配置 Lite 路径，使用标准 Milvus 地址 ---
-            init_logger.info(f"未配置 Milvus Lite 路径，将根据 'address' 配置连接标准 Milvus: '{milvus_address}'")
+            # --- 未配置 Lite 路径或为 Windows 系统，使用标准 Milvus 地址 ---
+            init_logger.info(f"将根据 'address' 配置连接标准 Milvus: '{milvus_address}'")
             is_lite_mode = False
             # 判断 address 是 URI 还是 host:port
             if milvus_address.startswith(("http://", "https://", "unix:")):
@@ -305,35 +314,36 @@ def initialize_milvus(plugin: "Mnemosyne"):
             # 使用新的 MilvusVectorDB 适配器
             init_logger.info(f"准备使用以下参数初始化 MilvusVectorDB 适配器: {loggable_connect_args}")
             plugin.milvus_adapter = MilvusVectorDB(**connect_args)
-            
-            # 检查连接状态
-            if not plugin.milvus_adapter or not plugin.milvus_adapter._manager.is_connected():
-                mode_name = "Milvus Lite" if is_lite_mode else "标准 Milvus"
-                raise ConnectionError(
-                    f"初始化 MilvusVectorDB 适配器或连接到 {mode_name} 失败。请检查配置和 Milvus 实例状态。"
+
+            # 不再在初始化时检查连接，而是延迟到首次使用时
+            if not plugin.milvus_adapter:
+                raise RuntimeError(
+                    f"创建 MilvusVectorDB 适配器实例失败。请检查配置。"
                 )
-            
+
             mode_name = "Milvus Lite" if plugin.milvus_adapter._manager._is_lite else "标准 Milvus"
-            init_logger.info(f"成功通过 MilvusVectorDB 适配器连接到 {mode_name} (别名: {alias})。")
-            
+            init_logger.info(f"MilvusVectorDB 适配器已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。")
+
             # 为了向后兼容，将适配器的 manager 赋值给 milvus_manager
             plugin.milvus_manager = plugin.milvus_adapter._manager
         else:
             # 使用原始的 MilvusManager（默认，保持向后兼容）
             init_logger.info(f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}")
-            
+
             # 创建 MilvusManager 实例
+            # 注意：不在初始化时立即连接，而是延迟到首次使用时连接
+            # 这样可以容错处理配置检查和初始化步骤
             plugin.milvus_manager = MilvusManager(**connect_args)
 
-            # 6. 检查连接状态
-            if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
+            # 6. 不再在初始化时检查连接，而是记录已准备好
+            if not plugin.milvus_manager:
                 mode_name = "Milvus Lite" if is_lite_mode else "标准 Milvus"
-                raise ConnectionError(
-                    f"初始化 MilvusManager 或连接到 {mode_name} 失败。请检查配置和 Milvus 实例状态。"
+                raise RuntimeError(
+                    f"创建 MilvusManager 实例失败。请检查配置。"
                 )
 
             mode_name = "Milvus Lite" if plugin.milvus_manager._is_lite else "标准 Milvus"
-            init_logger.info(f"成功连接到 {mode_name} (别名: {alias})。")
+            init_logger.info(f"MilvusManager 已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。")
 
         # 7. 设置集合和索引
         init_logger.debug("开始设置 Milvus 集合和索引...")
@@ -345,7 +355,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
     except Exception as e:
         init_logger.error(f"Milvus 初始化或设置过程中发生错误: {e}", exc_info=True) # exc_info=True 会记录堆栈跟踪
         plugin.milvus_manager = None  # 确保在初始化失败时 manager 被设为 None
-        raise # 重新抛出异常，以便上层代码可以捕获并处理
+        # 不再抛出异常，允许插件以降级模式运行
 
 
 def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
@@ -374,7 +384,7 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
     else:
         # 如果集合不存在，则创建集合
         init_logger.info(f"未找到集合 '{collection_name}'。正在创建...")
-        
+
         # 根据使用的类型选择创建方法
         if use_adapter:
             # 使用适配器创建集合（需要将 CollectionSchema 转换为字典）
@@ -385,12 +395,10 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
             # 使用管理器创建集合
             if not manager.create_collection(collection_name, plugin.collection_schema):
                 raise RuntimeError(f"创建 Milvus 集合 '{collection_name}' 失败。")
-        
-        init_logger.info(f"成功创建集合 '{collection_name}'。")
-        # 创建集合后立即尝试创建索引
-        ensure_milvus_index(plugin, collection_name)
 
-    # 再次确保索引存在（即使集合已存在也检查一遍）
+        init_logger.info(f"成功创建集合 '{collection_name}'。")
+
+    # 确保索引存在（只调用一次）
     ensure_milvus_index(plugin, collection_name)
 
     # 确保集合已加载到内存中以供搜索
@@ -486,79 +494,75 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
         raise
 
 
+def _migrate_data_if_needed(old_dir: str, new_dir: str):
+    """
+    如果插件数据曾存储在其他位置，自动将其迁移到新位置。
+
+    Args:
+        old_dir (str): 旧的数据目录路径
+        new_dir (str): 新的数据目录路径
+    """
+    from pathlib import Path
+    import shutil
+
+    old_path = Path(old_dir)
+    new_path = Path(new_dir)
+
+    # 如果旧目录存在且新目录不同
+    if old_path.exists() and old_path != new_path:
+        try:
+            # 检查旧目录中是否有数据
+            old_files = list(old_path.glob("*"))
+            if old_files:
+                new_path.mkdir(parents=True, exist_ok=True)
+                for file in old_files:
+                    new_file = new_path / file.name
+                    if file.is_file():
+                        if not new_file.exists():
+                            shutil.copy2(file, new_file)
+                            init_logger.info(f"已迁移数据文件: {file.name}")
+                    elif file.is_dir():
+                        if not new_file.exists():
+                            shutil.copytree(file, new_file)
+                            init_logger.info(f"已迁移数据目录: {file.name}")
+                init_logger.info(f"已完成从 '{old_dir}' 到 '{new_dir}' 的数据迁移")
+        except Exception as e:
+            init_logger.warning(f"数据迁移失败: {e}，继续使用新位置")
+
+
 def initialize_components(plugin: "Mnemosyne"):
-    """初始化非 Milvus 的其他组件，如上下文管理器和嵌入 API。"""
+    """初始化非 Milvus 的其他组件，如上下文管理器和消息计数器。"""
     init_logger.debug("开始初始化其他核心组件...")
     # 1. 初始化消息计数器和上下文管理器
     try:
         plugin.context_manager = ConversationContextManager()
-        plugin.msg_counter = MessageCounter()
-        init_logger.info("消息计数器初始化成功。")
+
+        # 使用 StarTools.get_data_dir() 获取插件数据目录
+        try:
+            plugin_data_dir = StarTools.get_data_dir()
+
+            # 检查是否需要迁移旧数据
+            # 旧的相对路径：./mnemosyne_data 或 mnemosyne_data
+            from pathlib import Path
+            old_relative_dir = Path("./mnemosyne_data")
+            if old_relative_dir.exists() and Path(plugin_data_dir) != old_relative_dir:
+                init_logger.info("检测到旧的数据目录，启动数据迁移...")
+                _migrate_data_if_needed(str(old_relative_dir), plugin_data_dir)
+
+            plugin.msg_counter = MessageCounter(plugin_data_dir=plugin_data_dir)
+            init_logger.debug(f"使用 StarTools 获取的插件数据目录初始化 MessageCounter: {plugin_data_dir}")
+        except RuntimeError as e:
+            # 如果获取失败，使用 MessageCounter 的后备机制
+            init_logger.warning(f"无法通过 StarTools 获取数据目录，将使用 MessageCounter 的后备方案: {e}")
+            plugin.msg_counter = MessageCounter()
+
+        init_logger.info("消息计数器和上下文管理器初始化成功。")
     except Exception as e:
-        init_logger.error(f"消息计数器初始化失败:{e}")
+        init_logger.error(f"消息计数器初始化失败:{e}", exc_info=True)
         raise
 
-    # 2. 初始化 Embedding API
-    try:
-        # 检查必要的配置是否存在
-        try:
-            plugin.ebd = plugin.context.get_registered_star("astrbot_plugin_embedding_adapter").star_cls
-            dim=plugin.ebd.get_dim()
-            model_name=plugin.ebd.get_model_name()
-            if dim is not None and model_name is not None:
-                plugin.config["embedding_dim"] = dim
-                plugin.config["collection_name"] = "ea_"+re.sub(r'[^a-zA-Z0-9]', '_', model_name)
-        except Exception as e:
-            init_logger.warning(f"嵌入服务适配器插件加载失败: {e}", exc_info=True)
-            plugin.ebd = None
-
-        required_keys = ["embedding_model", "embedding_key"]
-        missing_keys = [key for key in required_keys if not plugin.config.get(key)]
-        
-        if plugin.ebd is None:
-            if missing_keys:
-                raise ValueError(f"缺少 Embedding API 的配置项: {', '.join(missing_keys)}")
-            embedding_service = plugin.config.get("embedding_service")
-            embedding_key = plugin.config.get("embedding_key")
-            
-            # 安全检查：确保不会在日志中泄露 API 密钥
-            if not embedding_key:
-                init_logger.warning("embedding_key 未配置或为空")
-
-            if embedding_service == "gemini":
-                plugin.ebd = GeminiEmbeddingAPI(
-                    model=plugin.config.get("embedding_model"),
-                    api_key=embedding_key,
-                )
-                init_logger.info("已选择 Gemini 作为嵌入服务提供商")
-            elif embedding_service == "openai":
-                plugin.ebd = OpenAIEmbeddingAPI(
-                    model=plugin.config.get("embedding_model"),
-                    api_key=embedding_key,
-                    base_url=plugin.config.get("embedding_url"),
-                )
-                init_logger.info("已选择 OpenAI 作为嵌入服务提供商")
-            else:
-                raise ValueError(f"不支持的嵌入服务提供商: {embedding_service}")
-
-        try:
-            plugin.ebd.test_connection()  # 假设此方法在失败时抛出异常
-            init_logger.info("Embedding API 初始化成功，连接测试通过。")
-        except AttributeError:
-            init_logger.warning(
-                "Embedding API 类没有 test_connection 方法，跳过连接测试。"
-            )
-        except Exception as conn_err:
-            init_logger.error(f"Embedding API 连接测试失败: {conn_err}", exc_info=True)
-            # 决定是否允许插件在 Embedding API 连接失败时继续运行
-            # raise ConnectionError(f"无法连接到 Embedding API: {conn_err}") from conn_err
-            init_logger.warning("将继续运行，但 Embedding 功能将不可用。")
-            plugin.ebd = None  # 明确设为 None 表示不可用
-
-    except Exception as e:
-        init_logger.error(f"初始化 Embedding API 失败: {e}", exc_info=True)
-        plugin.ebd = None  # 确保失败时 ebd 为 None
-        raise  # Embedding 是核心功能，失败则插件无法工作
+    # 注: Embedding Provider 已在 main.py 中异步初始化
+    # embedding_provider 的初始化是非阻塞的，不会阻止插件启动
 
     init_logger.debug("其他核心组件初始化完成。")
 

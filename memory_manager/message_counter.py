@@ -51,21 +51,35 @@ class MessageCounter:
     - 支持上下文管理器和资源清理
     """
 
-    def __init__(self, db_file: Optional[str] = None):
+    def __init__(self, db_file: Optional[str] = None, plugin_data_dir: Optional[str] = None):
         """
         初始化消息计数器，使用 SQLite 数据库存储。
-        db_file 参数现在是可选的。如果为 None，则自动使用 StarTools.get_data_dir() 生成路径。
+        db_file 参数现在是可选的。如果为 None，则自动使用数据目录生成路径。
 
         Args:
             db_file (str, optional): SQLite 数据库文件路径。
                                      如果为 None，则使用标准插件数据目录。
-        
+            plugin_data_dir (str, optional): 插件数据目录。如果提供，将直接使用此目录。
+                                             如果不提供，将尝试使用 StarTools.get_data_dir()。
+
         Raises:
             ValueError: 如果提供的路径不安全（路径遍历攻击）
         """
-        # 使用 AstrBot 标准 API 获取插件数据目录
-        default_data_dir = Path(StarTools.get_data_dir())
-        
+        # 确定默认数据目录
+        if plugin_data_dir:
+            # 外部提供了数据目录，直接使用
+            default_data_dir = Path(plugin_data_dir)
+            logging.debug(f"使用外部提供的插件数据目录: {default_data_dir}")
+        else:
+            # 尝试使用 StarTools.get_data_dir() 获取插件数据目录
+            try:
+                default_data_dir = Path(StarTools.get_data_dir())
+                logging.debug(f"使用 StarTools 获取的插件数据目录: {default_data_dir}")
+            except RuntimeError as e:
+                # 获取失败，使用当前工作目录下的默认位置
+                logging.warning(f"无法通过 StarTools 获取数据目录: {e}，将使用默认路径")
+                default_data_dir = Path.cwd() / "mnemosyne_data"
+
         if db_file is None:
             # 使用标准插件数据目录
             default_data_dir.mkdir(parents=True, exist_ok=True)
@@ -90,7 +104,7 @@ class MessageCounter:
         self._connection: Optional[sqlite3.Connection] = None
         self._lock = threading.Lock()  # 线程锁，确保并发安全
         self._closed = False
-        
+
         self._initialize_db()
 
     def _get_connection(self) -> sqlite3.Connection:

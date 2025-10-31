@@ -131,8 +131,8 @@ class MilvusManager:
         # 5. 合并额外的 kwargs 参数
         self._merge_kwargs()
 
-        # 6. 尝试建立初始连接
-        self._attempt_initial_connect()
+        # 6. 延迟连接：不在初始化时建立连接，而是在第一次需要时建立
+        # 这样可以容错处理配置检查和其他初始化步骤
 
     # ------- 私有方法 -------
     def _prepare_lite_path(self, path_input: str) -> str:
@@ -1041,6 +1041,7 @@ class MilvusManager:
         collection = self.get_collection(collection_name)
         if not collection:
             return False
+
         # 检查加载状态
         try:
             progress = utility.loading_progress(collection_name, using=self.alias)
@@ -1049,18 +1050,20 @@ class MilvusManager:
                 logger.info(f"集合 '{collection_name}' 已加载。")
                 return True
         except Exception as e:
-            if e.code == 101:  # 集合未加载
-                logger.warning(f"集合 '{collection_name}' 尚未加载，将尝试加载。")
+            # 检查异常代码，如果是 101（集合未加载），则不记录为错误
+            error_code = getattr(e, 'code', None)
+            if error_code == 101:  # 集合未加载 - 这是正常情况，我们将继续加载
+                logger.debug(f"集合 '{collection_name}' 尚未加载，将尝试加载。")
             else:
-                logger.error(
-                    f"检查集合 '{collection_name}' 加载状态时出错: {e}。将尝试加载。"
+                logger.debug(
+                    f"检查集合 '{collection_name}' 加载状态时出错（代码 {error_code}）: {str(e)[:100]}。将尝试加载。"
                 )
 
         logger.info(f"尝试将集合 '{collection_name}' 加载到内存...")
         try:
             collection.load(replica_number=replica_number, timeout=timeout, **kwargs)
             # 检查加载进度/等待完成
-            logger.info(f"等待集合 '{collection_name}' 加载完成...")
+            logger.debug(f"等待集合 '{collection_name}' 加载完成...")
             utility.wait_for_loading_complete(
                 collection_name, using=self.alias, timeout=timeout
             )
