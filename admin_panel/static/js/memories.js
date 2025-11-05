@@ -4,16 +4,79 @@
 let currentSearchParams = {
     keyword: '',
     session_id: null,
+    persona_id: null,
     start_date: null,
     end_date: null,
     page: 1,
-    page_size: 20
+    page_size: 20,
+    group_by: ''
 };
 
 // 选中的记忆ID列表
 let selectedMemoryIds = new Set();
 
-// 加载记忆列表
+// 当前记忆数据（用于前端过滤）
+let allMemoriesCache = [];
+
+// 加载所有记忆
+async function loadAllMemories() {
+    console.log('加载所有记忆...');
+    showLoading(true);
+    
+    try {
+        // 使用 loadMemories 函数来加载记忆，避免重复代码
+        await loadMemories({
+            page: 1,
+            page_size: 100  // 使用合理的分页大小
+        });
+    } catch (error) {
+        console.error('加载记忆失败:', error);
+        showMemoriesError('记忆列表加载失败: ' + error.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+// 备用的完整加载函数（如果需要加载所有记忆）
+async function loadAllMemoriesComplete() {
+    console.log('加载所有记忆（完整版）...');
+    showLoading(true);
+    
+    try {
+        // 构建查询参数
+        const params = new URLSearchParams({
+            limit: 1000,
+            offset: 0,
+            sort_by: 'create_time',
+            sort_order: 'desc'
+        });
+        
+        // POST 请求需要传递空对象作为 body
+        const data = await apiCall(`/memories/search?${params.toString()}`, 'POST', {});
+        
+        if (data && data.records) {
+            allMemoriesCache = data.records;
+            AppState.memoriesData = data;
+            
+            // 根据分组方式渲染
+            const groupBy = document.getElementById('search-group-by')?.value || '';
+            if (groupBy) {
+                renderGroupedMemories(data.records, groupBy);
+            } else {
+                renderMemoriesList(data.records);
+            }
+            
+            showToast(`成功加载 ${data.records.length} 条记忆`, 'success');
+        }
+    } catch (error) {
+        console.error('加载记忆失败:', error);
+        showMemoriesError('记忆列表加载失败: ' + error.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+// 加载记忆列表（带参数）
 async function loadMemories(params = {}) {
     console.log('加载记忆列表...', params);
     showLoading(true);
@@ -22,19 +85,55 @@ async function loadMemories(params = {}) {
     currentSearchParams = { ...currentSearchParams, ...params };
     
     try {
-        const data = await apiCall('/memories/search', 'POST', currentSearchParams);
-        AppState.memoriesData = data;
+        // 构建查询参数
+        const queryParams = new URLSearchParams();
+        if (currentSearchParams.session_id) {
+            queryParams.append('session_id', currentSearchParams.session_id);
+        }
+        if (currentSearchParams.persona_id) {
+            queryParams.append('persona_id', currentSearchParams.persona_id);
+        }
+        if (currentSearchParams.keyword) {
+            queryParams.append('keyword', currentSearchParams.keyword);
+        }
+        queryParams.append('limit', currentSearchParams.page_size);
+        queryParams.append('offset', (currentSearchParams.page - 1) * currentSearchParams.page_size);
+        queryParams.append('sort_by', 'create_time');
+        queryParams.append('sort_order', 'desc');
         
-        // 渲染记忆列表
-        renderMemoriesList(data.memories);
+        const data = await apiCall(`/memories/search?${queryParams.toString()}`, 'POST', {});
         
-        // 更新分页
-        renderPagination(data.pagination);
-        
-        showToast('记忆列表加载成功', 'success');
+        if (data && data.records) {
+            allMemoriesCache = data.records;
+            AppState.memoriesData = data;
+            
+            // 根据分组方式渲染
+            const groupBy = currentSearchParams.group_by || '';
+            if (groupBy) {
+                renderGroupedMemories(data.records, groupBy);
+            } else {
+                renderMemoriesList(data.records);
+            }
+            
+            // 更新分页 - 如果后端返回了 pagination 对象
+            if (data.pagination) {
+                renderPagination(data.pagination);
+            } else if (data.total_count !== undefined) {
+                // 如果后端返回的是 total_count，手动构造 pagination 对象
+                const totalPages = Math.ceil(data.total_count / currentSearchParams.page_size);
+                renderPagination({
+                    page: currentSearchParams.page,
+                    page_size: currentSearchParams.page_size,
+                    total: data.total_count,
+                    total_pages: totalPages
+                });
+            }
+            
+            showToast('记忆列表加载成功', 'success');
+        }
     } catch (error) {
         console.error('加载记忆失败:', error);
-        showMemoriesError('记忆列表加载失败');
+        showMemoriesError('记忆列表加载失败: ' + error.message);
     } finally {
         showLoading(false);
     }
@@ -148,6 +247,12 @@ function renderPagination(pagination) {
     const container = document.getElementById('memories-pagination');
     if (!container) return;
     
+    // 检查 pagination 是否存在
+    if (!pagination) {
+        container.innerHTML = '';
+        return;
+    }
+    
     const { page, page_size, total, total_pages } = pagination;
     
     if (total_pages <= 1) {
@@ -214,6 +319,34 @@ async function resetSearch() {
         end_date: null,
         page: 1
     });
+}
+
+// 清除筛选（别名函数）
+async function clearFilters() {
+    // 清空所有筛选输入框
+    const searchKeyword = document.getElementById('search-keyword');
+    const searchSessionId = document.getElementById('search-session-id');
+    const searchPersonaId = document.getElementById('search-persona-id');
+    const searchGroupBy = document.getElementById('search-group-by');
+    
+    if (searchKeyword) searchKeyword.value = '';
+    if (searchSessionId) searchSessionId.value = '';
+    if (searchPersonaId) searchPersonaId.value = '';
+    if (searchGroupBy) searchGroupBy.value = '';
+    
+    // 重置搜索参数并重新加载
+    currentSearchParams = {
+        keyword: '',
+        session_id: null,
+        persona_id: null,
+        start_date: null,
+        end_date: null,
+        page: 1,
+        page_size: 20,
+        group_by: ''
+    };
+    
+    await loadMemories({ page: 1 });
 }
 
 // 切换记忆选择
@@ -301,9 +434,8 @@ async function deleteMemory(memoryId) {
     showLoading(true);
     
     try {
-        await apiCall('/memories/delete', 'POST', {
-            memory_ids: [memoryId]
-        });
+        // 使用 DELETE 方法删除单个记忆
+        await apiCall(`/memories/${memoryId}`, 'DELETE');
         
         showToast('删除成功', 'success');
         
@@ -319,7 +451,8 @@ async function deleteMemory(memoryId) {
 
 // 查看记忆详情
 function viewMemoryDetail(memoryId) {
-    const memory = AppState.memoriesData?.memories?.find(m => m.memory_id === memoryId);
+    // 从 records 数组中查找记忆
+    const memory = AppState.memoriesData?.records?.find(m => m.memory_id === memoryId);
     if (!memory) {
         showToast('记忆数据未找到', 'error');
         return;
@@ -486,8 +619,10 @@ function showMemoriesError(message) {
 
 // 导出函数
 window.loadMemories = loadMemories;
+window.loadAllMemories = loadAllMemories;
 window.searchMemories = searchMemories;
 window.resetSearch = resetSearch;
+window.clearFilters = clearFilters;
 window.toggleMemorySelection = toggleMemorySelection;
 window.toggleSelectAll = toggleSelectAll;
 window.batchDeleteMemories = batchDeleteMemories;

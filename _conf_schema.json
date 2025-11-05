@@ -1,9 +1,17 @@
 {
     "LLM_providers":{
-        "description":"记忆总结使用的LLM服务商ID",
+        "description":"记忆总结使用的LLM服务商",
         "type":"string",
-        "pattern":"^[a-zA-Z0-9_-]+$",
-        "minLength":1
+        "hint":"选择用于记忆总结的大语言模型提供商。留空则使用当前会话的默认提供商",
+        "_special":"select_provider",
+        "default":""
+    },
+    "embedding_provider_id":{
+        "description":"Embedding 服务提供商",
+        "type":"string",
+        "hint":"选择用于向量嵌入的 Embedding Provider。留空则使用 AstrBot 中配置的第一个 Embedding Provider",
+        "_special":"select_embedding_provider",
+        "default":""
     },
     "milvus_lite_path":{
         "description":"milvus数据库的lite模式路径",
@@ -88,47 +96,13 @@
         "default":true
     },
     "num_pairs":{
-        "description":"记忆总结的对话长度",
+        "description":"记忆总结的对话轮数",
         "type":"int",
-        "hint":"一问一答长度为2，对话长度达到这个阈值时会进行记忆总结",
+        "hint":"一问一答算作1轮对话。当对话轮数达到此阈值时会自动进行记忆总结。例如设置为5，表示每5轮对话（5次问答）后进行总结",
         "obvious_hint":false,
-        "default":10,
-        "minimum":2,
-        "maximum":50
-    },
-    "embedding_service": {
-        "description": "选择嵌入服务提供商 (openai 或 gemini)",
-        "type": "string",
-        "options": ["openai", "gemini"],
-        "default": "openai"
-    },
-    "embedding_key":{
-        "description":"embedding模型服务的apikey",
-        "type":"string",
-        "obvious_hint":false,
-        "minLength":0
-    },
-    "embedding_url":{
-        "description":"embedding模型服务的端点url",
-        "type":"string",
-        "hint":"目前只针对于OpenAI兼容的接口，填写到V1即可。如选择Gemini，则不填写",
-        "obvious_hint":true,
-        "pattern":"^https?://[a-zA-Z0-9.-]+/.*$",
-        "minLength":0
-    },
-    "embedding_model":{
-        "description":"embedding模型模型名称",
-        "type":"string",
-        "minLength":1
-    },
-    "embedding_dim":{
-        "description":"向量模型输出的维度",
-        "type":"int",
-        "hint":"注意！这个维度大小最好不要随意变动，如果一定要改变向量维度，请修改collection_name。Gemini修改为3072",
-        "obvious_hint":true,
-        "default":1024,
-        "minimum":128,
-        "maximum":4096
+        "default":5,
+        "minimum":1,
+        "maximum":25
     },
     "top_k":{
         "description":"返回的长期记忆的数量",
@@ -168,11 +142,20 @@
             "api_key":{
                 "description":"管理面板 API 密钥",
                 "type":"string",
-                "hint":"用于保护管理面板 API 的访问密钥。留空则禁用认证（不推荐）。建议使用强密码或随机生成的密钥",
+                "hint":"用于保护管理面板 API 的访问密钥。留空则每次重启自动生成临时密钥（仅本次运行有效）。如需固定密钥，请在此配置自定义密钥",
                 "obvious_hint":true,
                 "default":"",
                 "minLength":0,
                 "maxLength":128
+            },
+            "port": {
+                "description": "管理面板服务器端口",
+                "type": "int",
+                "hint": "管理面板Web服务器运行的端口，默认为8000。请确保端口未被其他服务占用",
+                "obvious_hint": true,
+                "default": 8000,
+                "minimum": 1024,
+                "maximum": 65535
             }
         }
     }

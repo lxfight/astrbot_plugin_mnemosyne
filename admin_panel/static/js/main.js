@@ -10,73 +10,100 @@ const AppState = {
     dashboardData: null,
     memoriesData: null,
     sessionsData: null,
-    apiKey: null,  // API 密钥
+    sessionToken: null,  // 会话令牌
+    serverStartTime: null,  // 服务器启动时间
 };
 
-// ==================== API Key 管理 ====================
+// ==================== 会话管理 ====================
 
 /**
- * 从 localStorage 加载 API Key
+ * 从 localStorage 加载会话令牌
  */
-function loadApiKey() {
-    const savedKey = localStorage.getItem('mnemosyne_api_key');
-    if (savedKey) {
-        AppState.apiKey = savedKey;
+function loadSessionToken() {
+    const savedToken = localStorage.getItem('session_token');
+    const savedServerStartTime = localStorage.getItem('server_start_time');
+    if (savedToken && savedServerStartTime) {
+        AppState.sessionToken = savedToken;
+        AppState.serverStartTime = savedServerStartTime;
         return true;
     }
     return false;
 }
 
 /**
- * 保存 API Key 到 localStorage
- * @param {string} apiKey - API 密钥
+ * 清除会话令牌
  */
-function saveApiKey(apiKey) {
-    if (apiKey && apiKey.trim()) {
-        AppState.apiKey = apiKey.trim();
-        localStorage.setItem('mnemosyne_api_key', AppState.apiKey);
-        return true;
+function clearSession() {
+    AppState.sessionToken = null;
+    AppState.serverStartTime = null;
+    localStorage.removeItem('session_token');
+    localStorage.removeItem('server_start_time');
+}
+
+/**
+ * 检查会话是否有效
+ */
+async function checkSession() {
+    if (!loadSessionToken()) {
+        // 没有会话令牌，重定向到登录页
+        window.location.href = '/';
+        return false;
     }
-    return false;
-}
-
-/**
- * 清除 API Key
- */
-function clearApiKey() {
-    AppState.apiKey = null;
-    localStorage.removeItem('mnemosyne_api_key');
-}
-
-/**
- * 显示 API Key 输入对话框
- */
-function promptApiKey() {
-    const apiKey = prompt(
-        '请输入管理面板 API 密钥：\n\n' +
-        '提示：如果您未配置自定义密钥，请查看服务器日志获取自动生成的 token。\n' +
-        '日志中会显示类似 "🔒 已生成动态强 token" 的信息。'
-    );
     
-    if (apiKey && apiKey.trim()) {
-        if (saveApiKey(apiKey)) {
-            showToast('API 密钥已保存', 'success');
-            return true;
+    try {
+        // 检查服务器是否重启
+        const healthResp = await fetch('/health');
+        const healthData = await healthResp.json();
+        
+        if (healthData.server_start_time != AppState.serverStartTime) {
+            // 服务器已重启，清除旧会话
+            showToast('服务器已重启，请重新登录', 'warning');
+            clearSession();
+            window.location.href = '/';
+            return false;
         }
+        
+        // 验证会话令牌
+        const testResp = await fetch('/api/system/status', {
+            headers: {
+                'X-Session-Token': AppState.sessionToken
+            }
+        });
+        
+        if (!testResp.ok) {
+            // 会话无效
+            showToast('会话已过期，请重新登录', 'warning');
+            clearSession();
+            window.location.href = '/';
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('检查会话失败:', error);
+        return false;
     }
-    return false;
 }
 
 /**
- * 检查是否需要输入 API Key
+ * 登出
  */
-function checkApiKey() {
-    if (!AppState.apiKey) {
-        if (!loadApiKey()) {
-            return promptApiKey();
+async function logout() {
+    try {
+        if (AppState.sessionToken) {
+            await fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: {
+                    'X-Session-Token': AppState.sessionToken
+                }
+            });
         }
+    } catch (error) {
+        console.error('登出失败:', error);
     }
-    return true;
+    
+    clearSession();
+    window.location.href = '/';
 }
 
 // ==================== 安全函数 ====================
@@ -127,21 +154,38 @@ function formatTime(timestamp) {
 }
 
 // 初始化应用
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log('Mnemosyne 管理面板初始化...');
     
-    // 加载 API Key
-    if (!checkApiKey()) {
-        showToast('未设置 API 密钥，无法访问管理面板', 'error');
+    // 检查会话
+    const sessionValid = await checkSession();
+    if (!sessionValid) {
         return;
     }
     
     // 设置导航
     setupNavigation();
     
+    // 添加登出按钮
+    addLogoutButton();
+    
     // 加载初始页面
     loadPage('dashboard');
 });
+
+// 添加登出按钮
+function addLogoutButton() {
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+        const logoutBtn = document.createElement('div');
+        logoutBtn.className = 'nav-item';
+        logoutBtn.style.marginTop = 'auto';
+        logoutBtn.style.cursor = 'pointer';
+        logoutBtn.innerHTML = '<i class="ti ti-logout icon"></i><span>登出</span>';
+        logoutBtn.addEventListener('click', logout);
+        sidebar.appendChild(logoutBtn);
+    }
+}
 
 // 导航设置
 function setupNavigation() {
@@ -184,16 +228,14 @@ function loadPage(pageName) {
             loadDashboard();
             break;
         case 'memories':
-            // 记忆页面按需加载
+            // 自动加载所有记忆
+            loadAllMemories();
             break;
         case 'sessions':
             loadSessions();
             break;
         case 'statistics':
             loadStatistics();
-            break;
-        case 'logs':
-            loadLogs();
             break;
         case 'config':
             loadConfig();
@@ -203,18 +245,19 @@ function loadPage(pageName) {
 
 // API 调用封装
 async function apiCall(endpoint, method = 'GET', body = null) {
-    // 确保有 API Key
-    if (!AppState.apiKey) {
-        if (!checkApiKey()) {
-            throw new Error('未设置 API 密钥');
-        }
+    // 确保有会话令牌
+    if (!AppState.sessionToken) {
+        showToast('会话已过期，请重新登录', 'warning');
+        clearSession();
+        window.location.href = '/';
+        throw new Error('无会话令牌');
     }
     
     const options = {
         method: method,
         headers: {
             'Content-Type': 'application/json',
-            'X-API-Key': AppState.apiKey,  // 添加认证 header
+            'X-Session-Token': AppState.sessionToken,  // 添加会话令牌
         },
     };
     
@@ -224,18 +267,16 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     
     try {
         const response = await fetch(`${API_BASE}${endpoint}`, options);
-        const data = await response.json();
         
         // 处理认证失败
-        if (response.status === 401 || data.error === 'Unauthorized') {
-            showToast('认证失败，请重新输入 API 密钥', 'error');
-            clearApiKey();
-            if (promptApiKey()) {
-                // 重试请求
-                return apiCall(endpoint, method, body);
-            }
+        if (response.status === 401) {
+            showToast('会话已过期，请重新登录', 'warning');
+            clearSession();
+            window.location.href = '/';
             throw new Error('认证失败');
         }
+        
+        const data = await response.json();
         
         if (!data.success) {
             throw new Error(data.error || '请求失败');
@@ -318,19 +359,13 @@ function formatBytes(bytes) {
 // 获取状态颜色和图标
 function getStatusIndicator(status) {
     const indicators = {
-        'healthy': { icon: '🟢', text: '健康', class: 'healthy' },
-        'unhealthy': { icon: '🔴', text: '异常', class: 'unhealthy' },
-        'degraded': { icon: '🟡', text: '降级', class: 'degraded' },
-        'unknown': { icon: '⚪', text: '未知', class: 'unknown' }
+        'healthy': { iconClass: 'ti-circle-check', text: '健康', class: 'healthy' },
+        'unhealthy': { iconClass: 'ti-circle-x', text: '异常', class: 'unhealthy' },
+        'degraded': { iconClass: 'ti-alert-triangle', text: '降级', class: 'degraded' },
+        'unknown': { iconClass: 'ti-circle-dashed', text: '未知', class: 'unknown' }
     };
     
     return indicators[status] || indicators['unknown'];
-}
-
-// 日志查看功能（占位）
-function loadLogs() {
-    console.log('日志查看功能待实现');
-    showToast('日志查看功能正在开发中', 'warning');
 }
 
 // 配置管理功能（占位）
@@ -341,6 +376,11 @@ function loadConfig() {
 
 function saveConfig() {
     showToast('配置保存功能正在开发中', 'warning');
+}
+
+// 导航到指定页面
+function navigateTo(pageName) {
+    loadPage(pageName);
 }
 
 // 导出工具函数
@@ -355,6 +395,8 @@ window.formatNumber = formatNumber;
 window.formatBytes = formatBytes;
 window.getStatusIndicator = getStatusIndicator;
 window.loadPage = loadPage;
-window.loadLogs = loadLogs;
+window.navigateTo = navigateTo;  // 导出导航函数
 window.loadConfig = loadConfig;
 window.saveConfig = saveConfig;
+window.logout = logout;  // 导出登出函数
+window.checkSession = checkSession;  // 导出会话检查函数

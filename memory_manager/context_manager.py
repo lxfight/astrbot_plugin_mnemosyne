@@ -1,14 +1,13 @@
-from typing import List, Dict, Optional
-import time
 import threading
-import asyncio
-from astrbot.core.log import LogManager
+import time
+
 from astrbot.api.event import AstrMessageEvent
+
 
 class ConversationContextManager:
     """
     会话上下文管理器
-    
+
     M18 修复: 改进并发安全性
     - 在异步环境中，如果所有操作都在同一个事件循环线程中执行，threading.RLock 是安全的
     - 保留 RLock 用于同步代码路径
@@ -16,14 +15,14 @@ class ConversationContextManager:
     """
 
     def __init__(self):
-        self.conversations: Dict[str, Dict] = {}
+        self.conversations: dict[str, dict] = {}
         # 使用 RLock 保证线程安全
         # 注意: 这个类的方法主要在 asyncio 事件循环中调用
         # RLock 可以保护同步代码路径，对于异步代码，Python 的 GIL 和单线程事件循环提供了基本保护
         # 如果未来需要真正的异步锁，应该使用 asyncio.Lock
         self._lock = threading.RLock()
 
-    def init_conv(self, session_id:str, contexts:list[Dict],event:AstrMessageEvent):
+    def init_conv(self, session_id: str, contexts: list[dict], event: AstrMessageEvent):
         """
         从AstrBot获取历史消息
         """
@@ -39,7 +38,7 @@ class ConversationContextManager:
             self.conversations[session_id]["last_summary_time"] = time.time()
             return
 
-    def add_message(self, session_id: str, role: str, content: str) -> Optional[str]:
+    def add_message(self, session_id: str, role: str, content: str) -> str | None:
         """
         添加对话消息
         :param session_id: 会话ID
@@ -59,7 +58,9 @@ class ConversationContextManager:
                 {
                     "role": role,
                     "content": content,
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),# 这个是不会被加入到总结的内容中的，应该
+                    "timestamp": time.strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),  # 这个是不会被加入到总结的内容中的，应该
                 }
             )
 
@@ -81,7 +82,7 @@ class ConversationContextManager:
             if session_id in self.conversations:
                 self.conversations[session_id]["last_summary_time"] = time.time()
 
-    def get_history(self, session_id: str) -> List[Dict]:
+    def get_history(self, session_id: str) -> list[dict]:
         """
         获取对话历史记录
         :param session_id: 会话ID

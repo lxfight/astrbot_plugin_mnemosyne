@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - Mnemosyne 管理面板</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 背景动画文字 */
+        .background-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 12vw;
+            font-weight: 900;
+            color: rgba(99, 102, 241, 0.03);
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+            pointer-events: none;
+            user-select: none;
+            animation: textFloat 25s ease-in-out infinite;
+        }
+
+        @keyframes textFloat {
+            0%, 100% { 
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0.03;
+            }
+            50% { 
+                transform: translate(-50%, -48%) scale(1.02);
+                opacity: 0.05;
+            }
+        }
+
+        /* 装饰线条 */
+        .line {
+            position: absolute;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.1), transparent);
+            pointer-events: none;
+            animation: lineMove 20s linear infinite;
+        }
+
+        .line:nth-child(1) {
+            top: 20%;
+            width: 60%;
+            left: -60%;
+            animation-delay: 0s;
+        }
+
+        .line:nth-child(2) {
+            top: 50%;
+            width: 80%;
+            left: -80%;
+            animation-delay: 7s;
+        }
+
+        .line:nth-child(3) {
+            top: 80%;
+            width: 70%;
+            left: -70%;
+            animation-delay: 14s;
+        }
+
+        @keyframes lineMove {
+            0% {
+                left: -100%;
+            }
+            100% {
+                left: 100%;
+            }
+        }
+
+        .login-container {
+            background: #ffffff;
+            border-radius: 24px;
+            padding: 60px 50px;
+            width: 100%;
+            max-width: 460px;
+            position: relative;
+            z-index: 10;
+            animation: containerFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.03), 
+                        0 20px 60px rgba(0, 0, 0, 0.08);
+        }
+
+        @keyframes containerFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 48px;
+            animation: logoFadeIn 1s ease-out 0.2s both;
+        }
+
+        @keyframes logoFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-15px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .logo i {
+            font-size: 64px;
+            color: #6366f1;
+            margin-bottom: 20px;
+            display: inline-block;
+            animation: iconFloat 3s ease-in-out infinite;
+        }
+
+        @keyframes iconFloat {
+            0%, 100% {
+                transform: translateY(0px);
+            }
+            50% {
+                transform: translateY(-8px);
+            }
+        }
+
+        .logo h1 {
+            font-size: 36px;
+            color: #0f172a;
+            margin-bottom: 8px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .logo p {
+            color: #94a3b8;
+            font-size: 15px;
+            font-weight: 400;
+        }
+
+        .form-group {
+            margin-bottom: 32px;
+            animation: formFadeIn 1s ease-out 0.4s both;
+        }
+
+        @keyframes formFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 12px;
+            color: #1e293b;
+            font-weight: 600;
+            font-size: 14px;
+            letter-spacing: -0.01em;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        .input-wrapper i {
+            position: absolute;
+            left: 18px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #cbd5e1;
+            font-size: 20px;
+            transition: all 0.3s ease;
+            z-index: 1;
+        }
+
+        input[type="password"] {
+            width: 100%;
+            padding: 16px 18px 16px 52px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 14px;
+            font-size: 15px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-family: 'Monaco', 'Courier New', monospace;
+            background: #ffffff;
+            color: #0f172a;
+        }
+
+        input[type="password"]:hover {
+            border-color: #cbd5e1;
+        }
+
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
+        }
+
+        input[type="password"]:focus ~ i {
+            color: #6366f1;
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 16px;
+            background: #6366f1;
+            color: white;
+            border: none;
+            border-radius: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.25);
+            animation: btnFadeIn 1s ease-out 0.6s both;
+        }
+
+        @keyframes btnFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .btn-login:hover {
+            background: #4f46e5;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(99, 102, 241, 0.35);
+        }
+
+        .btn-login:active {
+            transform: translateY(0);
+        }
+
+        .btn-login:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .alert {
+            padding: 0;
+            margin-bottom: 28px;
+            display: none;
+            animation: alertSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            font-size: 14px;
+            font-weight: 500;
+            color: #dc2626;
+            text-align: center;
+        }
+
+        @keyframes alertSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .alert.alert-success {
+            color: #10b981;
+        }
+
+        .alert i {
+            margin-right: 6px;
+            font-size: 16px;
+        }
+
+        .info-text {
+            margin-top: 28px;
+            padding: 0;
+            animation: infoFadeIn 1s ease-out 0.8s both;
+            text-align: center;
+        }
+
+        @keyframes infoFadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        .info-text p {
+            color: #94a3b8;
+            font-size: 13px;
+            line-height: 1.7;
+            margin: 0 0 8px 0;
+        }
+
+        .info-text p:last-child {
+            margin-bottom: 0;
+        }
+
+        .info-text i {
+            color: #cbd5e1;
+            font-size: 14px;
+            margin-right: 4px;
+        }
+
+        .spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .server-info {
+            text-align: center;
+            margin-top: 28px;
+            padding-top: 28px;
+            border-top: 1px solid #f1f5f9;
+            color: #cbd5e1;
+            font-size: 12px;
+            animation: infoFadeIn 1s ease-out 1s both;
+        }
+
+        .server-info span {
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        /* 响应式 */
+        @media (max-width: 480px) {
+            .login-container {
+                padding: 50px 35px;
+            }
+
+            .logo h1 {
+                font-size: 32px;
+            }
+
+            .background-text {
+                font-size: 18vw;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 背景动画文字 -->
+    <div class="background-text">MNEMOSYNE</div>
+
+    <!-- 装饰线条 -->
+    <div class="line"></div>
+    <div class="line"></div>
+    <div class="line"></div>
+
+    <div class="login-container">
+        <div class="logo">
+            <i class="ti ti-brain"></i>
+            <h1>Mnemosyne</h1>
+            <p>记忆管理系统</p>
+        </div>
+
+        <div id="alert" class="alert"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="apiKey">API 密钥</label>
+                <div class="input-wrapper">
+                    <input 
+                        type="password" 
+                        id="apiKey" 
+                        name="apiKey" 
+                        placeholder="请输入 API 密钥" 
+                        required
+                        autocomplete="off"
+                    >
+                    <i class="ti ti-key"></i>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-login" id="loginBtn">
+                <i class="ti ti-login"></i>
+                <span>登录</span>
+            </button>
+        </form>
+
+        <div class="info-text">
+            <p><i class="ti ti-info-circle"></i> API 密钥可在服务器启动日志中查看</p>
+            <p>每次重启后密钥会重新生成，旧密钥将失效</p>
+        </div>
+
+        <div class="server-info">
+            <div>服务器启动: <span id="serverStartTime">-</span></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        // 检查是否已登录
+        async function checkAuth() {
+            const sessionToken = localStorage.getItem('session_token');
+            const serverStartTime = localStorage.getItem('server_start_time');
+            
+            if (sessionToken) {
+                try {
+                    const healthResp = await fetch(`${API_BASE}/health`);
+                    const healthData = await healthResp.json();
+                    
+                    if (serverStartTime && healthData.server_start_time != serverStartTime) {
+                        showAlert('服务器已重启，请使用新的 API 密钥重新登录', 'error');
+                        localStorage.removeItem('session_token');
+                        localStorage.removeItem('server_start_time');
+                        return;
+                    }
+                    
+                    const resp = await fetch(`${API_BASE}/api/system/status`, {
+                        headers: {
+                            'X-Session-Token': sessionToken
+                        }
+                    });
+                    
+                    if (resp.ok) {
+                        window.location.href = '/dashboard';
+                        return;
+                    } else {
+                        localStorage.removeItem('session_token');
+                        localStorage.removeItem('server_start_time');
+                    }
+                } catch (error) {
+                    console.error('检查认证状态失败:', error);
+                }
+            }
+            
+            loadServerInfo();
+        }
+
+        async function loadServerInfo() {
+            try {
+                const resp = await fetch(`${API_BASE}/health`);
+                const data = await resp.json();
+                if (data.server_start_time) {
+                    const date = new Date(data.server_start_time * 1000);
+                    document.getElementById('serverStartTime').textContent = date.toLocaleString('zh-CN');
+                }
+            } catch (error) {
+                console.error('加载服务器信息失败:', error);
+            }
+        }
+
+        function showAlert(message, type = 'error') {
+            const alert = document.getElementById('alert');
+            alert.className = `alert alert-${type}`;
+            alert.innerHTML = `<i class="ti ti-${type === 'error' ? 'alert-circle' : 'check'}"></i>${message}`;
+            alert.style.display = 'block';
+        }
+
+        function hideAlert() {
+            document.getElementById('alert').style.display = 'none';
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideAlert();
+            
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const loginBtn = document.getElementById('loginBtn');
+            
+            if (!apiKey) {
+                showAlert('请输入 API 密钥', 'error');
+                return;
+            }
+            
+            loginBtn.disabled = true;
+            loginBtn.innerHTML = '<div class="spinner"></div><span>登录中...</span>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ api_key: apiKey })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    localStorage.setItem('session_token', data.session_token);
+                    localStorage.setItem('server_start_time', data.server_start_time);
+                    
+                    showAlert('登录成功，正在跳转...', 'success');
+                    
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 500);
+                } else {
+                    showAlert(data.message || 'API 密钥无效，请检查后重试', 'error');
+                    loginBtn.disabled = false;
+                    loginBtn.innerHTML = '<i class="ti ti-login"></i><span>登录</span>';
+                }
+            } catch (error) {
+                console.error('登录失败:', error);
+                showAlert('登录失败，请检查网络连接', 'error');
+                loginBtn.disabled = false;
+                loginBtn.innerHTML = '<i class="ti ti-login"></i><span>登录</span>';
+            }
+        });
+
+        checkAuth();
+    </script>
+</body>
+</html>

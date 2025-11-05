@@ -37,7 +37,14 @@ function renderSystemStatus(statusData) {
     
     const indicator = getStatusIndicator(statusData.overall_status);
     
-    statusCard.querySelector('.card-icon').textContent = indicator.icon;
+    const cardIcon = statusCard.querySelector('.card-icon i');
+    if (cardIcon) {
+        // 移除旧的图标类
+        cardIcon.className = '';
+        // 添加新的图标类
+        cardIcon.className = `ti ${indicator.iconClass}`;
+    }
+    
     statusCard.querySelector('.status-text').textContent = indicator.text;
     statusCard.querySelector('.status-text').className = `status-text ${indicator.class}`;
 }
@@ -190,14 +197,28 @@ function getComponentDisplayName(name) {
 function showError(message) {
     const container = document.getElementById('components-health');
     if (container) {
-        container.innerHTML = `
-            <div style="padding: 2rem; text-align: center; color: var(--danger-color);">
-                <p>❌ ${message}</p>
-                <button class="btn btn-primary" onclick="refreshDashboard()" style="margin-top: 1rem;">
-                    重试
-                </button>
-            </div>
-        `;
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
+        
+        const icon = document.createElement('i');
+        icon.className = 'ti ti-alert-circle';
+        icon.style.cssText = 'font-size: 3rem; margin-bottom: 1rem;';
+        
+        const p = document.createElement('p');
+        p.textContent = message;
+        
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary';
+        btn.style.marginTop = '1rem';
+        btn.onclick = refreshDashboard;
+        btn.innerHTML = '<i class="ti ti-refresh"></i> 重试';
+        
+        errorDiv.appendChild(icon);
+        errorDiv.appendChild(p);
+        errorDiv.appendChild(btn);
+        
+        container.innerHTML = '';
+        container.appendChild(errorDiv);
     }
 }
 

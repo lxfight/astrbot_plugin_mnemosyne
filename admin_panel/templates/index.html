@@ -4,39 +4,37 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mnemosyne 管理面板</title>
-    <link rel="stylesheet" href="../static/css/main.css">
+    <link rel="stylesheet" href="/static/css/main.css">
+    <!-- Tabler Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 </head>
 <body>
     <div class="container">
         <!-- 侧边栏 -->
         <aside class="sidebar">
             <div class="logo">
-                <h1>🧠 Mnemosyne</h1>
+                <h1><i class="ti ti-brain"></i> Mnemosyne</h1>
                 <p class="subtitle">记忆管理系统</p>
             </div>
             <nav class="nav-menu">
                 <a href="#dashboard" class="nav-item active" data-page="dashboard">
-                    <span class="icon">📊</span>
+                    <i class="ti ti-dashboard icon"></i>
                     <span>系统监控</span>
                 </a>
                 <a href="#memories" class="nav-item" data-page="memories">
-                    <span class="icon">💭</span>
+                    <i class="ti ti-bulb icon"></i>
                     <span>记忆管理</span>
                 </a>
                 <a href="#sessions" class="nav-item" data-page="sessions">
-                    <span class="icon">👥</span>
+                    <i class="ti ti-users icon"></i>
                     <span>会话列表</span>
                 </a>
                 <a href="#statistics" class="nav-item" data-page="statistics">
-                    <span class="icon">📈</span>
+                    <i class="ti ti-chart-bar icon"></i>
                     <span>统计分析</span>
                 </a>
-                <a href="#logs" class="nav-item" data-page="logs">
-                    <span class="icon">📝</span>
-                    <span>日志查看</span>
-                </a>
                 <a href="#config" class="nav-item" data-page="config">
-                    <span class="icon">⚙️</span>
+                    <i class="ti ti-settings icon"></i>
                     <span>系统配置</span>
                 </a>
             </nav>
@@ -51,35 +49,35 @@
                     <div class="page-header">
                         <h2>系统监控仪表板</h2>
                         <button class="btn btn-primary" onclick="refreshDashboard()">
-                            🔄 刷新
+                            <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
 
                     <!-- 系统状态卡片 -->
                     <div class="status-cards">
                         <div class="status-card" id="overall-status">
-                            <div class="card-icon">🟢</div>
+                            <div class="card-icon"><i class="ti ti-circle-check"></i></div>
                             <div class="card-content">
                                 <h3>系统状态</h3>
                                 <p class="status-text">加载中...</p>
                             </div>
                         </div>
                         <div class="status-card">
-                            <div class="card-icon">💾</div>
+                            <div class="card-icon"><i class="ti ti-database"></i></div>
                             <div class="card-content">
                                 <h3>记忆总数</h3>
                                 <p class="status-value" id="total-memories">-</p>
                             </div>
                         </div>
                         <div class="status-card">
-                            <div class="card-icon">👥</div>
+                            <div class="card-icon"><i class="ti ti-users"></i></div>
                             <div class="card-content">
                                 <h3>活跃会话</h3>
                                 <p class="status-value" id="active-sessions">-</p>
                             </div>
                         </div>
                         <div class="status-card">
-                            <div class="card-icon">🧠</div>
+                            <div class="card-icon"><i class="ti ti-cpu"></i></div>
                             <div class="card-content">
                                 <h3>内存使用</h3>
                                 <p class="status-value" id="memory-usage">-</p>
@@ -108,20 +106,66 @@
                 <div id="memories-page" class="page">
                     <div class="page-header">
                         <h2>记忆管理</h2>
-                        <button class="btn btn-primary" onclick="showSearchModal()">
-                            🔍 搜索记忆
-                        </button>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="loadAllMemories()">
+                                <i class="ti ti-refresh"></i> 刷新
+                            </button>
+                            <button class="btn" onclick="exportMemories()">
+                                <i class="ti ti-download"></i> 导出
+                            </button>
+                        </div>
                     </div>
 
-                    <!-- 搜索过滤器 -->
-                    <div class="search-box">
-                        <input type="text" id="memory-keyword" placeholder="输入关键词搜索..." class="input">
-                        <button class="btn" onclick="searchMemories()">搜索</button>
+                    <!-- 搜索和过滤器 -->
+                    <div class="filters-container">
+                        <div class="filters-grid">
+                            <div class="filter-group">
+                                <label>关键词搜索</label>
+                                <input type="text" id="search-keyword" placeholder="输入关键词..." class="input">
+                            </div>
+                            <div class="filter-group">
+                                <label>会话ID</label>
+                                <input type="text" id="search-session-id" placeholder="会话ID（可选）" class="input">
+                            </div>
+                            <div class="filter-group">
+                                <label>人格ID</label>
+                                <input type="text" id="search-persona-id" placeholder="人格ID（可选）" class="input">
+                            </div>
+                            <div class="filter-group">
+                                <label>分组方式</label>
+                                <select id="search-group-by" class="input" onchange="applyGrouping()">
+                                    <option value="">不分组</option>
+                                    <option value="session">按会话分组</option>
+                                    <option value="persona">按人格分组</option>
+                                    <option value="date">按日期分组</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="filter-actions">
+                            <button class="btn btn-primary" onclick="searchMemories()">
+                                <i class="ti ti-search"></i> 关键词搜索
+                            </button>
+                            <button class="btn btn-success" onclick="vectorSearchMemories()">
+                                <i class="ti ti-topology-star"></i> 向量检索
+                            </button>
+                            <button class="btn" onclick="clearFilters()">
+                                <i class="ti ti-x"></i> 清除筛选
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 记忆统计信息 -->
+                    <div class="info-bar">
+                        <span id="memories-count-info">共 0 条记忆</span>
+                        <span id="memories-filter-info"></span>
                     </div>
 
                     <!-- 记忆列表 -->
                     <div id="memories-list" class="list-container">
-                        <p class="placeholder">请使用搜索功能查找记忆</p>
+                        <div class="loading-placeholder">
+                            <i class="ti ti-loader"></i>
+                            <p>正在加载记忆...</p>
+                        </div>
                     </div>
 
                     <!-- 分页控件 -->
@@ -135,7 +179,7 @@
                     <div class="page-header">
                         <h2>会话列表</h2>
                         <button class="btn btn-primary" onclick="loadSessions()">
-                            🔄 刷新
+                            <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
 
@@ -149,33 +193,56 @@
                     <div class="page-header">
                         <h2>统计分析</h2>
                         <button class="btn btn-primary" onclick="loadStatistics()">
-                            🔄 刷新
+                            <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
 
-                    <div id="statistics-content">
-                        <p class="placeholder">加载中...</p>
-                    </div>
-                </div>
-
-                <!-- 日志查看页面 -->
-                <div id="logs-page" class="page">
-                    <div class="page-header">
-                        <h2>系统日志</h2>
-                        <div class="btn-group">
-                            <select id="log-level" class="input">
-                                <option value="all">全部级别</option>
-                                <option value="debug">DEBUG</option>
-                                <option value="info">INFO</option>
-                                <option value="warning">WARNING</option>
-                                <option value="error">ERROR</option>
-                            </select>
-                            <button class="btn btn-primary" onclick="loadLogs()">刷新</button>
+                    <!-- 统计卡片 -->
+                    <div class="stats-grid">
+                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <h4 style="color: #6366f1;">总记忆数</h4>
+                            <div class="stat-value" id="stat-total-memories" style="color: #1f2937;">-</div>
+                            <div class="stat-label" style="color: #6b7280;">所有记忆总数</div>
+                        </div>
+                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <h4 style="color: #ec4899;">活跃会话</h4>
+                            <div class="stat-value" id="stat-active-sessions" style="color: #1f2937;">-</div>
+                            <div class="stat-label" style="color: #6b7280;">当前活跃会话数</div>
+                        </div>
+                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <h4 style="color: #06b6d4;">今日新增</h4>
+                            <div class="stat-value" id="stat-today-added" style="color: #1f2937;">-</div>
+                            <div class="stat-label" style="color: #6b7280;">今天新增的记忆</div>
+                        </div>
+                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <h4 style="color: #10b981;">平均记忆数</h4>
+                            <div class="stat-value" id="stat-avg-per-session" style="color: #1f2937;">-</div>
+                            <div class="stat-label" style="color: #6b7280;">每会话平均记忆数</div>
                         </div>
                     </div>
 
-                    <div id="logs-content" class="logs-container">
-                        <p class="placeholder">日志查看功能正在开发中...</p>
+                    <!-- 每日趋势图表 -->
+                    <div class="chart-container">
+                        <h3>每日记忆趋势</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="statistics-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 最活跃会话 -->
+                    <div class="section">
+                        <h3>最活跃的会话 (Top 10)</h3>
+                        <div id="top-sessions-list" class="list-container">
+                            <p class="placeholder">加载中...</p>
+                        </div>
+                    </div>
+
+                    <!-- 记忆类型分布 -->
+                    <div class="chart-container">
+                        <h3>记忆分布统计</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="distribution-chart"></canvas>
+                        </div>
                     </div>
                 </div>
 
@@ -184,7 +251,7 @@
                     <div class="page-header">
                         <h2>系统配置</h2>
                         <button class="btn btn-primary" onclick="saveConfig()">
-                            💾 保存配置
+                            <i class="ti ti-device-floppy"></i> 保存配置
                         </button>
                     </div>
 
@@ -199,14 +266,18 @@
     <!-- 加载提示 -->
     <div id="loading-overlay" class="loading-overlay" style="display: none;">
         <div class="loading-spinner"></div>
-        <p>加载中...</p>
+        <p><i class="ti ti-loader"></i> 加载中...</p>
     </div>
 
     <!-- Toast 通知 -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="../static/js/main.js"></script>
-    <script src="../static/js/dashboard.js"></script>
-    <script src="../static/js/memories.js"></script>
+    <script src="/static/js/main.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+    <script src="/static/js/memories.js"></script>
+    <script src="/static/js/sessions.js"></script>
+    <script src="/static/js/statistics.js"></script>
+    <!-- Chart.js for statistics charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </body>
 </html>

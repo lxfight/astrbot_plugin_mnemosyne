@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import Any
 
 
 class VectorDatabase(ABC):
@@ -15,7 +15,7 @@ class VectorDatabase(ABC):
         pass
 
     @abstractmethod
-    def create_collection(self, collection_name: str, schema: Dict[str, Any]):
+    def create_collection(self, collection_name: str, schema: dict[str, Any]):
         """
         创建集合（表）
         :param collection_name: 集合名称
@@ -24,7 +24,7 @@ class VectorDatabase(ABC):
         pass
 
     @abstractmethod
-    def insert(self, collection_name: str, data: List[Dict[str, Any]]):
+    def insert(self, collection_name: str, data: list[dict[str, Any]]):
         """
         插入数据
         :param collection_name: 集合名称
@@ -34,8 +34,8 @@ class VectorDatabase(ABC):
 
     @abstractmethod
     def query(
-        self, collection_name: str, filters: str, output_fields: List[str]
-    ) -> List[Dict[str, Any]]:
+        self, collection_name: str, filters: str, output_fields: list[str]
+    ) -> list[dict[str, Any]]:
         """
         根据条件查询数据
         :param collection_name: 集合名称
@@ -49,10 +49,10 @@ class VectorDatabase(ABC):
     def search(
         self,
         collection_name: str,
-        query_vector: List[float],
+        query_vector: list[float],
         top_k: int,
-        filters: str = None,
-    ) -> List[Dict[str, Any]]:
+        filters: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         执行相似性搜索
         :param collection_name: 集合名称
@@ -71,19 +71,19 @@ class VectorDatabase(ABC):
         pass
 
     @abstractmethod
-    def list_collections(self) -> List[str]:
+    def list_collections(self) -> list[str]:
         """
         获取所有集合名称
         """
         pass
 
     @abstractmethod
-    def get_loaded_collections(self) -> List[str]:
+    def get_loaded_collections(self) -> list[str]:
         """获取已加载到内存的集合"""
         pass
 
     @abstractmethod
-    def get_latest_memory(self, collection_name: str) -> Dict[str, Any]:
+    def get_latest_memory(self, collection_name: str) -> dict[str, Any]:
         """获取最新插入的记忆"""
         pass
 

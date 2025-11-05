@@ -7,10 +7,10 @@ async function loadSessions() {
     
     try {
         const data = await apiCall('/memories/sessions');
-        AppState.sessionsData = data;
+        AppState.sessionsData = { sessions: data };  // data 本身就是会话数组
         
         // 渲染会话列表
-        renderSessionsList(data.sessions);
+        renderSessionsList(data);
         
         showToast('会话列表加载成功', 'success');
     } catch (error) {
@@ -70,7 +70,7 @@ function createSessionItem(session) {
     lastLabel.textContent = '最后活跃:';
     const lastValue = document.createElement('span');
     lastValue.className = 'info-value';
-    lastValue.textContent = formatTime(session.last_activity);
+    lastValue.textContent = formatTime(session.last_memory_time);
     lastActivityRow.appendChild(lastLabel);
     lastActivityRow.appendChild(lastValue);
     
@@ -81,7 +81,7 @@ function createSessionItem(session) {
     firstLabel.textContent = '首次记录:';
     const firstValue = document.createElement('span');
     firstValue.className = 'info-value';
-    firstValue.textContent = formatTime(session.first_activity);
+    firstValue.textContent = formatTime(session.first_memory_time);
     firstActivityRow.appendChild(firstLabel);
     firstActivityRow.appendChild(firstValue);
     
@@ -116,14 +116,15 @@ function viewSessionMemories(sessionId) {
     // 切换到记忆管理页面
     navigateTo('memories');
     
-    // 设置会话过滤器
+    // 设置会话过滤器并搜索
     setTimeout(() => {
-        const sessionInput = document.getElementById('search-session');
+        const sessionInput = document.getElementById('search-session-id');
         if (sessionInput) {
             sessionInput.value = sessionId;
-            searchMemories();
+            // 直接调用 loadMemories 并传递 session_id 参数
+            loadMemories({ session_id: sessionId, page: 1 });
         }
-    }, 100);
+    }, 200);
 }
 
 // 删除会话
@@ -141,9 +142,7 @@ async function deleteSession(sessionId) {
     showLoading(true);
     
     try {
-        await apiCall('/memories/delete', 'POST', {
-            session_id: sessionId
-        });
+        await apiCall(`/memories/session/${sessionId}`, 'DELETE');
         
         showToast('会话删除成功', 'success');
         
