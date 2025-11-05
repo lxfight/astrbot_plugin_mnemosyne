@@ -318,10 +318,10 @@ function formatBytes(bytes) {
 // 获取状态颜色和图标
 function getStatusIndicator(status) {
     const indicators = {
-        'healthy': { icon: '🟢', text: '健康', class: 'healthy' },
-        'unhealthy': { icon: '🔴', text: '异常', class: 'unhealthy' },
-        'degraded': { icon: '🟡', text: '降级', class: 'degraded' },
-        'unknown': { icon: '⚪', text: '未知', class: 'unknown' }
+        'healthy': { iconClass: 'ti-circle-check', text: '健康', class: 'healthy' },
+        'unhealthy': { iconClass: 'ti-circle-x', text: '异常', class: 'unhealthy' },
+        'degraded': { iconClass: 'ti-alert-triangle', text: '降级', class: 'degraded' },
+        'unknown': { iconClass: 'ti-circle-dashed', text: '未知', class: 'unknown' }
     };
     
     return indicators[status] || indicators['unknown'];

@@ -106,7 +106,7 @@ class APIKeyAuth:
             data_dir = Path(StarTools.get_data_dir()) / "admin_panel"
         self.data_dir = Path(data_dir)
         self.token_file = self.data_dir / ".api_token"
-        self.api_key = None
+        self.api_key: str = ""  # 初始化为空字符串，后续会被赋值
         self.is_auto_generated = False
 
         # 处理用户配置的 api_key
@@ -124,7 +124,10 @@ class APIKeyAuth:
 
             if existing_token:
                 self.api_key = existing_token
-                logger.info(f"已加载现有的动态 token（文件: {self.token_file}）")
+                logger.info(f"✅ 已加载现有的 API Token")
+                logger.info(f"📁 Token 文件位置: {self.token_file}")
+                logger.info(f"🔑 当前 Token: {self.api_key}")
+                logger.info(f"💡 提示: 此 token 会持久保存，重启后仍然有效")
             else:
                 # 生成新的强 token
                 self.api_key = generate_secure_token(32)  # 64字符的十六进制 token
@@ -132,13 +135,17 @@ class APIKeyAuth:
                 # 保存到文件
                 if save_token_to_file(self.api_key, self.token_file):
                     logger.critical(
-                        f"🔒 已生成动态强 token 并保存到: {self.token_file}\n"
-                        f"   Token: {self.api_key}\n"
-                        f"   请妥善保管此 token，用于访问管理面板。\n"
-                        f"   建议在配置文件中设置 admin_panel.api_key 以使用自定义密钥。"
+                        f"🔒 已生成新的 API Token 并保存\n"
+                        f"📁 Token 文件: {self.token_file}\n"
+                        f"🔑 API Token: {self.api_key}\n"
+                        f"💡 提示:\n"
+                        f"   - 此 token 已保存到文件，重启后自动加载\n"
+                        f"   - 请妥善保管此 token，用于访问 Admin Panel\n"
+                        f"   - 如需自定义密钥，请在配置文件中设置 admin_panel.api_key"
                     )
                 else:
-                    logger.error("无法保存动态 token 到文件，token 仅在本次运行中有效")
+                    logger.error("⚠️ 无法保存 token 到文件，token 仅在本次运行中有效")
+                    logger.critical(f"🔑 临时 API Token: {self.api_key}")
 
             self.is_auto_generated = True
 
@@ -146,8 +153,9 @@ class APIKeyAuth:
         self.enabled = True
 
         # 计算 token 的哈希值用于日志（不记录完整 token）
-        token_hash = hashlib.sha256(self.api_key.encode()).hexdigest()[:8]
-        logger.info(f"Admin Panel API 强制认证已启用（Token Hash: {token_hash}...）")
+        if self.api_key:  # 确保 api_key 不为空
+            token_hash = hashlib.sha256(self.api_key.encode()).hexdigest()[:8]
+            logger.info(f"Admin Panel API 强制认证已启用（Token Hash: {token_hash}...）")
 
     def verify_request(self, request: dict[str, Any]) -> bool:
         """
@@ -189,6 +197,15 @@ class APIKeyAuth:
         Returns:
             Dict: token 信息
         """
+        if not self.api_key:
+            return {
+                "is_auto_generated": False,
+                "token_file": None,
+                "token_hash": "",
+                "token_length": 0,
+                "full_token": "[未设置]",
+            }
+        
         token_hash = hashlib.sha256(self.api_key.encode()).hexdigest()[:16]
 
         return {

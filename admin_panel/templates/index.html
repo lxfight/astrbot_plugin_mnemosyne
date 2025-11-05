@@ -5,38 +5,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mnemosyne 管理面板</title>
     <link rel="stylesheet" href="../static/css/main.css">
+    <!-- Tabler Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 </head>
 <body>
     <div class="container">
         <!-- 侧边栏 -->
         <aside class="sidebar">
             <div class="logo">
-                <h1>🧠 Mnemosyne</h1>
+                <h1><i class="ti ti-brain"></i> Mnemosyne</h1>
                 <p class="subtitle">记忆管理系统</p>
             </div>
             <nav class="nav-menu">
                 <a href="#dashboard" class="nav-item active" data-page="dashboard">
-                    <span class="icon">📊</span>
+                    <i class="ti ti-dashboard icon"></i>
                     <span>系统监控</span>
                 </a>
                 <a href="#memories" class="nav-item" data-page="memories">
-                    <span class="icon">💭</span>
+                    <i class="ti ti-bulb icon"></i>
                     <span>记忆管理</span>
                 </a>
                 <a href="#sessions" class="nav-item" data-page="sessions">
-                    <span class="icon">👥</span>
+                    <i class="ti ti-users icon"></i>
                     <span>会话列表</span>
                 </a>
                 <a href="#statistics" class="nav-item" data-page="statistics">
-                    <span class="icon">📈</span>
+                    <i class="ti ti-chart-bar icon"></i>
                     <span>统计分析</span>
                 </a>
                 <a href="#logs" class="nav-item" data-page="logs">
-                    <span class="icon">📝</span>
+                    <i class="ti ti-file-text icon"></i>
                     <span>日志查看</span>
                 </a>
                 <a href="#config" class="nav-item" data-page="config">
-                    <span class="icon">⚙️</span>
+                    <i class="ti ti-settings icon"></i>
                     <span>系统配置</span>
                 </a>
             </nav>
@@ -51,35 +53,35 @@
                     <div class="page-header">
                         <h2>系统监控仪表板</h2>
                         <button class="btn btn-primary" onclick="refreshDashboard()">
-                            🔄 刷新
+                            <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
 
                     <!-- 系统状态卡片 -->
                     <div class="status-cards">
                         <div class="status-card" id="overall-status">
-                            <div class="card-icon">🟢</div>
+                            <div class="card-icon"><i class="ti ti-circle-check"></i></div>
                             <div class="card-content">
                                 <h3>系统状态</h3>
                                 <p class="status-text">加载中...</p>
                             </div>
                         </div>
                         <div class="status-card">
-                            <div class="card-icon">💾</div>
+                            <div class="card-icon"><i class="ti ti-database"></i></div>
                             <div class="card-content">
                                 <h3>记忆总数</h3>
                                 <p class="status-value" id="total-memories">-</p>
                             </div>
                         </div>
                         <div class="status-card">
-                            <div class="card-icon">👥</div>
+                            <div class="card-icon"><i class="ti ti-users"></i></div>
                             <div class="card-content">
                                 <h3>活跃会话</h3>
                                 <p class="status-value" id="active-sessions">-</p>
                             </div>
                         </div>
                         <div class="status-card">
-                            <div class="card-icon">🧠</div>
+                            <div class="card-icon"><i class="ti ti-cpu"></i></div>
                             <div class="card-content">
                                 <h3>内存使用</h3>
                                 <p class="status-value" id="memory-usage">-</p>
@@ -109,7 +111,7 @@
                     <div class="page-header">
                         <h2>记忆管理</h2>
                         <button class="btn btn-primary" onclick="showSearchModal()">
-                            🔍 搜索记忆
+                            <i class="ti ti-search"></i> 搜索记忆
                         </button>
                     </div>
 
@@ -135,7 +137,7 @@
                     <div class="page-header">
                         <h2>会话列表</h2>
                         <button class="btn btn-primary" onclick="loadSessions()">
-                            🔄 刷新
+                            <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
 
@@ -149,7 +151,7 @@
                     <div class="page-header">
                         <h2>统计分析</h2>
                         <button class="btn btn-primary" onclick="loadStatistics()">
-                            🔄 刷新
+                            <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
 
@@ -184,7 +186,7 @@
                     <div class="page-header">
                         <h2>系统配置</h2>
                         <button class="btn btn-primary" onclick="saveConfig()">
-                            💾 保存配置
+                            <i class="ti ti-device-floppy"></i> 保存配置
                         </button>
                     </div>
 
@@ -199,7 +201,7 @@
     <!-- 加载提示 -->
     <div id="loading-overlay" class="loading-overlay" style="display: none;">
         <div class="loading-spinner"></div>
-        <p>加载中...</p>
+        <p><i class="ti ti-loader"></i> 加载中...</p>
     </div>
 
     <!-- Toast 通知 -->
