@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from astrbot.core.log import logging
+from astrbot.core.log import LogManager
 
 from ..models.memory import (
     MemoryRecord,
@@ -30,6 +30,7 @@ class MemoryService:
             plugin_instance: Mnemosyne 插件实例
         """
         self.plugin = plugin_instance
+        self.logger = LogManager.GetLogger(log_name="MemoryService")
 
     async def search_memories(
         self, request: MemorySearchRequest
@@ -91,7 +92,7 @@ class MemoryService:
                         )
                         expr_parts.append(f'{field_name} == "{request.persona_id}"')
                     else:
-                        logging.warning(
+                        self.logger.warning(
                             "集合中不存在 persona_id 或 personality_id 字段，跳过人格过滤"
                         )
 
@@ -108,7 +109,7 @@ class MemoryService:
             # 动态确定 output_fields
             collection = self.plugin.milvus_manager.get_collection(collection_name)
             if not collection:
-                logging.error(f"无法获取集合 {collection_name}")
+                self.logger.error(f"无法获取集合 {collection_name}")
                 return MemorySearchResponse(
                     records=[],
                     total_count=0,
@@ -140,7 +141,7 @@ class MemoryService:
 
                 # 检查查询结果
                 if results is None:
-                    logging.error("查询返回 None")
+                    self.logger.error("查询返回 None")
                     return MemorySearchResponse(
                         records=[],
                         total_count=0,
@@ -175,7 +176,7 @@ class MemoryService:
                         )
                         records.append(record)
                     except Exception as e:
-                        logging.error(f"转换记忆记录失败: {e}")
+                        self.logger.error(f"转换记忆记录失败: {e}")
                         continue
 
                 # 如果有关键词过滤，在内存中进行过滤
@@ -207,7 +208,7 @@ class MemoryService:
                 )
 
             except Exception as e:
-                logging.error(f"查询 Milvus 失败: {e}", exc_info=True)
+                self.logger.error(f"查询 Milvus 失败: {e}", exc_info=True)
                 return MemorySearchResponse(
                     records=[],
                     total_count=0,
@@ -217,7 +218,7 @@ class MemoryService:
                 )
 
         except Exception as e:
-            logging.error(f"搜索记忆失败: {e}", exc_info=True)
+            self.logger.error(f"搜索记忆失败: {e}", exc_info=True)
             return MemorySearchResponse(
                 records=[],
                 total_count=0,
@@ -262,7 +263,7 @@ class MemoryService:
 
                 # 检查查询结果
                 if not results:
-                    logging.warning("统计查询返回空结果")
+                    self.logger.warning("统计查询返回空结果")
                     return stats
 
                 # 统计各会话的记忆数
@@ -314,7 +315,7 @@ class MemoryService:
                 )
 
         except Exception as e:
-            logging.error(f"获取记忆统计失败: {e}", exc_info=True)
+            self.logger.error(f"获取记忆统计失败: {e}", exc_info=True)
 
         return stats
 
@@ -350,11 +351,11 @@ class MemoryService:
 
             self.plugin.milvus_manager.delete(collection_name, expr)
 
-            logging.info(f"已删除记忆: {memory_id}")
+            self.logger.info(f"已删除记忆: {memory_id}")
             return True
 
         except Exception as e:
-            logging.error(f"删除记忆失败: {e}", exc_info=True)
+            self.logger.error(f"删除记忆失败: {e}", exc_info=True)
             return False
 
     async def delete_session_memories(self, session_id: str) -> int:
@@ -392,12 +393,12 @@ class MemoryService:
                 expr = f'session_id == "{session_id}"'
                 self.plugin.milvus_manager.delete(collection_name, expr)
 
-                logging.info(f"已删除会话 {session_id} 的 {count} 条记忆")
+                self.logger.info(f"已删除会话 {session_id} 的 {count} 条记忆")
 
             return count
 
         except Exception as e:
-            logging.error(f"删除会话记忆失败: {e}", exc_info=True)
+            self.logger.error(f"删除会话记忆失败: {e}", exc_info=True)
             return 0
 
     async def export_memories(
@@ -469,11 +470,11 @@ class MemoryService:
                 return output.getvalue()
 
             else:
-                logging.error(f"不支持的导出格式: {format}")
+                self.logger.error(f"不支持的导出格式: {format}")
                 return None
 
         except Exception as e:
-            logging.error(f"导出记忆失败: {e}", exc_info=True)
+            self.logger.error(f"导出记忆失败: {e}", exc_info=True)
             return None
 
     async def get_session_list(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -507,7 +508,7 @@ class MemoryService:
 
             # 检查查询结果
             if not results:
-                logging.warning("会话列表查询返回空结果")
+                self.logger.warning("会话列表查询返回空结果")
                 return []
 
             # 统计每个会话
@@ -573,7 +574,7 @@ class MemoryService:
             return sessions[:limit]
 
         except Exception as e:
-            logging.error(f"获取会话列表失败: {e}", exc_info=True)
+            self.logger.error(f"获取会话列表失败: {e}", exc_info=True)
             return []
 
     async def vector_search(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
@@ -603,7 +604,7 @@ class MemoryService:
                 not hasattr(self.plugin, "embedding_model")
                 or not self.plugin.embedding_model
             ):
-                logging.warning("Embedding模型未初始化，无法进行向量检索")
+                self.logger.warning("Embedding模型未初始化，无法进行向量检索")
                 return []
 
             # 生成查询向量
@@ -612,7 +613,7 @@ class MemoryService:
             # 获取集合
             collection = self.plugin.milvus_manager.get_collection(collection_name)
             if not collection:
-                logging.error(f"无法获取集合 {collection_name}")
+                self.logger.error(f"无法获取集合 {collection_name}")
                 return []
 
             # 获取实际存在的字段
@@ -669,11 +670,11 @@ class MemoryService:
                         }
                         memories.append(memory)
                     except Exception as e:
-                        logging.error(f"转换搜索结果失败: {e}")
+                        self.logger.error(f"转换搜索结果失败: {e}")
                         continue
 
             return memories
 
         except Exception as e:
-            logging.error(f"向量检索失败: {e}", exc_info=True)
+            self.logger.error(f"向量检索失败: {e}", exc_info=True)
             return []

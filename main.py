@@ -102,7 +102,7 @@ class Mnemosyne(Star):
                     if callable(getattr(provider, "embed_texts", None)) or callable(
                         getattr(provider, "get_embedding", None)
                     ):
-                        logger.info(f"✅ 成功从配置加载 Embedding Provider: {emb_id}")
+                        logger.info(f" 成功从配置加载 Embedding Provider: {emb_id}")
                         # 使用类型断言确保返回正确的类型
                         embedding_provider = cast(EmbeddingProvider, provider)
                         return embedding_provider
@@ -120,7 +120,7 @@ class Mnemosyne(Star):
                 provider_id = getattr(provider, "provider_config", {}).get(
                     "id", "unknown"
                 )
-                logger.info(f"✅ 未指定 Embedding Provider，使用默认的: {provider_id}")
+                logger.info(f" 未指定 Embedding Provider，使用默认的: {provider_id}")
                 embedding_provider = cast(EmbeddingProvider, provider)
                 return embedding_provider
 
@@ -157,7 +157,7 @@ class Mnemosyne(Star):
 
             if self.embedding_provider:
                 logger.info(
-                    f"✅ Embedding Provider 已就绪 (用时 {time.time() - start_time:.1f}s)"
+                    f" Embedding Provider 已就绪 (用时 {time.time() - start_time:.1f}s)"
                 )
                 self._embedding_provider_ready = True
 
@@ -291,19 +291,30 @@ class Mnemosyne(Star):
                 # 检查并生成 Admin Panel API 密钥
                 api_key = admin_panel_config.get("api_key", "").strip()
                 if not api_key:
-                    # 生成临时随机 API 密钥（每次重启都会重新生成）
+                    # 生成临时强随机密码（每次重启都会重新生成）
                     import secrets
+                    import string
 
-                    api_key = secrets.token_urlsafe(32)
+                    # 生成包含大小写字母、数字和特殊字符的48字符强密码
+                    alphabet = (
+                        string.ascii_letters
+                        + string.digits
+                        + "!@#$%^&*()-_=+[]{}|;:,.<>?"
+                    )
+                    api_key = "".join(secrets.choice(alphabet) for _ in range(48))
+
                     # 注意：不保存到配置文件中，这样每次重启都会生成新密钥
-                    logger.warning("⚠️ Admin Panel API 密钥未配置，已自动生成临时密钥。")
-                    logger.critical(f"🔑 临时 Admin Panel API 密钥: {api_key}")
+                    logger.warning("Admin Panel API 密钥未配置，已自动生成临时强密码。")
+                    logger.critical(
+                        f"临时 Admin Panel API 密钥（请妥善保管）: {api_key}"
+                    )
                     logger.info(
-                        "💡 此密钥仅在本次运行中有效，重启后将生成新密钥。\n"
-                        "   如需固定密钥，请在配置文件中手动设置 admin_panel.api_key"
+                        "此密钥仅在本次运行中有效，重启后将生成新密钥，旧密钥将失效。\n"
+                        "   如需固定密钥，请在配置文件中手动设置 admin_panel.api_key\n"
+                        "   重要提示：每次重启后必须使用新的密钥重新认证"
                     )
                 else:
-                    logger.info("✅ Admin Panel API 密钥已配置（固定密钥）")
+                    logger.info("Admin Panel API 密钥已配置（固定密钥）")
 
                 self.admin_panel_server = AdminPanelServer(
                     self, port=port, host="127.0.0.1", api_key=api_key
@@ -316,14 +327,14 @@ class Mnemosyne(Star):
                         target=self.admin_panel_server.run_in_thread, daemon=True
                     )
                     self.admin_panel_thread.start()
-                    logger.info(f"✅ Admin Panel 服务器已启动在端口 {port}")
+                    logger.info(f" Admin Panel 服务器已启动在端口 {port}")
             except Exception as e:
                 logger.warning(f"⚠️ 启动 Admin Panel 服务器失败: {e}")
 
             # 5. 标记初始化成功
             self._initialization_successful = True
             logger.info(
-                f"✅ Mnemosyne 插件初始化成功。"
+                f" Mnemosyne 插件初始化成功。"
                 f"已初始化组件: {', '.join(self._initialized_components)}"
             )
 
