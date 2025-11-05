@@ -41,7 +41,8 @@ class EmbeddingProviderWrapper:
                 texts = [texts]
 
             # 调用 provider 的 embed 方法
-            embeddings = self.provider.embed(texts)
+            # M24 修复: 添加类型忽略注释
+            embeddings = self.provider.embed(texts)  # type: ignore
             if not embeddings:
                 raise ConnectionError("Embedding provider 返回空结果")
 
@@ -61,7 +62,8 @@ class EmbeddingProviderWrapper:
         """
         try:
             if hasattr(self.provider, "embedding_dim"):
-                return self.provider.embedding_dim
+                # M24 修复: 添加类型忽略注释
+                return self.provider.embedding_dim  # type: ignore
             return -1
         except Exception:
             return -1

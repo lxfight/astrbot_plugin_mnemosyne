@@ -96,13 +96,18 @@ async def handle_query_memory(
             # 使用 AstrBot EmbeddingProvider（异步）
             try:
                 # 等待 Embedding Provider 就绪
-                if not plugin.embedding_provider and not plugin._embedding_provider_ready:
+                if (
+                    not plugin.embedding_provider
+                    and not plugin._embedding_provider_ready
+                ):
                     logger.warning("Embedding Provider 不可用，无法执行 RAG 搜索")
                     return
 
                 # 使用 AstrBot EmbeddingProvider 的 embed 方法
                 if plugin.embedding_provider:
-                    query_vector = await plugin.embedding_provider.get_embedding(req.prompt)
+                    query_vector = await plugin.embedding_provider.get_embedding(
+                        req.prompt
+                    )
                 else:
                     logger.error("Embedding Provider 未正确初始化")
                     return
@@ -234,7 +239,10 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str |
     if not persona_id or persona_id == "[%None]":
         # 使用最新的persona_manager API获取默认人格
         try:
-            default_persona = plugin.context.persona_manager.get_default_persona_v3()
+            # M24 修复: get_default_persona_v3 返回协程，需要 await
+            default_persona = (
+                await plugin.context.persona_manager.get_default_persona_v3()
+            )
             persona_id = default_persona.get("name") if default_persona else None
         except Exception as e:
             logger.warning(f"获取默认人格失败: {e}")
@@ -268,14 +276,18 @@ async def _check_and_trigger_summary(
         context: 请求上下文列表。
         persona_id: 人格 ID.
     """
-    if plugin.msg_counter.adjust_counter_if_necessary(
-        session_id, context
-    ) and plugin.msg_counter.get_counter(session_id) >= plugin.config.get(
-        "num_pairs", 10
+    # M24 修复: 添加 msg_counter 的类型检查
+    if (
+        plugin.msg_counter
+        and plugin.msg_counter.adjust_counter_if_necessary(session_id, context)
+        and plugin.msg_counter.get_counter(session_id)
+        >= plugin.config.get("num_pairs", 10)
     ):
         logger.info("开始总结历史对话...")
+        # M24 修复: 添加类型忽略，context 来自运行时的上下文
         history_contents = format_context_to_string(
-            context, plugin.config.get("num_pairs", 10)
+            context,  # type: ignore
+            plugin.config.get("num_pairs", 10),
         )
 
         # M19 修复: 为后台任务添加异常处理回调
@@ -297,7 +309,9 @@ async def _check_and_trigger_summary(
 
         task.add_done_callback(task_done_callback)
         logger.info("总结历史对话任务已提交到后台执行。")
-        plugin.msg_counter.reset_counter(session_id)
+        # M24 修复: 添加类型检查
+        if plugin.msg_counter:
+            plugin.msg_counter.reset_counter(session_id)
 
 
 async def _perform_milvus_search(
@@ -372,11 +386,16 @@ async def _perform_milvus_search(
         f"开始在集合 '{collection_name}' 中搜索相关记忆 (TopK: {top_k}, Filter: '{search_expression or '无'}')"
     )
 
+    # M24 修复: 添加 milvus_manager 的类型检查
+    if not plugin.milvus_manager:
+        logger.error("Milvus 管理器不可用")
+        return None
+
     try:
         search_results = await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: plugin.milvus_manager.search(
+                lambda: plugin.milvus_manager.search(  # type: ignore
                     collection_name=collection_name,
                     query_vectors=[query_vector],
                     vector_field=VECTOR_FIELD_NAME,
@@ -616,7 +635,8 @@ async def _get_summary_llm_response(
     )
 
     try:
-        llm_response = await llm_provider.text_chat(
+        # M24 修复: 添加 text_chat 方法的类型忽略
+        llm_response = await llm_provider.text_chat(  # type: ignore
             prompt=memory_text,
             contexts=[{"role": "system", "content": long_memory_prompt}],
             **summary_llm_config,
@@ -707,12 +727,23 @@ async def _store_summary_to_milvus(
     # --- 修改 insert 调用 ---
     loop = asyncio.get_event_loop()
     mutation_result = None
+
+    # M24 修复: 添加 milvus_manager 的类型检查
+    if not plugin.milvus_manager:
+        logger.error("Milvus 管理器不可用")
+        return
+
     try:
+        # M24 修复: 定义插入函数避免类型检查问题
+        def _insert_data():
+            return plugin.milvus_manager.insert(  # type: ignore
+                collection_name=collection_name,
+                data=data_to_insert,  # type: ignore
+            )
+
         mutation_result = await loop.run_in_executor(
             None,  # 使用默认线程池
-            lambda: plugin.milvus_manager.insert(
-                collection_name=collection_name, data=data_to_insert
-            ),
+            _insert_data,
         )
     except (MilvusException, ConnectionError, ValueError) as e:
         logger.error(f"向 Milvus 插入总结记忆时出错: {e}", exc_info=True)
@@ -733,10 +764,15 @@ async def _store_summary_to_milvus(
             logger.debug(
                 f"正在刷新 (Flush) 集合 '{collection_name}' 以确保记忆立即可用..."
             )
+
             # plugin.milvus_manager.flush([collection_name])
+            # M24 修复: 定义刷新函数避免类型检查问题
+            def _flush_collection():
+                return plugin.milvus_manager.flush([collection_name])  # type: ignore
+
             await loop.run_in_executor(
                 None,  # 使用默认线程池
-                lambda: plugin.milvus_manager.flush([collection_name]),
+                _flush_collection,
             )
             logger.debug(f"集合 '{collection_name}' 刷新完成。")
 
@@ -783,7 +819,8 @@ async def handle_summary_long_memory(
                 return
 
             # 使用 AstrBot EmbeddingProvider 的 embed 方法
-            embedding_vector = await plugin.embedding_provider.embed(summary_text)
+            # M24 修复: 添加 embed 方法的类型忽略
+            embedding_vector = await plugin.embedding_provider.embed(summary_text)  # type: ignore
 
             if not embedding_vector:
                 logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")
@@ -848,7 +885,11 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                     )
                     if not session_context:  # 会话可能在检查期间被移除
                         continue
-                    if plugin.msg_counter.get_counter(session_id) <= 0:
+                    # M24 修复: 添加 msg_counter 的类型检查
+                    if (
+                        not plugin.msg_counter
+                        or plugin.msg_counter.get_counter(session_id) <= 0
+                    ):
                         logger.debug(f"会话 {session_id} 没有新消息，跳过检查。")
                         continue
 
@@ -861,9 +902,15 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                         )
                         # 运行总结
                         logger.info("开始总结历史对话...")
+                        # M24 修复: 添加 msg_counter 的类型检查和类型忽略
+                        counter = (
+                            plugin.msg_counter.get_counter(session_id)
+                            if plugin.msg_counter
+                            else 0
+                        )
                         history_contents = format_context_to_string(
                             session_context["history"],
-                            plugin.msg_counter.get_counter(session_id),
+                            counter,  # type: ignore
                         )
                         persona_id = await _get_persona_id(
                             plugin, session_context["event"]
@@ -875,7 +922,9 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                         )
                         logger.info("总结历史对话任务已提交到后台执行。")
 
-                        plugin.msg_counter.reset_counter(session_id)
+                        # M24 修复: 添加 msg_counter 的类型检查
+                        if plugin.msg_counter:
+                            plugin.msg_counter.reset_counter(session_id)
                         plugin.context_manager.update_summary_time(session_id)
 
                 except KeyError:

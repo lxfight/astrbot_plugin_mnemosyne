@@ -131,7 +131,8 @@ class MilvusVectorDB(VectorDatabase):
         """
         try:
             # 使用 MilvusManager 插入数据
-            result = self._manager.insert(collection_name=collection_name, data=data)
+            # M24 修复: 添加类型忽略注释，Milvus SDK 的类型定义较宽松
+            result = self._manager.insert(collection_name=collection_name, data=data)  # type: ignore
 
             if result:
                 logger.info(f"成功向集合 '{collection_name}' 插入 {len(data)} 条数据")
@@ -180,7 +181,7 @@ class MilvusVectorDB(VectorDatabase):
         collection_name: str,
         query_vector: list[float],
         top_k: int,
-        filters: str = None,
+        filters: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         执行相似性搜索

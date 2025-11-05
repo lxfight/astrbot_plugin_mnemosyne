@@ -124,10 +124,10 @@ class APIKeyAuth:
 
             if existing_token:
                 self.api_key = existing_token
-                logger.info(f"✅ 已加载现有的 API Token")
+                logger.info("✅ 已加载现有的 API Token")
                 logger.info(f"📁 Token 文件位置: {self.token_file}")
                 logger.info(f"🔑 当前 Token: {self.api_key}")
-                logger.info(f"💡 提示: 此 token 会持久保存，重启后仍然有效")
+                logger.info("💡 提示: 此 token 会持久保存，重启后仍然有效")
             else:
                 # 生成新的强 token
                 self.api_key = generate_secure_token(32)  # 64字符的十六进制 token
@@ -205,7 +205,7 @@ class APIKeyAuth:
                 "token_length": 0,
                 "full_token": "[未设置]",
             }
-        
+
         token_hash = hashlib.sha256(self.api_key.encode()).hexdigest()[:16]
 
         return {

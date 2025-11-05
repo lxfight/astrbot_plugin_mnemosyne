@@ -51,7 +51,7 @@ class VectorDatabase(ABC):
         collection_name: str,
         query_vector: list[float],
         top_k: int,
-        filters: str = None,
+        filters: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         执行相似性搜索
