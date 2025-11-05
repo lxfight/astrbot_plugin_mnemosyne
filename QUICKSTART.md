@@ -10,7 +10,7 @@
 
 ```bash
 # 下载配置文件
-wget https://github.com/milvus-io/milvus/releases/download/v2.3.0/milvus-standalone-docker-compose.yml -O docker-compose.yml
+wget https://github.com/milvus-io/milvus/releases/download/v2.6.4/milvus-standalone-docker-compose.yml -O docker-compose.yml
 
 # 启动服务
 docker-compose up -d
@@ -22,14 +22,14 @@ docker-compose ps
 **方法 B：Milvus Lite（轻量级）**
 
 ```bash
-pip install milvus
+pip install pymilvus
 ```
 
 ### 步骤 2：安装插件依赖
 
 ```bash
 cd data/plugins/astrbot_plugin_mnemosyne
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 ### 步骤 3：配置插件
@@ -100,7 +100,6 @@ telnet 127.0.0.1 19530
 **检查方法**：
 ```bash
 # 查看日志中的消息计数
-grep "消息计数" logs/astrbot.log
 
 # 检查 LLM 配置
 # 在 AstrBot WebUI → 服务商配置 中确认
@@ -121,52 +120,7 @@ grep "消息计数" logs/astrbot.log
    # 重启 AstrBot
    ```
 
-## 配置调优建议
 
-### 小型部署（个人使用）
-
-```json
-{
-  "num_pairs": 5,
-  "top_k": 3,
-  "score_threshold": 0.75,
-  "index_type": "FLAT",
-  "nlist": 128
-}
-```
-
-**特点**：响应快速，精度高，适合少量用户
-
-### 中型部署（小团队）
-
-```json
-{
-  "num_pairs": 8,
-  "top_k": 5,
-  "score_threshold": 0.7,
-  "index_type": "IVF_FLAT",
-  "nlist": 512,
-  "nprobe": 32
-}
-```
-
-**特点**：平衡性能和精度，适合多用户场景
-
-### 大型部署（高并发）
-
-```json
-{
-  "num_pairs": 10,
-  "top_k": 10,
-  "score_threshold": 0.65,
-  "index_type": "IVF_PQ",
-  "nlist": 2048,
-  "nprobe": 64,
-  "m": 8
-}
-```
-
-**特点**：高吞吐量，适合大规模部署
 
 ## 性能优化技巧
 
@@ -200,103 +154,5 @@ grep "消息计数" logs/astrbot.log
 }
 ```
 
-### 3. 索引类型选择
-
-| 数据量 | 推荐索引 | 说明 |
-|--------|----------|------|
-| < 1万 | FLAT | 精确搜索，速度快 |
-| 1万-10万 | IVF_FLAT | 平衡精度和速度 |
-| > 10万 | IVF_PQ | 压缩存储，适合大规模 |
-
-## 进阶使用
-
-### 多集合管理
-
-为不同场景创建独立集合：
-
-```json
-// 工作场景
-{
-  "collection_name": "work_memory",
-  "num_pairs": 8
-}
-
-// 娱乐场景
-{
-  "collection_name": "casual_memory",
-  "num_pairs": 5
-}
-```
-
-### 记忆迁移
-
-```python
-from pymilvus import Collection, connections
-
-# 连接数据库
-connections.connect(host="127.0.0.1", port="19530")
-
-# 从旧集合读取
-old_coll = Collection("old_collection")
-old_coll.load()
-data = old_coll.query(expr="id >= 0", output_fields=["*"])
-
-# 写入新集合
-new_coll = Collection("new_collection")
-new_coll.insert(data)
-new_coll.flush()
-```
-
-### 定期维护
-
-**每月任务**：
-1. 清理低质量记忆（相似度 < 0.5）
-2. 压缩集合以节省空间
-3. 检查索引性能并重建（如需要）
-
-**使用 WebUI**：
-- 打开记忆列表
-- 按相似度排序
-- 批量删除低分记忆
-
-## 监控与日志
-
-### 查看运行状态
-
-```bash
-# 查看插件日志
-grep "Mnemosyne" logs/astrbot.log | tail -50
-
-# 查看 Milvus 日志
-docker logs milvus-standalone | tail -50
-```
-
-### 关键指标
-
-**记忆存储**：
-- 总结触发次数
-- 平均总结耗时
-- 向量化成功率
-
-**记忆检索**：
-- 平均检索耗时
-- 命中率（相似度 ≥ 阈值）
-- Top-K 平均相似度
-
-## 下一步
-
-- 📖 阅读完整文档：[README.md](README.md)
-- 🎨 探索 WebUI：[admin_panel/README.md](admin_panel/README.md)
-- 🔧 了解修复详情：[MILVUS_FIX_SUMMARY.md](MILVUS_FIX_SUMMARY.md)
-
-## 获取帮助
-
-如遇到问题，请：
-1. 查看日志文件
-2. 阅读故障排查部分
-3. 在 GitHub Issues 中搜索类似问题
-4. 提交新的 Issue 并附上日志
-
----
 
 **祝您使用愉快！** 🎉

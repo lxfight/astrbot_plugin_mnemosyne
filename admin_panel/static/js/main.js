@@ -193,9 +193,6 @@ function loadPage(pageName) {
         case 'statistics':
             loadStatistics();
             break;
-        case 'logs':
-            loadLogs();
-            break;
         case 'config':
             loadConfig();
             break;
@@ -328,12 +325,6 @@ function getStatusIndicator(status) {
     return indicators[status] || indicators['unknown'];
 }
 
-// 日志查看功能（占位）
-function loadLogs() {
-    console.log('日志查看功能待实现');
-    showToast('日志查看功能正在开发中', 'warning');
-}
-
 // 配置管理功能（占位）
 function loadConfig() {
     console.log('配置管理功能待实现');
@@ -362,6 +353,5 @@ window.formatBytes = formatBytes;
 window.getStatusIndicator = getStatusIndicator;
 window.loadPage = loadPage;
 window.navigateTo = navigateTo;  // 导出导航函数
-window.loadLogs = loadLogs;
 window.loadConfig = loadConfig;
 window.saveConfig = saveConfig;

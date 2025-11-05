@@ -142,7 +142,7 @@
             "api_key":{
                 "description":"管理面板 API 密钥",
                 "type":"string",
-                "hint":"用于保护管理面板 API 的访问密钥。留空则禁用认证（不推荐）。建议使用强密码或随机生成的密钥",
+                "hint":"用于保护管理面板 API 的访问密钥。留空则每次重启自动生成临时密钥（仅本次运行有效）。如需固定密钥，请在此配置自定义密钥",
                 "obvious_hint":true,
                 "default":"",
                 "minLength":0,

@@ -33,10 +33,6 @@
                     <i class="ti ti-chart-bar icon"></i>
                     <span>统计分析</span>
                 </a>
-                <a href="#logs" class="nav-item" data-page="logs">
-                    <i class="ti ti-file-text icon"></i>
-                    <span>日志查看</span>
-                </a>
                 <a href="#config" class="nav-item" data-page="config">
                     <i class="ti ti-settings icon"></i>
                     <span>系统配置</span>
@@ -247,27 +243,6 @@
                         <div class="chart-wrapper">
                             <canvas id="distribution-chart"></canvas>
                         </div>
-                    </div>
-                </div>
-
-                <!-- 日志查看页面 -->
-                <div id="logs-page" class="page">
-                    <div class="page-header">
-                        <h2>系统日志</h2>
-                        <div class="btn-group">
-                            <select id="log-level" class="input">
-                                <option value="all">全部级别</option>
-                                <option value="debug">DEBUG</option>
-                                <option value="info">INFO</option>
-                                <option value="warning">WARNING</option>
-                                <option value="error">ERROR</option>
-                            </select>
-                            <button class="btn btn-primary" onclick="loadLogs()">刷新</button>
-                        </div>
-                    </div>
-
-                    <div id="logs-content" class="logs-container">
-                        <p class="placeholder">日志查看功能正在开发中...</p>
                     </div>
                 </div>
 

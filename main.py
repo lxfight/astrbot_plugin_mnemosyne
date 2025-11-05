@@ -41,7 +41,7 @@ from .memory_manager.vector_db.milvus_manager import MilvusManager
     "Mnemosyne",
     "lxfight",
     "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
-    "0.5.2",
+    "2.0.0",
     "https://github.com/lxfight/astrbot_plugin_mnemosyne",
 )
 class Mnemosyne(Star):
@@ -289,26 +289,24 @@ class Mnemosyne(Star):
                 )  # 从配置中获取端口，默认8000
 
                 # 检查并生成 Admin Panel API 密钥
-                api_key = admin_panel_config.get("api_key")
+                api_key = admin_panel_config.get("api_key", "").strip()
                 if not api_key:
-                    # 生成随机 API 密钥
+                    # 生成临时随机 API 密钥（每次重启都会重新生成）
                     import secrets
 
                     api_key = secrets.token_urlsafe(32)
-                    # 更新配置
-                    if "admin_panel" not in self.config:
-                        self.config["admin_panel"] = {}
-                    self.config["admin_panel"]["api_key"] = api_key
-                    logger.warning("⚠️ Admin Panel API 密钥未配置，已自动生成随机密钥。")
-                    logger.info(f"🔑 Admin Panel API 密钥: {api_key}")
+                    # 注意：不保存到配置文件中，这样每次重启都会生成新密钥
+                    logger.warning("⚠️ Admin Panel API 密钥未配置，已自动生成临时密钥。")
+                    logger.critical(f"🔑 临时 Admin Panel API 密钥: {api_key}")
                     logger.info(
-                        "💡 请妥善保存此密钥，或在配置文件中手动设置 admin_panel.api_key"
+                        "💡 此密钥仅在本次运行中有效，重启后将生成新密钥。\n"
+                        "   如需固定密钥，请在配置文件中手动设置 admin_panel.api_key"
                     )
                 else:
-                    logger.info("✅ Admin Panel API 密钥已配置")
+                    logger.info("✅ Admin Panel API 密钥已配置（固定密钥）")
 
                 self.admin_panel_server = AdminPanelServer(
-                    self, port=port, host="127.0.0.1"
+                    self, port=port, host="127.0.0.1", api_key=api_key
                 )
                 # 在独立线程中启动服务器
                 import threading

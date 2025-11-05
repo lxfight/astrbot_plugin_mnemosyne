@@ -1,396 +1,333 @@
-# Mnemosyne 长期记忆插件
+<div align="center">
 
-AstrBot 的长期记忆管理插件，基于 Milvus 向量数据库实现对话记忆的存储、检索和总结功能。
+# Mnemosyne
 
-## 功能特性
+### AstrBot 长期记忆插件
 
-- 🧠 **智能记忆总结**：自动总结对话内容并存储为长期记忆
-- 🔍 **相关记忆检索**：基于语义相似度检索历史对话记忆
-- 📊 **WebUI 管理界面**：提供可视化的记忆管理和配置界面
-- 🗂️ **记忆集合管理**：支持多个独立的记忆集合，隔离不同场景的记忆
-- 🔄 **自动数据迁移**：支持从旧版本数据格式自动迁移
+<p align="center">
+  <i>为 AI 赋予持久记忆能力，构建个性化对话体验</i>
+</p>
 
-## 系统要求
+---
 
-### 必需依赖
+[![License](https://img.shields.io/badge/license-Custom-blue.svg)](./LICENSE)
+[![Version](https://img.shields.io/badge/version-v2.0.0-green.svg)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
+[![QQ Group](https://img.shields.io/badge/QQ群-953245617-blue?style=flat-square&logo=tencent-qq)](https://qm.qq.com/cgi-bin/qm/qr?k=WdyqoP-AOEXqGAN08lOFfVSguF2EmBeO&jump_from=webapi&authKey=tPyfv90TVYSGVhbAhsAZCcSBotJuTTLf03wnn7/lQZPUkWfoQ/J8e9nkAipkOzwh)
 
-- Python 3.9+
-- AstrBot 4.0+
-- Milvus 向量数据库（推荐 2.3.0+）
+</div>
 
-### Python 依赖包
+---
 
+## 概述
+
+**Mnemosyne** 是一个为 AstrBot 设计的长期记忆管理插件，基于 RAG (检索增强生成) 技术和 Milvus 向量数据库实现。该插件能够自动总结对话内容，将其转换为向量存储，并在后续对话中智能检索相关记忆，使 AI 具备真正的长期记忆能力。
+
+<table>
+<tr>
+<td width="50%">
+
+### 核心特性
+
+<ul>
+<li><strong>自动记忆总结</strong><br/>根据对话轮数自动触发记忆总结与存储</li>
+<li><strong>智能记忆检索</strong><br/>基于语义相似度检索最相关的历史记忆</li>
+<li><strong>会话隔离</strong><br/>为不同会话维护独立的记忆上下文</li>
+<li><strong>向量化存储</strong><br/>使用 Milvus 进行高效的向量存储与检索</li>
+</ul>
+
+</td>
+<td width="50%">
+
+### 管理功能
+
+<ul>
+<li><strong>Web 管理面板</strong><br/>可视化管理记忆数据，支持查询、统计</li>
+<li><strong>命令行工具</strong><br/>提供丰富的命令行指令管理记忆</li>
+<li><strong>灵活配置</strong><br/>支持多种记忆注入方式与检索策略</li>
+<li><strong>数据安全</strong><br/>支持 API 密钥认证保护管理端点</li>
+</ul>
+
+</td>
+</tr>
+</table>
+
+---
+
+## 技术架构
+
+<table>
+<tr>
+<th width="25%">组件</th>
+<th width="75%">说明</th>
+</tr>
+<tr>
+<td><strong>向量数据库</strong></td>
+<td>基于 Milvus / Milvus Lite 进行向量存储与检索，支持多种索引类型</td>
+</tr>
+<tr>
+<td><strong>Embedding 服务</strong></td>
+<td>集成 AstrBot 的 Embedding Provider，自动获取文本向量表示</td>
+</tr>
+<tr>
+<td><strong>LLM 总结</strong></td>
+<td>使用配置的 LLM Provider 进行对话内容总结，生成结构化记忆</td>
+</tr>
+<tr>
+<td><strong>上下文管理</strong></td>
+<td>维护对话历史与记忆注入，支持多种注入策略（用户提示/系统提示）</td>
+</tr>
+<tr>
+<td><strong>Web 管理面板</strong></td>
+<td>基于 FastAPI 的管理界面，提供记忆查询、统计、监控功能</td>
+</tr>
+</table>
+
+---
+
+## 主要功能
+
+### 记忆管理
+
+- **自动总结机制**：根据配置的对话轮数阈值自动触发总结
+- **时间触发总结**：支持基于时间阈值的定期总结（可选）
+- **人格过滤**：支持按人格配置过滤记忆检索结果
+- **多集合支持**：可为不同场景创建独立的记忆集合
+
+### 命令系统
+
+```
+/memory list                              查看所有记忆集合
+/memory list_records [collection] [limit] 列出指定集合的记忆记录
+/memory get_session_id                    获取当前会话 ID
+/memory reset [confirm]                   清除当前会话记忆
+/memory delete_session_memory [id] [confirm]  删除指定会话记忆（管理员）
+/memory drop_collection [name] [confirm] 删除整个集合（管理员）
+```
+
+### 配置选项
+
+<table>
+<tr>
+<th>配置项</th>
+<th>说明</th>
+<th>默认值</th>
+</tr>
+<tr>
+<td><code>num_pairs</code></td>
+<td>触发总结的对话轮数阈值</td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>top_k</code></td>
+<td>检索返回的记忆数量</td>
+<td>3</td>
+</tr>
+<tr>
+<td><code>collection_name</code></td>
+<td>Milvus 集合名称</td>
+<td>default</td>
+</tr>
+<tr>
+<td><code>memory_injection_method</code></td>
+<td>记忆注入方式</td>
+<td>user_prompt</td>
+</tr>
+<tr>
+<td><code>use_personality_filtering</code></td>
+<td>是否启用人格过滤</td>
+<td>true</td>
+</tr>
+</table>
+
+---
+
+## 快速开始
+
+### 先决条件
+
+- AstrBot v4.0.0+
+- Python 3.8+
+- Milvus 数据库（可选择 Milvus Lite 或 Standalone）
+- 已配置的 Embedding Provider
+
+### 安装步骤
+
+<table>
+<tr>
+<td width="5%"><strong>1</strong></td>
+<td>
+
+**安装依赖**
 ```bash
-pymilvus>=2.3.0
-pydantic>=2.0.0
+cd data/plugins/astrbot_plugin_mnemosyne
+uv pip install -r requirements.txt
 ```
 
-## 安装步骤
+</td>
+</tr>
+<tr>
+<td><strong>2</strong></td>
+<td>
 
-### 1. 安装 Milvus
+**配置 Milvus**
 
-**使用 Docker（推荐）**：
+选择以下方式之一：
 
-```bash
-# 下载 Milvus Standalone docker-compose 配置
-wget https://github.com/milvus-io/milvus/releases/download/v2.3.0/milvus-standalone-docker-compose.yml -O docker-compose.yml
+- **Milvus Lite**（轻量级，无需额外服务，不支持windows系统）
+  ```json
+  {
+    "milvus_lite_path": "./data/milvus.db"
+  }
+  ```
 
-# 启动 Milvus
-docker-compose up -d
-```
+- **Milvus Standalone**（完整功能）
+  ```json
+  {
+    "address": "127.0.0.1:19530"
+  }
+  ```
 
-**使用 Milvus Lite（轻量级）**：
+</td>
+</tr>
+<tr>
+<td><strong>3</strong></td>
+<td>
 
-```bash
-pip install milvus
-```
+**配置插件**
 
-更多安装方式请参考：https://milvus.io/docs/install_standalone-docker.md
+在 AstrBot WebUI 中进行插件配置，设置：
+- LLM Provider（用于记忆总结）
+- Embedding Provider（用于向量化）
+- 记忆管理参数
 
-### 2. 安装插件
+</td>
+</tr>
+<tr>
+<td><strong>4</strong></td>
+<td>
 
-1. 下载插件到 AstrBot 的 `data/plugins` 目录：
-   ```bash
-   cd data/plugins
-   git clone <repository-url> astrbot_plugin_mnemosyne
-   ```
+**启动服务**
 
-2. 安装依赖：
-   ```bash
-   pip install pymilvus>=2.3.0 pydantic>=2.0.0
-   ```
+重启 AstrBot，插件将自动初始化
 
-3. 重启 AstrBot
+</td>
+</tr>
+</table>
 
-## 配置说明
+详细的部署指南请参阅：**[快速启动指南 (QUICKSTART.md)](./QUICKSTART.md)**
 
-### 基础配置
+或访问 Wiki：**[如何正确且快速地食用本插件](https://github.com/lxfight/astrbot_plugin_mnemosyne/wiki/%E5%A6%82%E4%BD%95%E6%AD%A3%E7%A1%AE%E4%B8%94%E5%BF%AB%E9%80%9F%E7%9A%84%E9%A3%9F%E7%94%A8%E6%9C%AC%E6%8F%92%E4%BB%B6)**
 
-| 配置项 | 说明 | 默认值 | 范围 |
-|--------|------|--------|------|
-| `milvus_host` | Milvus 服务器地址 | `127.0.0.1` | - |
-| `milvus_port` | Milvus 服务器端口 | `19530` | 1-65535 |
-| `collection_name` | Milvus 集合名称 | `default` | - |
-| `num_pairs` | 记忆总结的对话轮数 | `5` | 1-25 |
+---
 
-**重要说明**：
-- `num_pairs` 配置为**对话轮数**，一问一答算作 1 轮对话
-- 例如设置为 5，表示每 5 轮对话（5 次问答）后进行记忆总结
+## 使用示例
 
-### 高级配置
+### 场景一：个人助手
 
-| 配置项 | 说明 | 默认值 | 范围 |
-|--------|------|--------|------|
-| `embedding_dim` | 向量维度（自动获取） | `1536` | 128-4096 |
-| `index_type` | 索引类型 | `IVF_FLAT` | - |
-| `metric_type` | 距离度量类型 | `COSINE` | `COSINE`/`L2`/`IP` |
-| `nlist` | IVF 索引聚类中心数 | `128` | 1-65536 |
-| `nprobe` | 查询时探测的聚类数 | `16` | 1-nlist |
-| `top_k` | 检索返回的最大记忆数 | `5` | 1-20 |
-| `score_threshold` | 相似度阈值 | `0.7` | 0.0-1.0 |
+配置较小的对话轮数（3-5 轮），使 AI 能够快速记忆用户偏好和近期事项。
 
-**注意事项**：
-- `embedding_dim` 会自动从 AstrBot 的 `embedding_provider` 获取，通常无需手动配置
-- 如果 Provider 未就绪，将使用默认值 1536（OpenAI text-embedding-ada-002 维度）
+### 场景二：客服机器人
 
-### 配置文件示例
+配置较大的记忆检索数量（top_k=10），确保能够回忆起用户的历史问题。
 
-```json
-{
-  "milvus_host": "127.0.0.1",
-  "milvus_port": 19530,
-  "collection_name": "default",
-  "num_pairs": 5,
-  "top_k": 5,
-  "score_threshold": 0.7,
-  "index_type": "IVF_FLAT",
-  "metric_type": "COSINE",
-  "nlist": 128,
-  "nprobe": 16
-}
-```
+### 场景三：知识管理
 
-## 使用指南
+使用多个集合分别存储不同领域的对话记忆，实现知识分类管理。
 
-### 1. WebUI 管理界面
+---
 
-插件提供了完整的 WebUI 管理界面，详细文档请参考：[admin_panel/README.md](admin_panel/README.md)
+## Web 管理面板
 
-主要功能包括：
-- 📋 记忆列表查看和搜索
-- ➕ 手动添加记忆
-- ✏️ 编辑和删除记忆
-- 🔍 记忆检索测试
-- ⚙️ 实时配置管理
+插件内置了基于 FastAPI 的管理面板，提供以下功能：
 
-访问方式：AstrBot Dashboard → 插件管理 → Mnemosyne → 管理面板
+- 记忆数据查询与浏览
+- 会话统计与分析
+- 实时监控与日志查看
+- 记忆数据导出
 
-### 2. 命令行使用
+**访问地址**：`http://localhost:8000`（默认端口）
 
-**查看记忆统计**：
-```
-/mne stats
-```
+**安全配置**：
+- 支持 API 密钥认证
+- 可在配置文件中设置固定密钥
+- 未配置时自动生成临时密钥（每次重启变化）
 
-**手动触发总结**：
-```
-/mne summarize
-```
+---
 
-**搜索记忆**：
-```
-/mne search <关键词>
-```
+## 技术细节
 
-## 工作原理
-
-### 记忆总结流程
+### 记忆存储流程
 
 ```
-用户对话 → 消息计数 → 达到阈值 → 调用 LLM 总结 → 生成向量 → 存储到 Milvus
+对话消息 → 达到轮数阈值 → LLM 总结 → Embedding 向量化 → Milvus 存储
 ```
-
-1. **消息计数**：每次对话后，插件会跟踪消息数量
-2. **触发总结**：当累计达到 `num_pairs * 2` 条消息时触发总结
-3. **LLM 总结**：调用 AstrBot 的 LLM 提供者生成摘要
-4. **向量化**：使用 Embedding Provider 将摘要转换为向量
-5. **存储**：将向量和元数据存储到 Milvus 集合
 
 ### 记忆检索流程
 
 ```
-用户消息 → 向量化 → Milvus 检索 → 相似度过滤 → 返回相关记忆
+用户输入 → Embedding 向量化 → Milvus 相似度检索 → 过滤筛选 → 注入上下文
 ```
 
-1. **向量化查询**：将用户消息转换为向量
-2. **语义检索**：在 Milvus 中执行 ANN（近似最近邻）搜索
-3. **相似度过滤**：只返回相似度 ≥ `score_threshold` 的记忆
-4. **上下文注入**：将相关记忆注入到 LLM 的上下文中
+### 数据模型
 
-## 故障排查
+每条记忆记录包含以下字段：
+- `id`：唯一标识符
+- `text`：总结后的文本内容
+- `embedding`：文本的向量表示
+- `session_id`：关联的会话 ID
+- `persona_id`：关联的人格 ID
+- `timestamp`：创建时间戳
+- `metadata`：扩展元数据
 
-### 常见问题
-
-#### 1. Milvus 连接失败
-
-**错误信息**：
-```
-[ERROR] 无法连接到 Milvus 服务器
-```
-
-**解决方案**：
-- 检查 Milvus 服务是否运行：`docker ps | grep milvus`
-- 验证 `milvus_host` 和 `milvus_port` 配置
-- 检查防火墙和网络连接
-
-#### 2. Collection not loaded 错误（已修复）
-
-**错误信息**：
-```
-MilvusException: (code=101, message=collection not loaded)
-```
-
-**修复说明**：
-- 插件现已采用**延迟加载策略**
-- 集合会在首次查询或插入时自动加载
-- 不再需要手动处理集合加载问题
-
-详细修复信息请参考：[MILVUS_FIX_SUMMARY.md](MILVUS_FIX_SUMMARY.md)
-
-#### 3. Embedding 维度不匹配
-
-**错误信息**：
-```
-[ERROR] Embedding 维度不匹配
-```
-
-**解决方案**：
-- 检查 `embedding_provider` 配置是否正确
-- 确保所有消息使用相同的 Embedding 模型
-- 如果更换了模型，需要重建集合：
-  ```python
-  # 删除旧集合
-  collection.drop()
-  # 重启插件以创建新集合
-  ```
-
-#### 4. 记忆总结未触发
-
-**可能原因**：
-- 对话轮数未达到 `num_pairs` 阈值
-- LLM Provider 未正确配置
-- 消息计数器被重置（重启 AstrBot）
-
-**检查方法**：
-- 查看日志中的消息计数信息
-- 使用 `/mne stats` 查看当前会话状态
-- 降低 `num_pairs` 值进行测试
-
-### 调试模式
-
-启用详细日志：
-
-```python
-# 在 main.py 中设置
-import logging
-logging.getLogger("astrbot_plugin_mnemosyne").setLevel(logging.DEBUG)
-```
-
-## 性能优化建议
-
-### 1. 索引优化
-
-**小数据集（< 1万条）**：
-```json
-{
-  "index_type": "FLAT",
-  "nlist": 128
-}
-```
-
-**中等数据集（1万-10万）**：
-```json
-{
-  "index_type": "IVF_FLAT",
-  "nlist": 1024,
-  "nprobe": 32
-}
-```
-
-**大数据集（> 10万）**：
-```json
-{
-  "index_type": "IVF_PQ",
-  "nlist": 2048,
-  "nprobe": 64,
-  "m": 8
-}
-```
-
-### 2. 查询优化
-
-- **调整 `top_k`**：减少返回的记忆数量可提升速度
-- **提高 `score_threshold`**：过滤掉低相关度结果
-- **减少 `nprobe`**：降低查询精度但提高速度
-
-### 3. 资源管理
-
-- 定期清理无用记忆：使用 WebUI 删除过时数据
-- 使用多个集合隔离不同场景：避免单个集合过大
-- 监控 Milvus 内存使用：及时调整 `replica_number`
-
-## 数据备份与迁移
-
-### 备份数据
-
-```bash
-# 导出 Milvus 数据
-docker exec -it milvus-standalone bash
-cd /var/lib/milvus/
-tar -czf backup.tar.gz ./*
-```
-
-### 恢复数据
-
-```bash
-# 停止 Milvus
-docker-compose down
-
-# 恢复数据
-docker exec -it milvus-standalone bash
-cd /var/lib/milvus/
-tar -xzf backup.tar.gz
-
-# 重启 Milvus
-docker-compose up -d
-```
-
-### 迁移到新集合
-
-使用 WebUI 的导出/导入功能，或使用 Python 脚本：
-
-```python
-from pymilvus import Collection, connections
-
-# 连接
-connections.connect(host="127.0.0.1", port="19530")
-
-# 读取旧集合
-old_collection = Collection("old_collection")
-old_collection.load()
-results = old_collection.query(expr="id >= 0", output_fields=["*"])
-
-# 插入到新集合
-new_collection = Collection("new_collection")
-new_collection.insert(results)
-new_collection.flush()
-```
-
-## 开发文档
-
-### 目录结构
-
-```
-astrbot_plugin_mnemosyne/
-├── main.py                 # 插件入口
-├── _conf_schema.json       # 配置模式
-├── admin_panel/           # WebUI 管理界面
-│   ├── index.html
-│   ├── app.js
-│   └── README.md
-├── core/                  # 核心逻辑
-│   ├── initialization.py  # 初始化
-│   ├── memory_operations.py  # 记忆操作
-│   └── context_utils.py   # 上下文工具
-├── memory_manager/        # 记忆管理
-│   ├── __init__.py
-│   └── vector_db/
-│       └── milvus_manager.py  # Milvus 管理器
-└── utils/                 # 工具函数
-    ├── message_counter.py  # 消息计数
-    └── data_models.py     # 数据模型
-```
-
-### API 接口
-
-插件提供以下 HTTP API：
-
-- `GET /api/memories` - 获取记忆列表
-- `POST /api/memories` - 创建新记忆
-- `PUT /api/memories/{id}` - 更新记忆
-- `DELETE /api/memories/{id}` - 删除记忆
-- `POST /api/search` - 搜索记忆
-- `GET /api/config` - 获取配置
-- `PUT /api/config` - 更新配置
-
-详细 API 文档请参考：[admin_panel/README.md](admin_panel/README.md#api-接口)
-
-## 更新日志
-
-### v2.0.0 (2025-11-05)
-
-**重大改进**：
-- ✅ 修复 Milvus "collection not loaded" 错误
-- ✅ 实现延迟加载策略，提升启动速度
-- ✅ 优化 `num_pairs` 配置逻辑（改为对话轮数）
-- ✅ `embedding_dim` 自动获取，简化配置
-- ✅ 增强错误处理和诊断信息
-- ✅ 完善 WebUI 管理界面
-- ✅ 新增完整的文档和故障排查指南
-
-**破坏性变更**：
-- `num_pairs` 现在表示对话轮数而非消息条数（旧版本需要除以 2）
-
-### v1.x
-
-- 初始版本功能实现
+---
 
 ## 许可证
 
-本项目采用与 AstrBot 相同的许可证。
+本项目采用自定义许可证，详见 [LICENSE](./LICENSE) 文件。
+
+---
 
 ## 支持与反馈
 
-- 问题报告：请在 GitHub Issues 中提交
-- 功能建议：欢迎提交 Pull Request
-- 
+<table>
+<tr>
+<td width="50%">
+
+### 问题报告
+
+如遇到 Bug 或功能问题，请在 GitHub Issues 中提交问题报告。
+
+[提交 Issue →](https://github.com/lxfight/astrbot_plugin_mnemosyne/issues)
+
+</td>
+<td width="50%">
+
+### 社区讨论
+
+加入 QQ 群与开发者和用户交流：
+
+**群号：953245617**
+
+[点击加入 →](https://qm.qq.com/cgi-bin/qm/qr?k=WdyqoP-AOEXqGAN08lOFfVSguF2EmBeO&jump_from=webapi&authKey=tPyfv90TVYSGVhbAhsAZCcSBotJuTTLf03wnn7/lQZPUkWfoQ/J8e9nkAipkOzwh)
+
+</td>
+</tr>
+</table>
+
+### 贡献代码
+
+欢迎提交 Pull Request 贡献代码或改进文档。
+
+---
+
+<div align="center">
+
+**项目地址**：[github.com/lxfight/astrbot_plugin_mnemosyne](https://github.com/lxfight/astrbot_plugin_mnemosyne)
+
+**作者**：lxfight | **版本**：v0.5.2
+
+---
+
+*让 AI 拥有真正的记忆*
+
+</div>

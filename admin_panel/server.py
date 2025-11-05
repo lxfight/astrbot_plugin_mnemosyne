@@ -25,7 +25,7 @@ class AdminPanelServer:
     Admin Panel Web 服务器
     """
 
-    def __init__(self, plugin_instance, port: int = 8000, host: str = "127.0.0.1"):
+    def __init__(self, plugin_instance, port: int = 8000, host: str = "127.0.0.1", api_key: str = ""):
         """
         初始化服务器
 
@@ -33,10 +33,12 @@ class AdminPanelServer:
             plugin_instance: Mnemosyne 插件实例
             port: 服务器端口
             host: 服务器主机
+            api_key: API密钥（如果为空则从配置中读取）
         """
         self.plugin = plugin_instance
         self.port = port
         self.host = host
+        self.api_key = api_key  # 保存传入的API密钥
         self.app = FastAPI(
             title="Mnemosyne Admin Panel",
             description="Mnemosyne 插件的 Web 管理面板",
@@ -74,8 +76,8 @@ class AdminPanelServer:
         )
 
         # API 密钥认证中间件（只对 API 路由进行认证）
-        admin_panel_config = self.plugin.config.get("admin_panel", {})
-        api_key = admin_panel_config.get("api_key", "").strip()
+        # 优先使用传入的api_key，如果没有则从配置中读取
+        api_key = self.api_key or self.plugin.config.get("admin_panel", {}).get("api_key", "").strip()
         if api_key:
             # 为 FastAPI 应用添加认证中间件
             @self.app.middleware("http")
