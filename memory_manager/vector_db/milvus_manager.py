@@ -1121,60 +1121,38 @@ class MilvusManager:
         if not collection:
             return False
 
-        # 检查加载状态
+        # 检查集合是否存在
+        if not self.has_collection(collection_name):
+            logger.debug(f"集合 '{collection_name}' 不存在，无法加载。")
+            return False
+
+        # 尝试直接加载，不预先检查加载状态
+        # 如果集合已加载，load() 调用会被忽略或快速返回
+        logger.debug(f"尝试将集合 '{collection_name}' 加载到内存...")
         try:
-            # 先检查集合是否存在
-            if not self.has_collection(collection_name):
-                logger.debug(f"集合 '{collection_name}' 不存在，无法加载。")
-                return False
-
-            progress = utility.loading_progress(collection_name, using=self.alias)
-            # progress['loading_progress'] 会是 0 到 100 的整数，或 None
-            if progress and progress.get("loading_progress") == 100:
-                logger.info(f"集合 '{collection_name}' 已加载。")
-                return True
-        except MilvusException as e:
-            # 检查异常代码，如果是 101（集合未加载），则不记录为错误
-            error_code = getattr(e, "code", None)
-            if error_code == 101:  # 集合未加载 - 这是正常情况，我们将继续加载
-                logger.debug(f"集合 '{collection_name}' 尚未加载，将尝试加载。")
-            else:
-                logger.warning(
-                    f"检查集合 '{collection_name}' 加载状态时出错（代码 {error_code}）: {str(e)[:100]}。将尝试加载。"
-                )
-        except Exception as e:
-            logger.warning(
-                f"检查集合 '{collection_name}' 加载状态时发生非 Milvus 异常: {str(e)[:100]}。将尝试加载。"
-            )
-
-        logger.info(f"尝试将集合 '{collection_name}' 加载到内存...")
-        try:
-            # 先尝试释放可能存在的旧加载状态
-            try:
-                collection.release(timeout=5)
-                logger.debug(f"已释放集合 '{collection_name}' 的旧加载状态")
-            except Exception:
-                pass  # 如果集合未加载，释放会失败，这是正常的
-
             # 加载集合
             collection.load(replica_number=replica_number, timeout=timeout, **kwargs)
-            # 检查加载进度/等待完成
+            # 等待加载完成
             logger.debug(f"等待集合 '{collection_name}' 加载完成...")
             utility.wait_for_loading_complete(
                 collection_name, using=self.alias, timeout=timeout
             )
-            logger.info(f"成功加载集合 '{collection_name}' 到内存。")
+            logger.info(f"成功确保集合 '{collection_name}' 已加载到内存。")
             return True
         except MilvusException as e:
             error_code = getattr(e, "code", None)
+            error_msg = str(e).lower()
+
+            # 如果集合已经加载，某些 Milvus 版本会返回特定错误
+            if "already loaded" in error_msg or "loading" in error_msg:
+                logger.debug(f"集合 '{collection_name}' 已加载。")
+                return True
+
             logger.error(
                 f"加载集合 '{collection_name}' 失败 (错误代码: {error_code}): {e}"
             )
             # 常见错误：未创建索引
-            if (
-                "index not found" in str(e).lower()
-                or "index doesn't exist" in str(e).lower()
-            ):
+            if "index not found" in error_msg or "index doesn't exist" in error_msg:
                 logger.error(
                     f"加载失败原因可能是集合 '{collection_name}' 尚未创建索引。请确保已为向量字段创建索引。"
                 )
@@ -1256,13 +1234,6 @@ class MilvusManager:
             logger.error(f"无法获取集合 '{collection_name}' 以执行搜索。")
             return None
 
-        # 确保集合已加载
-        if not self.load_collection(
-            collection_name, timeout=timeout
-        ):  # 尝试加载，如果失败则退出
-            logger.error(f"搜索前加载集合 '{collection_name}' 失败。")
-            return None
-
         logger.info(
             f"在集合 '{collection_name}' 中搜索 {len(query_vectors)} 个向量 (字段: {vector_field}, top_k: {limit})..."
         )
@@ -1321,15 +1292,14 @@ class MilvusManager:
                 return None
         except MilvusException as e:
             # 检查是否是因为集合未加载的错误 (code 101)
-            if getattr(e, "code", None) == 101:
-                logger.info(
-                    f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})"
+            error_code = getattr(e, "code", None)
+            if error_code == 101:
+                logger.warning(
+                    f"集合 '{collection_name}' 未加载，尝试加载后重试... (错误: {e})"
                 )
-                # 尝试再次加载集合
+                # 尝试加载集合并重试
                 if self.load_collection(collection_name, timeout=timeout):
-                    logger.info(
-                        f"集合 '{collection_name}' 重新加载成功，重试搜索操作..."
-                    )
+                    logger.info(f"集合 '{collection_name}' 加载成功，重试搜索操作...")
                     # 重试搜索操作
                     try:
                         search_result = collection.search(
@@ -1343,19 +1313,14 @@ class MilvusManager:
                             timeout=timeout,
                             **kwargs,
                         )
-                        # 由于 Pymilvus 可能返回 SearchFuture 或 SearchResult，安全处理
-                        # 为了类型安全，使用类型忽略注释
-                        # type: ignore
                         try:
                             # 安全地获取结果数
                             if search_result is not None and hasattr(
                                 search_result, "__len__"
                             ):
-                                # 检查是否支持 len() 操作
                                 try:
                                     num_results = len(search_result)  # type: ignore
                                 except (TypeError, AttributeError):
-                                    # 如果无法获取长度，设为0
                                     num_results = 0
                             else:
                                 num_results = 0
@@ -1363,10 +1328,6 @@ class MilvusManager:
                             num_results = 0
 
                         logger.info(f"重试搜索成功。返回 {num_results} 组结果。")
-
-                        # 返回原始结果，由调用方处理具体类型
-                        # 为了类型安全，直接返回，不进行转换
-                        # type: ignore
                         if search_result is not None:
                             return search_result  # type: ignore
                         else:
@@ -1375,10 +1336,12 @@ class MilvusManager:
                         logger.error(f"重试搜索仍失败: {retry_e}")
                         return None
                 else:
-                    logger.error(f"重新加载集合 '{collection_name}' 仍失败。")
+                    logger.error(f"加载集合 '{collection_name}' 失败。")
                     return None
             else:
-                logger.error(f"在集合 '{collection_name}' 中搜索失败: {e}")
+                logger.error(
+                    f"在集合 '{collection_name}' 中搜索失败 (错误代码: {error_code}): {e}"
+                )
                 return None
         except Exception as e:
             logger.error(f"在集合 '{collection_name}' 中搜索时发生意外错误: {e}")
@@ -1418,12 +1381,7 @@ class MilvusManager:
         # 确保连接
         self._ensure_connected()
 
-        # Milvus 对 query 的 limit 有内部限制，如果传入的 limit 过大，可能需要分批查询或调整
-        # 默认可能是 16384，检查 pymilvus 文档或 Milvus 配置
         effective_limit = limit
-        # if limit and limit > 16384:
-        #     logger.warning(f"查询 limit {limit} 可能超过 Milvus 内部限制 (通常为 16384)，结果可能被截断。")
-        #     # effective_limit = 16384 # 或者根据需要处理分页
 
         logger.info(
             f"在集合 '{collection_name}' 中执行查询: '{expression}' (Limit: {effective_limit}, Offset: {offset})..."
@@ -1467,15 +1425,14 @@ class MilvusManager:
             return query_results
         except MilvusException as e:
             # 检查是否是因为集合未加载的错误 (code 101)
-            if getattr(e, "code", None) == 101:
-                logger.info(
-                    f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})"
+            error_code = getattr(e, "code", None)
+            if error_code == 101:
+                logger.warning(
+                    f"集合 '{collection_name}' 未加载，尝试加载后重试... (错误: {e})"
                 )
-                # 尝试再次加载集合
+                # 尝试加载集合并重试
                 if self.load_collection(collection_name, timeout=timeout):
-                    logger.info(
-                        f"集合 '{collection_name}' 重新加载成功，重试查询操作..."
-                    )
+                    logger.info(f"集合 '{collection_name}' 加载成功，重试查询操作...")
                     # 重试查询操作
                     try:
                         query_results = collection.query(
@@ -1493,10 +1450,12 @@ class MilvusManager:
                         logger.error(f"重试查询仍失败: {retry_e}")
                         return None
                 else:
-                    logger.error(f"重新加载集合 '{collection_name}' 仍失败。")
+                    logger.error(f"加载集合 '{collection_name}' 失败。")
                     return None
             else:
-                logger.error(f"在集合 '{collection_name}' 中执行查询失败: {e}")
+                logger.error(
+                    f"在集合 '{collection_name}' 中执行查询失败 (错误代码: {error_code}): {e}"
+                )
                 return None
         except Exception as e:
             logger.error(f"在集合 '{collection_name}' 中执行查询时发生意外错误: {e}")

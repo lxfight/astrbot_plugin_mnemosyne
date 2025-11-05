@@ -77,10 +77,7 @@ class MemoryStatistics:
             "total_sessions": self.total_sessions,
             "memories_by_session": self.memories_by_session,
             "memories_by_date": self.memories_by_date,
-            "most_active_sessions": [
-                {"session_id": session_id, "count": count}
-                for session_id, count in self.most_active_sessions
-            ],
+            "most_active_sessions": self.most_active_sessions,  # 保持元组列表格式，前端需要这种格式
             "recent_memories_count": self.recent_memories_count,
             "average_memory_length": round(self.average_memory_length, 2),
             "timestamp": self.timestamp.isoformat(),
@@ -114,10 +111,14 @@ class MemorySearchResponse:
 
     def to_dict(self) -> dict:
         """转换为字典"""
+        total_pages = (self.total_count + self.page_size - 1) // self.page_size if self.page_size > 0 else 1
         return {
             "records": [record.to_dict() for record in self.records],
             "total_count": self.total_count,
-            "page": self.page,
-            "page_size": self.page_size,
-            "has_more": self.has_more,
+            "pagination": {
+                "page": self.page,
+                "page_size": self.page_size,
+                "total": self.total_count,
+                "total_pages": total_pages,
+            },
         }

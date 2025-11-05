@@ -184,7 +184,8 @@ function loadPage(pageName) {
             loadDashboard();
             break;
         case 'memories':
-            // 记忆页面按需加载
+            // 自动加载所有记忆
+            loadAllMemories();
             break;
         case 'sessions':
             loadSessions();
@@ -343,6 +344,11 @@ function saveConfig() {
     showToast('配置保存功能正在开发中', 'warning');
 }
 
+// 导航到指定页面
+function navigateTo(pageName) {
+    loadPage(pageName);
+}
+
 // 导出工具函数
 window.AppState = AppState;
 window.apiCall = apiCall;
@@ -355,6 +361,7 @@ window.formatNumber = formatNumber;
 window.formatBytes = formatBytes;
 window.getStatusIndicator = getStatusIndicator;
 window.loadPage = loadPage;
+window.navigateTo = navigateTo;  // 导出导航函数
 window.loadLogs = loadLogs;
 window.loadConfig = loadConfig;
 window.saveConfig = saveConfig;

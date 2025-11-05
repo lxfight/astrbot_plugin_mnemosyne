@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from astrbot.core.log import LogManager
+from astrbot.core.log import logging
 
 from ..models.memory import (
     MemoryRecord,
@@ -30,7 +30,6 @@ class MemoryService:
             plugin_instance: Mnemosyne 插件实例
         """
         self.plugin = plugin_instance
-        self.logger = LogManager.GetLogger(log_name="MemoryService")
 
     async def search_memories(
         self, request: MemorySearchRequest
@@ -67,14 +66,34 @@ class MemoryService:
                     has_more=False,
                 )
 
+            # 优化：query 方法内部会自动处理集合加载，无需手动加载
             # 构建查询表达式
             expr_parts = []
 
             if request.session_id:
                 expr_parts.append(f'session_id == "{request.session_id}"')
 
+            # 注意：persona_id 字段可能不存在，需要先检查
             if request.persona_id:
-                expr_parts.append(f'persona_id == "{request.persona_id}"')
+                # 先检查集合是否有 persona_id 字段
+                collection = self.plugin.milvus_manager.get_collection(collection_name)
+                if collection:
+                    schema_fields = [f.name for f in collection.schema.fields]
+                    if (
+                        "persona_id" in schema_fields
+                        or "personality_id" in schema_fields
+                    ):
+                        # 使用正确的字段名
+                        field_name = (
+                            "personality_id"
+                            if "personality_id" in schema_fields
+                            else "persona_id"
+                        )
+                        expr_parts.append(f'{field_name} == "{request.persona_id}"')
+                    else:
+                        logging.warning(
+                            "集合中不存在 persona_id 或 personality_id 字段，跳过人格过滤"
+                        )
 
             if request.start_date:
                 start_timestamp = request.start_date.timestamp()
@@ -86,27 +105,49 @@ class MemoryService:
 
             expr = " && ".join(expr_parts) if expr_parts else ""
 
-            # 查询记忆
-            output_fields = [
-                "memory_id",
-                "session_id",
-                "content",
-                "create_time",
-                "persona_id",
-            ]
+            # 动态确定 output_fields
+            collection = self.plugin.milvus_manager.get_collection(collection_name)
+            if not collection:
+                logging.error(f"无法获取集合 {collection_name}")
+                return MemorySearchResponse(
+                    records=[],
+                    total_count=0,
+                    page=request.offset // request.limit + 1,
+                    page_size=request.limit,
+                    has_more=False,
+                )
+
+            # 获取实际存在的字段
+            schema_fields = [f.name for f in collection.schema.fields]
+            output_fields = ["memory_id", "session_id", "content", "create_time"]
+            # 添加可选字段
+            if "personality_id" in schema_fields:
+                output_fields.append("personality_id")
+            elif "persona_id" in schema_fields:
+                output_fields.append("persona_id")
 
             try:
-                # 获取总数
-                collection = self.plugin.milvus_manager.get_collection(collection_name)
-
-                # 执行查询
+                # 执行查询 - expression 是必需的第一个参数
+                # 如果没有过滤条件，使用一个总是为真的表达式
+                query_expr = expr if expr else "memory_id >= 0"
                 results = self.plugin.milvus_manager.query(
                     collection_name=collection_name,
-                    expr=expr if expr else None,
+                    expression=query_expr,
                     output_fields=output_fields,
                     limit=request.limit,
                     offset=request.offset,
                 )
+
+                # 检查查询结果
+                if results is None:
+                    logging.error("查询返回 None")
+                    return MemorySearchResponse(
+                        records=[],
+                        total_count=0,
+                        page=request.offset // request.limit + 1,
+                        page_size=request.limit,
+                        has_more=False,
+                    )
 
                 # 转换为 MemoryRecord
                 records = []
@@ -120,16 +161,21 @@ class MemoryService:
                         else:
                             create_time = datetime.now()
 
+                        # 使用正确的字段名
+                        persona_id_value = result.get("personality_id") or result.get(
+                            "persona_id"
+                        )
+
                         record = MemoryRecord(
                             memory_id=str(result.get("memory_id", "")),
                             session_id=result.get("session_id", ""),
                             content=result.get("content", ""),
                             create_time=create_time,
-                            persona_id=result.get("persona_id"),
+                            persona_id=persona_id_value,
                         )
                         records.append(record)
                     except Exception as e:
-                        self.logger.error(f"转换记忆记录失败: {e}")
+                        logging.error(f"转换记忆记录失败: {e}")
                         continue
 
                 # 如果有关键词过滤，在内存中进行过滤
@@ -161,7 +207,7 @@ class MemoryService:
                 )
 
             except Exception as e:
-                self.logger.error(f"查询 Milvus 失败: {e}", exc_info=True)
+                logging.error(f"查询 Milvus 失败: {e}", exc_info=True)
                 return MemorySearchResponse(
                     records=[],
                     total_count=0,
@@ -171,7 +217,7 @@ class MemoryService:
                 )
 
         except Exception as e:
-            self.logger.error(f"搜索记忆失败: {e}", exc_info=True)
+            logging.error(f"搜索记忆失败: {e}", exc_info=True)
             return MemorySearchResponse(
                 records=[],
                 total_count=0,
@@ -200,7 +246,7 @@ class MemoryService:
             if not self.plugin.milvus_manager.has_collection(collection_name):
                 return stats
 
-            # 获取总记忆数
+            # 获取总记忆数（无需手动加载，query会自动处理）
             collection = self.plugin.milvus_manager.get_collection(collection_name)
             stats.total_memories = collection.num_entities
 
@@ -209,10 +255,15 @@ class MemoryService:
             if max_query > 0:
                 results = self.plugin.milvus_manager.query(
                     collection_name=collection_name,
-                    expr=None,
+                    expression="memory_id >= 0",  # 查询所有记录
                     output_fields=["session_id", "content", "create_time"],
                     limit=max_query,
                 )
+
+                # 检查查询结果
+                if not results:
+                    logging.warning("统计查询返回空结果")
+                    return stats
 
                 # 统计各会话的记忆数
                 session_counts = defaultdict(int)
@@ -263,7 +314,7 @@ class MemoryService:
                 )
 
         except Exception as e:
-            self.logger.error(f"获取记忆统计失败: {e}", exc_info=True)
+            logging.error(f"获取记忆统计失败: {e}", exc_info=True)
 
         return stats
 
@@ -288,15 +339,22 @@ class MemoryService:
             if not self.plugin.milvus_manager.has_collection(collection_name):
                 return False
 
-            # 删除记忆
-            expr = f'memory_id == "{memory_id}"'
+            # 删除记忆 - memory_id 是 Int64 类型，不需要引号
+            try:
+                # 尝试将 memory_id 转换为整数
+                memory_id_int = int(memory_id)
+                expr = f'memory_id == {memory_id_int}'
+            except ValueError:
+                # 如果转换失败，使用字符串格式（向后兼容）
+                expr = f'memory_id == "{memory_id}"'
+            
             self.plugin.milvus_manager.delete(collection_name, expr)
 
-            self.logger.info(f"已删除记忆: {memory_id}")
+            logging.info(f"已删除记忆: {memory_id}")
             return True
 
         except Exception as e:
-            self.logger.error(f"删除记忆失败: {e}", exc_info=True)
+            logging.error(f"删除记忆失败: {e}", exc_info=True)
             return False
 
     async def delete_session_memories(self, session_id: str) -> int:
@@ -320,26 +378,26 @@ class MemoryService:
             if not self.plugin.milvus_manager.has_collection(collection_name):
                 return 0
 
-            # 先查询记忆数量
+            # 先查询记忆数量 - session_id 是字符串类型，需要引号
             results = self.plugin.milvus_manager.query(
                 collection_name=collection_name,
-                expr=f'session_id == "{session_id}"',
+                expression=f'session_id == "{session_id}"',
                 output_fields=["memory_id"],
                 limit=10000,
             )
-            count = len(results)
+            count = len(results) if results else 0
 
-            # 删除记忆
+            # 删除记忆 - session_id 是字符串类型，需要引号
             if count > 0:
                 expr = f'session_id == "{session_id}"'
                 self.plugin.milvus_manager.delete(collection_name, expr)
 
-                self.logger.info(f"已删除会话 {session_id} 的 {count} 条记忆")
+                logging.info(f"已删除会话 {session_id} 的 {count} 条记忆")
 
             return count
 
         except Exception as e:
-            self.logger.error(f"删除会话记忆失败: {e}", exc_info=True)
+            logging.error(f"删除会话记忆失败: {e}", exc_info=True)
             return 0
 
     async def export_memories(
@@ -411,11 +469,11 @@ class MemoryService:
                 return output.getvalue()
 
             else:
-                self.logger.error(f"不支持的导出格式: {format}")
+                logging.error(f"不支持的导出格式: {format}")
                 return None
 
         except Exception as e:
-            self.logger.error(f"导出记忆失败: {e}", exc_info=True)
+            logging.error(f"导出记忆失败: {e}", exc_info=True)
             return None
 
     async def get_session_list(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -439,13 +497,18 @@ class MemoryService:
             if not self.plugin.milvus_manager.has_collection(collection_name):
                 return []
 
-            # 查询所有记忆
+            # 查询所有记忆（无需手动加载，query会自动处理）
             results = self.plugin.milvus_manager.query(
                 collection_name=collection_name,
-                expr=None,
+                expression="memory_id >= 0",  # 查询所有记录
                 output_fields=["session_id", "create_time"],
                 limit=10000,
             )
+
+            # 检查查询结果
+            if not results:
+                logging.warning("会话列表查询返回空结果")
+                return []
 
             # 统计每个会话
             session_data: dict[str, dict[str, Any]] = defaultdict(
@@ -510,5 +573,107 @@ class MemoryService:
             return sessions[:limit]
 
         except Exception as e:
-            self.logger.error(f"获取会话列表失败: {e}", exc_info=True)
+            logging.error(f"获取会话列表失败: {e}", exc_info=True)
+            return []
+
+    async def vector_search(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
+        """
+        向量检索记忆
+
+        Args:
+            query: 查询文本
+            limit: 返回数量限制
+
+        Returns:
+            List[Dict]: 记忆列表，按相似度排序
+        """
+        try:
+            if (
+                not self.plugin.milvus_manager
+                or not self.plugin.milvus_manager.is_connected()
+            ):
+                return []
+
+            collection_name = self.plugin.collection_name
+            if not self.plugin.milvus_manager.has_collection(collection_name):
+                return []
+
+            # 使用embedding模型生成查询向量
+            if (
+                not hasattr(self.plugin, "embedding_model")
+                or not self.plugin.embedding_model
+            ):
+                logging.warning("Embedding模型未初始化，无法进行向量检索")
+                return []
+
+            # 生成查询向量
+            query_vector = self.plugin.embedding_model.encode(query)
+
+            # 获取集合
+            collection = self.plugin.milvus_manager.get_collection(collection_name)
+            if not collection:
+                logging.error(f"无法获取集合 {collection_name}")
+                return []
+
+            # 获取实际存在的字段
+            schema_fields = [f.name for f in collection.schema.fields]
+            output_fields = ["memory_id", "session_id", "content", "create_time"]
+
+            # 添加可选字段
+            if "personality_id" in schema_fields:
+                output_fields.append("personality_id")
+            elif "persona_id" in schema_fields:
+                output_fields.append("persona_id")
+
+            # 执行向量搜索
+            search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+
+            results = self.plugin.milvus_manager.search(
+                collection_name=collection_name,
+                query_vectors=[query_vector],
+                anns_field="embedding",
+                limit=limit,
+                output_fields=output_fields,
+                search_params=search_params,
+            )
+
+            # 转换结果
+            memories = []
+            if results and len(results) > 0:
+                for hit in results[0]:
+                    try:
+                        entity = hit.entity
+
+                        # 获取时间
+                        create_time = entity.get("create_time")
+                        if isinstance(create_time, (int, float)):
+                            create_time = datetime.fromtimestamp(create_time)
+                        elif isinstance(create_time, str):
+                            create_time = datetime.fromisoformat(create_time)
+                        else:
+                            create_time = datetime.now()
+
+                        # 获取人格ID
+                        persona_id_value = entity.get("personality_id") or entity.get(
+                            "persona_id"
+                        )
+
+                        memory = {
+                            "memory_id": str(entity.get("memory_id", "")),
+                            "session_id": entity.get("session_id", ""),
+                            "content": entity.get("content", ""),
+                            "create_time": create_time.isoformat(),
+                            "persona_id": persona_id_value,
+                            "similarity_score": 1.0
+                            / (1.0 + hit.distance),  # 转换距离为相似度
+                        }
+                        memories.append(memory)
+                    except Exception as e:
+                        logging.error(f"转换搜索结果失败: {e}")
+                        continue
+
+            return memories
+
+        except Exception as e:
+            logging.error(f"向量检索失败: {e}", exc_info=True)
             return []

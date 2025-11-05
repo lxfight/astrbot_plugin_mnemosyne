@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mnemosyne 管理面板</title>
-    <link rel="stylesheet" href="../static/css/main.css">
+    <link rel="stylesheet" href="/static/css/main.css">
     <!-- Tabler Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 </head>
@@ -110,20 +110,66 @@
                 <div id="memories-page" class="page">
                     <div class="page-header">
                         <h2>记忆管理</h2>
-                        <button class="btn btn-primary" onclick="showSearchModal()">
-                            <i class="ti ti-search"></i> 搜索记忆
-                        </button>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="loadAllMemories()">
+                                <i class="ti ti-refresh"></i> 刷新
+                            </button>
+                            <button class="btn" onclick="exportMemories()">
+                                <i class="ti ti-download"></i> 导出
+                            </button>
+                        </div>
                     </div>
 
-                    <!-- 搜索过滤器 -->
-                    <div class="search-box">
-                        <input type="text" id="memory-keyword" placeholder="输入关键词搜索..." class="input">
-                        <button class="btn" onclick="searchMemories()">搜索</button>
+                    <!-- 搜索和过滤器 -->
+                    <div class="filters-container">
+                        <div class="filters-grid">
+                            <div class="filter-group">
+                                <label>关键词搜索</label>
+                                <input type="text" id="search-keyword" placeholder="输入关键词..." class="input">
+                            </div>
+                            <div class="filter-group">
+                                <label>会话ID</label>
+                                <input type="text" id="search-session-id" placeholder="会话ID（可选）" class="input">
+                            </div>
+                            <div class="filter-group">
+                                <label>人格ID</label>
+                                <input type="text" id="search-persona-id" placeholder="人格ID（可选）" class="input">
+                            </div>
+                            <div class="filter-group">
+                                <label>分组方式</label>
+                                <select id="search-group-by" class="input" onchange="applyGrouping()">
+                                    <option value="">不分组</option>
+                                    <option value="session">按会话分组</option>
+                                    <option value="persona">按人格分组</option>
+                                    <option value="date">按日期分组</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="filter-actions">
+                            <button class="btn btn-primary" onclick="searchMemories()">
+                                <i class="ti ti-search"></i> 关键词搜索
+                            </button>
+                            <button class="btn btn-success" onclick="vectorSearchMemories()">
+                                <i class="ti ti-topology-star"></i> 向量检索
+                            </button>
+                            <button class="btn" onclick="clearFilters()">
+                                <i class="ti ti-x"></i> 清除筛选
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 记忆统计信息 -->
+                    <div class="info-bar">
+                        <span id="memories-count-info">共 0 条记忆</span>
+                        <span id="memories-filter-info"></span>
                     </div>
 
                     <!-- 记忆列表 -->
                     <div id="memories-list" class="list-container">
-                        <p class="placeholder">请使用搜索功能查找记忆</p>
+                        <div class="loading-placeholder">
+                            <i class="ti ti-loader"></i>
+                            <p>正在加载记忆...</p>
+                        </div>
                     </div>
 
                     <!-- 分页控件 -->
@@ -155,8 +201,52 @@
                         </button>
                     </div>
 
-                    <div id="statistics-content">
-                        <p class="placeholder">加载中...</p>
+                    <!-- 统计卡片 -->
+                    <div class="stats-grid">
+                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <h4 style="color: #6366f1;">总记忆数</h4>
+                            <div class="stat-value" id="stat-total-memories" style="color: #1f2937;">-</div>
+                            <div class="stat-label" style="color: #6b7280;">所有记忆总数</div>
+                        </div>
+                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <h4 style="color: #ec4899;">活跃会话</h4>
+                            <div class="stat-value" id="stat-active-sessions" style="color: #1f2937;">-</div>
+                            <div class="stat-label" style="color: #6b7280;">当前活跃会话数</div>
+                        </div>
+                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <h4 style="color: #06b6d4;">今日新增</h4>
+                            <div class="stat-value" id="stat-today-added" style="color: #1f2937;">-</div>
+                            <div class="stat-label" style="color: #6b7280;">今天新增的记忆</div>
+                        </div>
+                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                            <h4 style="color: #10b981;">平均记忆数</h4>
+                            <div class="stat-value" id="stat-avg-per-session" style="color: #1f2937;">-</div>
+                            <div class="stat-label" style="color: #6b7280;">每会话平均记忆数</div>
+                        </div>
+                    </div>
+
+                    <!-- 每日趋势图表 -->
+                    <div class="chart-container">
+                        <h3>每日记忆趋势</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="statistics-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 最活跃会话 -->
+                    <div class="section">
+                        <h3>最活跃的会话 (Top 10)</h3>
+                        <div id="top-sessions-list" class="list-container">
+                            <p class="placeholder">加载中...</p>
+                        </div>
+                    </div>
+
+                    <!-- 记忆类型分布 -->
+                    <div class="chart-container">
+                        <h3>记忆分布统计</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="distribution-chart"></canvas>
+                        </div>
                     </div>
                 </div>
 
@@ -207,8 +297,12 @@
     <!-- Toast 通知 -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="../static/js/main.js"></script>
-    <script src="../static/js/dashboard.js"></script>
-    <script src="../static/js/memories.js"></script>
+    <script src="/static/js/main.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+    <script src="/static/js/memories.js"></script>
+    <script src="/static/js/sessions.js"></script>
+    <script src="/static/js/statistics.js"></script>
+    <!-- Chart.js for statistics charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </body>
 </html>

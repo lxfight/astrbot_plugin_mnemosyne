@@ -59,32 +59,20 @@ def setup_memory_routes(app, plugin_instance):
 
             response = await memory_service.search_memories(search_req)
 
-            return {
-                "success": True,
-                "data": response.to_dict()
-            }
+            return {"success": True, "data": response.to_dict()}
         except Exception as e:
             logger.error(f"搜索记忆失败: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # API: 获取记忆统计
     @router.get("/api/memories/statistics")
     async def get_memory_statistics(request: Request):
         try:
             stats = await memory_service.get_memory_statistics()
-            return {
-                "success": True,
-                "data": stats.to_dict()
-            }
+            return {"success": True, "data": stats.to_dict()}
         except Exception as e:
             logger.error(f"获取记忆统计失败: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # API: 获取会话列表
     @router.get("/api/memories/sessions")
@@ -93,16 +81,10 @@ def setup_memory_routes(app, plugin_instance):
     ):
         try:
             sessions = await memory_service.get_session_list(limit=limit)
-            return {
-                "success": True,
-                "data": sessions
-            }
+            return {"success": True, "data": sessions}
         except Exception as e:
             logger.error(f"获取会话列表失败: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # API: 删除单条记忆
     @router.delete("/api/memories/{memory_id}")
@@ -206,6 +188,30 @@ def setup_memory_routes(app, plugin_instance):
         except Exception as e:
             logger.error(f"导出记忆失败: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
+
+    # API: 向量检索记忆
+    @router.post("/api/memories/vector-search")
+    async def vector_search_memories(request: Request):
+        try:
+            body = await request.json()
+            query = body.get("query", "")
+            limit = body.get("limit", 50)
+
+            if not query:
+                raise HTTPException(status_code=400, detail="查询内容不能为空")
+
+            # 调用向量检索服务
+            results = await memory_service.vector_search(query, limit)
+
+            return {
+                "success": True,
+                "data": {"records": results, "total_count": len(results)},
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"向量检索失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
     # 将路由器包含到主应用中
     app.include_router(router)
