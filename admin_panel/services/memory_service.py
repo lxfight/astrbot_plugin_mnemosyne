@@ -343,11 +343,11 @@ class MemoryService:
             try:
                 # 尝试将 memory_id 转换为整数
                 memory_id_int = int(memory_id)
-                expr = f'memory_id == {memory_id_int}'
+                expr = f"memory_id == {memory_id_int}"
             except ValueError:
                 # 如果转换失败，使用字符串格式（向后兼容）
                 expr = f'memory_id == "{memory_id}"'
-            
+
             self.plugin.milvus_manager.delete(collection_name, expr)
 
             logging.info(f"已删除记忆: {memory_id}")
