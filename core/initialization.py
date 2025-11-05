@@ -43,13 +43,13 @@ def initialize_config_check(plugin: "Mnemosyne"):
     astrbot_config = plugin.context.get_config()
     # ------ 检查num_pairs ------
     num_pairs = plugin.config["num_pairs"]
-    # num_pairs需要小于['provider_settings']['max_context_length']配置的数量，如果该配置为-1，则不限制。
+    # num_pairs 表示对话轮数（一问一答算1轮）
+    # 需要转换为消息数量（num_pairs * 2）与 AstrBot 的 max_context_length 比较
     astrbot_max_context_length = astrbot_config["provider_settings"][
         "max_context_length"
     ]
-    # B0 修复: 修正验证逻辑，num_pairs 应该直接与 astrbot_max_context_length 比较
-    # 因为 num_pairs 表示的是对话轮数，每轮包含用户和助手两条消息
-    if astrbot_max_context_length > 0 and num_pairs > astrbot_max_context_length:
+    # 一轮对话包含用户和助手两条消息，所以需要 num_pairs * 2
+    if astrbot_max_context_length > 0 and num_pairs * 2 > astrbot_max_context_length:
         # 安全处理：不在异常消息中暴露具体配置值
         error_detail = f"num_pairs({num_pairs})不能大于astrbot的配置(最多携带对话数量):{astrbot_max_context_length}"
         init_logger.error(error_detail)
@@ -86,9 +86,15 @@ def initialize_config_and_schema(plugin: "Mnemosyne"):
     """解析配置、验证和定义模式/索引参数。"""
     init_logger.debug("开始初始化配置和 Schema...")
     try:
+        # 优先从 embedding_provider 获取维度，如果未设置则使用默认值
+        # embedding_dim 将在 main.py 中从 embedding_provider 动态获取并存储到 config 中
         embedding_dim = plugin.config.get("embedding_dim", DEFAULT_EMBEDDING_DIM)
         if not isinstance(embedding_dim, int) or embedding_dim <= 0:
-            raise ValueError("配置 'embedding_dim' 必须是一个正整数。")
+            init_logger.warning(
+                f"embedding_dim 无效 ({embedding_dim})，使用默认值 {DEFAULT_EMBEDDING_DIM}。"
+                f"embedding_dim 将在 Embedding Provider 就绪后自动更新。"
+            )
+            embedding_dim = DEFAULT_EMBEDDING_DIM
 
         fields = [
             FieldSchema(
@@ -431,56 +437,12 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
     # 确保索引存在（只调用一次）
     ensure_milvus_index(plugin, collection_name)
 
-    # 确保集合已加载到内存中以供搜索
-    init_logger.info(f"确保集合 '{collection_name}' 已加载到内存...")
-    max_retries = 3
-    retry_count = 0
-    load_success = False
-
-    while retry_count < max_retries and not load_success:
-        try:
-            # 先检查集合是否已经加载
-            from pymilvus import utility
-
-            progress = utility.loading_progress(
-                collection_name,
-                using=manager.alias if hasattr(manager, "alias") else "default",
-            )
-            if progress and progress.get("loading_progress") == 100:
-                init_logger.info(f"集合 '{collection_name}' 已处于加载状态。")
-                load_success = True
-                break
-
-            # 尝试加载集合
-            if manager.load_collection(collection_name, timeout=30):
-                init_logger.info(f"集合 '{collection_name}' 已成功加载。")
-                load_success = True
-            else:
-                retry_count += 1
-                if retry_count < max_retries:
-                    init_logger.warning(
-                        f"加载集合 '{collection_name}' 失败，第 {retry_count} 次重试..."
-                    )
-                    import time
-
-                    time.sleep(2)
-                else:
-                    init_logger.error(
-                        f"加载集合 '{collection_name}' 失败（已重试 {max_retries} 次）。搜索功能可能无法正常工作。"
-                    )
-        except Exception as e:
-            retry_count += 1
-            if retry_count < max_retries:
-                init_logger.warning(
-                    f"加载集合 '{collection_name}' 时出错: {e}，第 {retry_count} 次重试..."
-                )
-                import time
-
-                time.sleep(2)
-            else:
-                init_logger.error(
-                    f"加载集合 '{collection_name}' 时出错（已重试 {max_retries} 次）: {e}。将在首次使用时重试加载。"
-                )
+    # 采用延迟加载策略：不在初始化时加载集合，而是在首次使用时按需加载
+    # 这样可以避免在集合尚未准备好时就尝试加载，从而避免 code=101 错误
+    init_logger.info(
+        f"集合 '{collection_name}' 已创建并建立索引。"
+        f"采用延迟加载策略，集合将在首次查询或插入时自动加载到内存。"
+    )
 
 
 def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):

@@ -96,13 +96,13 @@
         "default":true
     },
     "num_pairs":{
-        "description":"记忆总结的对话长度",
+        "description":"记忆总结的对话轮数",
         "type":"int",
-        "hint":"一问一答长度为2，对话长度达到这个阈值时会进行记忆总结",
+        "hint":"一问一答算作1轮对话。当对话轮数达到此阈值时会自动进行记忆总结。例如设置为5，表示每5轮对话（5次问答）后进行总结",
         "obvious_hint":false,
-        "default":10,
-        "minimum":2,
-        "maximum":50
+        "default":5,
+        "minimum":1,
+        "maximum":25
     },
     "top_k":{
         "description":"返回的长期记忆的数量",

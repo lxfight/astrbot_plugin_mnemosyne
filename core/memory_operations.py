@@ -277,17 +277,19 @@ async def _check_and_trigger_summary(
         persona_id: 人格 ID.
     """
     # M24 修复: 添加 msg_counter 的类型检查
+    # num_pairs 是对话轮数，msg_counter 计数的是消息条数（一问一答=2条消息）
+    # 所以需要用 num_pairs * 2 来比较
+    num_pairs = plugin.config.get("num_pairs", 5)
     if (
         plugin.msg_counter
         and plugin.msg_counter.adjust_counter_if_necessary(session_id, context)
-        and plugin.msg_counter.get_counter(session_id)
-        >= plugin.config.get("num_pairs", 10)
+        and plugin.msg_counter.get_counter(session_id) >= num_pairs * 2
     ):
-        logger.info("开始总结历史对话...")
+        logger.info(f"对话已达到 {num_pairs} 轮，开始总结历史对话...")
         # M24 修复: 添加类型忽略，context 来自运行时的上下文
         history_contents = format_context_to_string(
             context,  # type: ignore
-            plugin.config.get("num_pairs", 10),
+            num_pairs * 2,  # 传递消息条数而不是轮数
         )
 
         # M19 修复: 为后台任务添加异常处理回调
@@ -818,9 +820,8 @@ async def handle_summary_long_memory(
                 logger.error("Embedding Provider 不可用，无法获取总结的 Embedding")
                 return
 
-            # 使用 AstrBot EmbeddingProvider 的 embed 方法
-            # M24 修复: 添加 embed 方法的类型忽略
-            embedding_vector = await plugin.embedding_provider.embed(summary_text)  # type: ignore
+            # 使用 AstrBot EmbeddingProvider 的 get_embedding 方法
+            embedding_vector = await plugin.embedding_provider.get_embedding(summary_text)
 
             if not embedding_vector:
                 logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")
