@@ -433,18 +433,54 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
 
     # 确保集合已加载到内存中以供搜索
     init_logger.info(f"确保集合 '{collection_name}' 已加载到内存...")
-    try:
-        if not manager.load_collection(collection_name):
-            # 加载失败可能是资源问题或索引未就绪，打印错误但允许插件继续
-            init_logger.error(
-                f"加载集合 '{collection_name}' 失败。搜索功能可能无法正常工作或效率低下。"
+    max_retries = 3
+    retry_count = 0
+    load_success = False
+
+    while retry_count < max_retries and not load_success:
+        try:
+            # 先检查集合是否已经加载
+            from pymilvus import utility
+
+            progress = utility.loading_progress(
+                collection_name,
+                using=manager.alias if hasattr(manager, "alias") else "default",
             )
-        else:
-            init_logger.info(f"集合 '{collection_name}' 已成功加载。")
-    except Exception as e:
-        init_logger.warning(
-            f"加载集合 '{collection_name}' 时出错: {e}。将在首次使用时重试加载。"
-        )
+            if progress and progress.get("loading_progress") == 100:
+                init_logger.info(f"集合 '{collection_name}' 已处于加载状态。")
+                load_success = True
+                break
+
+            # 尝试加载集合
+            if manager.load_collection(collection_name, timeout=30):
+                init_logger.info(f"集合 '{collection_name}' 已成功加载。")
+                load_success = True
+            else:
+                retry_count += 1
+                if retry_count < max_retries:
+                    init_logger.warning(
+                        f"加载集合 '{collection_name}' 失败，第 {retry_count} 次重试..."
+                    )
+                    import time
+
+                    time.sleep(2)
+                else:
+                    init_logger.error(
+                        f"加载集合 '{collection_name}' 失败（已重试 {max_retries} 次）。搜索功能可能无法正常工作。"
+                    )
+        except Exception as e:
+            retry_count += 1
+            if retry_count < max_retries:
+                init_logger.warning(
+                    f"加载集合 '{collection_name}' 时出错: {e}，第 {retry_count} 次重试..."
+                )
+                import time
+
+                time.sleep(2)
+            else:
+                init_logger.error(
+                    f"加载集合 '{collection_name}' 时出错（已重试 {max_retries} 次）: {e}。将在首次使用时重试加载。"
+                )
 
 
 def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):

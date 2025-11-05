@@ -1125,7 +1125,7 @@ class MilvusManager:
         try:
             # 先检查集合是否存在
             if not self.has_collection(collection_name):
-                logger.debug(f"集合 '{collection_name}' 不存在，将尝试创建并加载。")
+                logger.debug(f"集合 '{collection_name}' 不存在，无法加载。")
                 return False
 
             progress = utility.loading_progress(collection_name, using=self.alias)
@@ -1149,6 +1149,14 @@ class MilvusManager:
 
         logger.info(f"尝试将集合 '{collection_name}' 加载到内存...")
         try:
+            # 先尝试释放可能存在的旧加载状态
+            try:
+                collection.release(timeout=5)
+                logger.debug(f"已释放集合 '{collection_name}' 的旧加载状态")
+            except Exception:
+                pass  # 如果集合未加载，释放会失败，这是正常的
+
+            # 加载集合
             collection.load(replica_number=replica_number, timeout=timeout, **kwargs)
             # 检查加载进度/等待完成
             logger.debug(f"等待集合 '{collection_name}' 加载完成...")
@@ -1158,15 +1166,27 @@ class MilvusManager:
             logger.info(f"成功加载集合 '{collection_name}' 到内存。")
             return True
         except MilvusException as e:
-            logger.error(f"加载集合 '{collection_name}' 失败: {e}")
+            error_code = getattr(e, "code", None)
+            logger.error(
+                f"加载集合 '{collection_name}' 失败 (错误代码: {error_code}): {e}"
+            )
             # 常见错误：未创建索引
-            if "index not found" in str(e).lower():
+            if (
+                "index not found" in str(e).lower()
+                or "index doesn't exist" in str(e).lower()
+            ):
                 logger.error(
-                    f"加载失败原因可能是集合 '{collection_name}' 尚未创建索引。"
+                    f"加载失败原因可能是集合 '{collection_name}' 尚未创建索引。请确保已为向量字段创建索引。"
+                )
+            elif error_code == 101:
+                logger.error(
+                    f"集合 '{collection_name}' 处于未加载状态，这可能是由于之前的加载失败。建议检查 Milvus 日志。"
                 )
             return False
         except Exception as e:
-            logger.error(f"加载集合 '{collection_name}' 时发生意外错误: {e}")
+            logger.error(
+                f"加载集合 '{collection_name}' 时发生意外错误: {e}", exc_info=True
+            )
             return False
 
     def release_collection(
