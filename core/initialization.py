@@ -527,7 +527,7 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
 
 def _migrate_data_if_needed(old_dir: str, new_dir: str):
     """
-    如果插件数据曾存储在其他位置，自动将其迁移到新位置，并删除旧目录。
+    如果插件数据曾存储在其他位置，自动将其迁移到新位置(保留旧目录)。
 
     Args:
         old_dir (str): 旧的数据目录路径
@@ -572,19 +572,23 @@ def _migrate_data_if_needed(old_dir: str, new_dir: str):
                     f"数据迁移完成: 迁移 {migrated_count} 项, 跳过 {skipped_count} 项"
                 )
 
-                # 迁移成功后，删除旧目录
-                try:
-                    shutil.rmtree(old_path)
-                    init_logger.info(f"已自动删除旧数据目录: {old_dir}")
-                except Exception as e:
-                    init_logger.warning(f"删除旧目录 '{old_dir}' 失败: {e}，请手动删除")
+                # 迁移成功后，保留旧目录(不删除)
+                init_logger.info(f"旧数据目录已保留: {old_dir}")
+                # 注释掉删除逻辑，保留旧数据作为备份
+                # try:
+                #     shutil.rmtree(old_path)
+                #     init_logger.info(f"已自动删除旧数据目录: {old_dir}")
+                # except Exception as e:
+                #     init_logger.warning(f"删除旧目录 '{old_dir}' 失败: {e}，请手动删除")
             else:
-                # 旧目录为空，直接删除
-                try:
-                    old_path.rmdir()
-                    init_logger.info(f"已删除空的旧数据目录: {old_dir}")
-                except Exception as e:
-                    init_logger.debug(f"删除空目录失败: {e}")
+                # 旧目录为空，也保留不删除
+                init_logger.info(f"旧数据目录为空，已保留: {old_dir}")
+                # 注释掉删除空目录的逻辑
+                # try:
+                #     old_path.rmdir()
+                #     init_logger.info(f"已删除空的旧数据目录: {old_dir}")
+                # except Exception as e:
+                #     init_logger.debug(f"删除空目录失败: {e}")
         except Exception as e:
             init_logger.warning(f"数据迁移失败: {e}，继续使用新位置")
 

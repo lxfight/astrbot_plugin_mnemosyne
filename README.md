@@ -220,22 +220,6 @@ uv pip install -r requirements.txt
 
 ---
 
-## 使用示例
-
-### 场景一：个人助手
-
-配置较小的对话轮数（3-5 轮），使 AI 能够快速记忆用户偏好和近期事项。
-
-### 场景二：客服机器人
-
-配置较大的记忆检索数量（top_k=10），确保能够回忆起用户的历史问题。
-
-### 场景三：知识管理
-
-使用多个集合分别存储不同领域的对话记忆，实现知识分类管理。
-
----
-
 ## Web 管理面板
 
 插件内置了基于 FastAPI 的管理面板，提供以下功能：
@@ -245,7 +229,7 @@ uv pip install -r requirements.txt
 - 实时监控与日志查看
 - 记忆数据导出
 
-**访问地址**：`http://localhost:8000`（默认端口）
+**访问地址**：`http://127.0.0.1:8000`（默认端口）
 
 **安全配置**：
 - 支持 API 密钥认证
@@ -324,7 +308,7 @@ uv pip install -r requirements.txt
 
 **项目地址**：[github.com/lxfight/astrbot_plugin_mnemosyne](https://github.com/lxfight/astrbot_plugin_mnemosyne)
 
-**作者**：lxfight | **版本**：v0.5.2
+**作者**：lxfight | **版本**：v2.0.0
 
 ---
 
