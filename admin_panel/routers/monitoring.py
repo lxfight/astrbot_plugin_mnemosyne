@@ -3,7 +3,7 @@
 提供系统状态、性能指标、资源使用等 API
 """
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 
 from astrbot.core.log import LogManager
 

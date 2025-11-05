@@ -654,50 +654,57 @@ class MilvusManager:
             return None
 
     def get_collection_stats(self, collection_name: str) -> dict[str, Any]:
-       """
-       获取集合的统计信息 (例如实体数量)。
-       注意：获取准确的行数可能需要先执行 flush 操作。
-       """
-       collection = self.get_collection(collection_name)
-       if not collection:
-           return {"error": f"Collection '{collection_name}' not found."}
-       try:
-           # 确保连接有效
-           self._ensure_connected()
-           # 先 flush 获取最新数据
-           self.flush([collection_name])  # 确保统计数据相对最新
-           # 使用 Collection 实例的 describe 方法获取统计信息（较新版本的 pymilvus 可能不支持 utility.get_collection_stats）
-           stats = collection.describe()
-           # stats 返回的是一个包含 'row_count' 等键的字典
-           row_count = int(stats.get("row_count", 0))  # 确保是整数
-           logger.info(f"获取到集合 '{collection_name}' 的统计信息: {stats}")
-           # 返回标准化的字典，包含row_count
-           return {"row_count": row_count, **dict(stats)}
-       except MilvusException as e:
-           logger.error(f"获取集合 '{collection_name}' 统计信息失败: {e}")
-           # 如果 describe 失败，尝试使用 query 方法查询 count
-           try:
-               # 查询实体数量作为备选方案
-               result = self.query(collection_name, "0 <= id < 999999999", limit=1)  # 使用一个总是为真的条件
-               if result is not None:
-                   # 由于 limit=1，我们不能直接获取总数，使用另一种方式
-                   # 尝试获取集合中的实体数（使用 Milvus 的内部统计）
-                   try:
-                       # 尝试使用 Collection 实例的 num_entities 属性
-                       row_count = collection.num_entities
-                       logger.info(f"通过 num_entities 获取到集合 '{collection_name}' 的实体数: {row_count}")
-                       return {"row_count": row_count}
-                   except Exception as e2:
-                       logger.warning(f"通过 num_entities 获取实体数也失败: {e2}")
-                       return {"error": str(e), "fallback_error": "无法通过备选方案获取统计信息"}
-               else:
-                   return {"error": str(e)}
-           except Exception as fallback_e:
-               logger.error(f"备选方案获取统计信息也失败: {fallback_e}")
-               return {"error": str(e), "fallback_error": str(fallback_e)}
-       except Exception as e:  # 捕获其他错误
-           logger.error(f"获取集合 '{collection_name}' 统计信息时发生意外错误: {e}")
-           return {"error": f"Unexpected error: {str(e)}"}
+        """
+        获取集合的统计信息 (例如实体数量)。
+        注意：获取准确的行数可能需要先执行 flush 操作。
+        """
+        collection = self.get_collection(collection_name)
+        if not collection:
+            return {"error": f"Collection '{collection_name}' not found."}
+        try:
+            # 确保连接有效
+            self._ensure_connected()
+            # 先 flush 获取最新数据
+            self.flush([collection_name])  # 确保统计数据相对最新
+            # 使用 Collection 实例的 describe 方法获取统计信息（较新版本的 pymilvus 可能不支持 utility.get_collection_stats）
+            stats = collection.describe()
+            # stats 返回的是一个包含 'row_count' 等键的字典
+            row_count = int(stats.get("row_count", 0))  # 确保是整数
+            logger.info(f"获取到集合 '{collection_name}' 的统计信息: {stats}")
+            # 返回标准化的字典，包含row_count
+            return {"row_count": row_count, **dict(stats)}
+        except MilvusException as e:
+            logger.error(f"获取集合 '{collection_name}' 统计信息失败: {e}")
+            # 如果 describe 失败，尝试使用 query 方法查询 count
+            try:
+                # 查询实体数量作为备选方案
+                result = self.query(
+                    collection_name, "0 <= id < 999999999", limit=1
+                )  # 使用一个总是为真的条件
+                if result is not None:
+                    # 由于 limit=1，我们不能直接获取总数，使用另一种方式
+                    # 尝试获取集合中的实体数（使用 Milvus 的内部统计）
+                    try:
+                        # 尝试使用 Collection 实例的 num_entities 属性
+                        row_count = collection.num_entities
+                        logger.info(
+                            f"通过 num_entities 获取到集合 '{collection_name}' 的实体数: {row_count}"
+                        )
+                        return {"row_count": row_count}
+                    except Exception as e2:
+                        logger.warning(f"通过 num_entities 获取实体数也失败: {e2}")
+                        return {
+                            "error": str(e),
+                            "fallback_error": "无法通过备选方案获取统计信息",
+                        }
+                else:
+                    return {"error": str(e)}
+            except Exception as fallback_e:
+                logger.error(f"备选方案获取统计信息也失败: {fallback_e}")
+                return {"error": str(e), "fallback_error": str(fallback_e)}
+        except Exception as e:  # 捕获其他错误
+            logger.error(f"获取集合 '{collection_name}' 统计信息时发生意外错误: {e}")
+            return {"error": f"Unexpected error: {str(e)}"}
 
     # --- Data Operations ---
     def insert(
@@ -768,14 +775,21 @@ class MilvusManager:
         except MilvusException as e:
             # 检查是否是因为集合未加载的错误 (code 101)
             if getattr(e, "code", None) == 101:
-                logger.info(f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})")
+                logger.info(
+                    f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})"
+                )
                 # 尝试再次加载集合
                 if self.load_collection(collection_name, timeout=timeout):
-                    logger.info(f"集合 '{collection_name}' 重新加载成功，重试插入操作...")
+                    logger.info(
+                        f"集合 '{collection_name}' 重新加载成功，重试插入操作..."
+                    )
                     # 重试插入操作
                     try:
                         mutation_result = collection.insert(
-                            data=data, partition_name=partition_name, timeout=timeout, **kwargs
+                            data=data,
+                            partition_name=partition_name,
+                            timeout=timeout,
+                            **kwargs,
                         )
                         logger.info(
                             f"重试插入成功。PKs: {mutation_result.primary_keys}"
@@ -831,22 +845,22 @@ class MilvusManager:
             delete_count = 0
             if mutation_result:
                 # 检查 mutation_result 是否有 delete_count 属性
-                if hasattr(mutation_result, 'delete_count'):
+                if hasattr(mutation_result, "delete_count"):
                     try:
-                        delete_count = getattr(mutation_result, 'delete_count', 0)
+                        delete_count = getattr(mutation_result, "delete_count", 0)
                     except AttributeError:
                         delete_count = 0
                 # 如果没有 delete_count，尝试使用 primary_keys
-                elif hasattr(mutation_result, 'primary_keys'):
+                elif hasattr(mutation_result, "primary_keys"):
                     try:
-                        pks = getattr(mutation_result, 'primary_keys', [])
+                        pks = getattr(mutation_result, "primary_keys", [])
                         delete_count = len(pks) if pks is not None else 0
                     except AttributeError:
                         delete_count = 0
                 else:
                     # 尝试其他可能的属性
                     delete_count = "N/A (无法确定)"
-            
+
             logger.info(
                 f"成功从集合 '{collection_name}' 发送删除请求。删除数量: {delete_count} (注意: 实际删除需flush后生效)"
             )
@@ -1113,7 +1127,7 @@ class MilvusManager:
             if not self.has_collection(collection_name):
                 logger.debug(f"集合 '{collection_name}' 不存在，将尝试创建并加载。")
                 return False
-            
+
             progress = utility.loading_progress(collection_name, using=self.alias)
             # progress['loading_progress'] 会是 0 到 100 的整数，或 None
             if progress and progress.get("loading_progress") == 100:
@@ -1244,7 +1258,9 @@ class MilvusManager:
                 else:
                     output_fields_with_pk = output_fields
             else:
-                output_fields_with_pk = output_fields  # 如果无法获取主键字段名，使用原始输出字段
+                output_fields_with_pk = (
+                    output_fields  # 如果无法获取主键字段名，使用原始输出字段
+                )
 
             search_result = collection.search(
                 data=query_vectors,
@@ -1262,7 +1278,7 @@ class MilvusManager:
             # type: ignore
             try:
                 # 安全地获取结果数
-                if search_result is not None and hasattr(search_result, '__len__'):
+                if search_result is not None and hasattr(search_result, "__len__"):
                     # 检查是否支持 len() 操作
                     try:
                         num_results = len(search_result)  # type: ignore
@@ -1271,7 +1287,7 @@ class MilvusManager:
                         num_results = 0
                 else:
                     num_results = 0
-            except:
+            except Exception:
                 num_results = 0
 
             logger.info(f"搜索完成。返回 {num_results} 组结果。")
@@ -1286,10 +1302,14 @@ class MilvusManager:
         except MilvusException as e:
             # 检查是否是因为集合未加载的错误 (code 101)
             if getattr(e, "code", None) == 101:
-                logger.info(f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})")
+                logger.info(
+                    f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})"
+                )
                 # 尝试再次加载集合
                 if self.load_collection(collection_name, timeout=timeout):
-                    logger.info(f"集合 '{collection_name}' 重新加载成功，重试搜索操作...")
+                    logger.info(
+                        f"集合 '{collection_name}' 重新加载成功，重试搜索操作..."
+                    )
                     # 重试搜索操作
                     try:
                         search_result = collection.search(
@@ -1308,7 +1328,9 @@ class MilvusManager:
                         # type: ignore
                         try:
                             # 安全地获取结果数
-                            if search_result is not None and hasattr(search_result, '__len__'):
+                            if search_result is not None and hasattr(
+                                search_result, "__len__"
+                            ):
                                 # 检查是否支持 len() 操作
                                 try:
                                     num_results = len(search_result)  # type: ignore
@@ -1317,11 +1339,11 @@ class MilvusManager:
                                     num_results = 0
                             else:
                                 num_results = 0
-                        except:
+                        except Exception:
                             num_results = 0
 
                         logger.info(f"重试搜索成功。返回 {num_results} 组结果。")
-                        
+
                         # 返回原始结果，由调用方处理具体类型
                         # 为了类型安全，直接返回，不进行转换
                         # type: ignore
@@ -1391,7 +1413,12 @@ class MilvusManager:
             pk_field_name = None
             if collection.schema.primary_field:
                 pk_field_name = collection.schema.primary_field.name
-            if pk_field_name and output_fields and pk_field_name not in output_fields and "*" not in output_fields:
+            if (
+                pk_field_name
+                and output_fields
+                and pk_field_name not in output_fields
+                and "*" not in output_fields
+            ):
                 query_output_fields = output_fields + [pk_field_name]
             elif not output_fields:
                 # 如果 None, 尝试获取所有非向量字段 + PK
@@ -1421,10 +1448,14 @@ class MilvusManager:
         except MilvusException as e:
             # 检查是否是因为集合未加载的错误 (code 101)
             if getattr(e, "code", None) == 101:
-                logger.info(f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})")
+                logger.info(
+                    f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})"
+                )
                 # 尝试再次加载集合
                 if self.load_collection(collection_name, timeout=timeout):
-                    logger.info(f"集合 '{collection_name}' 重新加载成功，重试查询操作...")
+                    logger.info(
+                        f"集合 '{collection_name}' 重新加载成功，重试查询操作..."
+                    )
                     # 重试查询操作
                     try:
                         query_results = collection.query(
@@ -1505,142 +1536,147 @@ class MilvusManager:
         }
 
     def format_search_results(self, raw_results) -> list[dict[str, Any]]:
-       """
-       格式化搜索结果为统一格式
+        """
+        格式化搜索结果为统一格式
 
-       Args:
-           raw_results: Milvus 搜索返回的原始结果 (List[SearchResult])
+        Args:
+            raw_results: Milvus 搜索返回的原始结果 (List[SearchResult])
 
-       Returns:
-           List[Dict[str, Any]]: 格式化后的搜索结果列表，每个元素包含：
-               - id: 实体 ID
-               - distance: 相似度距离
-               - score: 相似度分数 (1 - distance，适用于 L2 距离)
-               - entity: 实体数据字典
-       """
-       if not raw_results:
-           return []
+        Returns:
+            List[Dict[str, Any]]: 格式化后的搜索结果列表，每个元素包含：
+                - id: 实体 ID
+                - distance: 相似度距离
+                - score: 相似度分数 (1 - distance，适用于 L2 距离)
+                - entity: 实体数据字典
+        """
+        if not raw_results:
+            return []
 
-       formatted_results = []
+        formatted_results = []
 
-       try:
-           # raw_results 可能是 List[SearchResult] 或其他类型，需要安全处理
-           # 首先检查是否为可迭代的
-           if not hasattr(raw_results, '__iter__'):
-               logger.warning(f"raw_results 不是可迭代对象: {type(raw_results)}")
-               return []
+        try:
+            # raw_results 可能是 List[SearchResult] 或其他类型，需要安全处理
+            # 首先检查是否为可迭代的
+            if not hasattr(raw_results, "__iter__"):
+                logger.warning(f"raw_results 不是可迭代对象: {type(raw_results)}")
+                return []
 
-           for search_result in raw_results:
-               # 检查 search_result 是否为可迭代的（SearchResult 通常包含多个命中）
-               if hasattr(search_result, '__iter__'):
-                   # 处理每个搜索结果中的命中项
-                   for hit in search_result:
-                       # 检查 hit 对象是否包含必要属性
-                       if not all(
-                           hasattr(hit, attr) for attr in ["id", "distance"]
-                       ):
-                           logger.warning(f"搜索结果对象缺少必要属性: {hit}")
-                           continue
+            for search_result in raw_results:
+                # 检查 search_result 是否为可迭代的（SearchResult 通常包含多个命中）
+                if hasattr(search_result, "__iter__"):
+                    # 处理每个搜索结果中的命中项
+                    for hit in search_result:
+                        # 检查 hit 对象是否包含必要属性
+                        if not all(hasattr(hit, attr) for attr in ["id", "distance"]):
+                            logger.warning(f"搜索结果对象缺少必要属性: {hit}")
+                            continue
 
-                       try:
-                           # 获取实体数据 - 有些搜索结果可能不直接提供 entity，需要从 hit 中获取
-                           entity_dict = {}
-                           # 尝试获取 entity，如果不存在则从 hit 的属性中构建
-                           if hasattr(hit, 'entity') and hit.entity is not None:
-                               entity_data = hit.entity
-                               if hasattr(entity_data, "to_dict"):
-                                   entity_dict = entity_data.to_dict()
-                               elif hasattr(entity_data, "__dict__"):
-                                   entity_dict = vars(entity_data)
-                               else:
-                                   try:
-                                       entity_dict = dict(entity_data)
-                                   except (TypeError, ValueError):
-                                       logger.warning(f"无法将实体转换为字典: {entity_data}")
-                                       entity_dict = {}
-                           else:
-                               # 如果没有实体对象，尝试直接从 hit 获取字段
-                               for attr_name in dir(hit):
-                                   if not attr_name.startswith('_') and attr_name not in ['id', 'distance']:
-                                       try:
-                                           attr_value = getattr(hit, attr_name)
-                                           if not callable(attr_value):
-                                               entity_dict[attr_name] = attr_value
-                                       except:
-                                           continue
+                        try:
+                            # 获取实体数据 - 有些搜索结果可能不直接提供 entity，需要从 hit 中获取
+                            entity_dict = {}
+                            # 尝试获取 entity，如果不存在则从 hit 的属性中构建
+                            if hasattr(hit, "entity") and hit.entity is not None:
+                                entity_data = hit.entity
+                                if hasattr(entity_data, "to_dict"):
+                                    entity_dict = entity_data.to_dict()
+                                elif hasattr(entity_data, "__dict__"):
+                                    entity_dict = vars(entity_data)
+                                else:
+                                    try:
+                                        entity_dict = dict(entity_data)
+                                    except (TypeError, ValueError):
+                                        logger.warning(
+                                            f"无法将实体转换为字典: {entity_data}"
+                                        )
+                                        entity_dict = {}
+                            else:
+                                # 如果没有实体对象，尝试直接从 hit 获取字段
+                                for attr_name in dir(hit):
+                                    if not attr_name.startswith(
+                                        "_"
+                                    ) and attr_name not in ["id", "distance"]:
+                                        try:
+                                            attr_value = getattr(hit, attr_name)
+                                            if not callable(attr_value):
+                                                entity_dict[attr_name] = attr_value
+                                        except Exception:
+                                            continue
 
-                           # 计算相似度分数 (对于 L2 距离，分数越高越相似)
-                           distance = float(hit.distance)
-                           score = 1.0 / (1.0 + distance)  # 转换为 0-1 范围的分数
+                            # 计算相似度分数 (对于 L2 距离，分数越高越相似)
+                            distance = float(hit.distance)
+                            score = 1.0 / (1.0 + distance)  # 转换为 0-1 范围的分数
 
-                           formatted_result = {
-                               "id": hit.id,
-                               "distance": distance,
-                               "score": score,
-                               "entity": entity_dict,
-                           }
+                            formatted_result = {
+                                "id": hit.id,
+                                "distance": distance,
+                                "score": score,
+                                "entity": entity_dict,
+                            }
 
-                           formatted_results.append(formatted_result)
+                            formatted_results.append(formatted_result)
 
-                       except Exception as e:
-                           logger.error(f"处理单个搜索结果时出错: {e}")
-                           continue
-               else:
-                   # 如果 search_result 不是可迭代的，说明 raw_results 可能是单个结果
-                   # 检查它是否是单个命中对象
-                   hit = search_result
-                   if not all(
-                       hasattr(hit, attr) for attr in ["id", "distance"]
-                   ):
-                       logger.warning(f"搜索结果对象缺少必要属性: {hit}")
-                       continue
+                        except Exception as e:
+                            logger.error(f"处理单个搜索结果时出错: {e}")
+                            continue
+                else:
+                    # 如果 search_result 不是可迭代的，说明 raw_results 可能是单个结果
+                    # 检查它是否是单个命中对象
+                    hit = search_result
+                    if not all(hasattr(hit, attr) for attr in ["id", "distance"]):
+                        logger.warning(f"搜索结果对象缺少必要属性: {hit}")
+                        continue
 
-                   try:
-                       # 获取实体数据
-                       entity_dict = {}
-                       # 尝试获取 entity，如果不存在则从 hit 中获取
-                       if hasattr(hit, 'entity') and hit.entity is not None:
-                           entity_data = hit.entity
-                           if hasattr(entity_data, "to_dict"):
-                               entity_dict = entity_data.to_dict()
-                           elif hasattr(entity_data, "__dict__"):
-                               entity_dict = vars(entity_data)
-                           else:
-                               try:
-                                   entity_dict = dict(entity_data)
-                               except (TypeError, ValueError):
-                                   logger.warning(f"无法将实体转换为字典: {entity_data}")
-                                   entity_dict = {}
-                       else:
-                           # 如果没有实体对象，尝试直接从 hit 获取字段
-                           for attr_name in dir(hit):
-                               if not attr_name.startswith('_') and attr_name not in ['id', 'distance']:
-                                   try:
-                                       attr_value = getattr(hit, attr_name)
-                                       if not callable(attr_value):
-                                           entity_dict[attr_name] = attr_value
-                                   except:
-                                       continue
+                    try:
+                        # 获取实体数据
+                        entity_dict = {}
+                        # 尝试获取 entity，如果不存在则从 hit 中获取
+                        if hasattr(hit, "entity") and hit.entity is not None:
+                            entity_data = hit.entity
+                            if hasattr(entity_data, "to_dict"):
+                                entity_dict = entity_data.to_dict()
+                            elif hasattr(entity_data, "__dict__"):
+                                entity_dict = vars(entity_data)
+                            else:
+                                try:
+                                    entity_dict = dict(entity_data)
+                                except (TypeError, ValueError):
+                                    logger.warning(
+                                        f"无法将实体转换为字典: {entity_data}"
+                                    )
+                                    entity_dict = {}
+                        else:
+                            # 如果没有实体对象，尝试直接从 hit 获取字段
+                            for attr_name in dir(hit):
+                                if not attr_name.startswith("_") and attr_name not in [
+                                    "id",
+                                    "distance",
+                                ]:
+                                    try:
+                                        attr_value = getattr(hit, attr_name)
+                                        if not callable(attr_value):
+                                            entity_dict[attr_name] = attr_value
+                                    except Exception:
+                                        continue
 
-                       # 计算相似度分数 (对于 L2 距离，分数越高越相似)
-                       distance = float(hit.distance)
-                       score = 1.0 / (1.0 + distance)  # 转换为 0-1 范围的分数
+                        # 计算相似度分数 (对于 L2 距离，分数越高越相似)
+                        distance = float(hit.distance)
+                        score = 1.0 / (1.0 + distance)  # 转换为 0-1 范围的分数
 
-                       formatted_result = {
-                           "id": hit.id,
-                           "distance": distance,
-                           "score": score,
-                           "entity": entity_dict,
-                       }
+                        formatted_result = {
+                            "id": hit.id,
+                            "distance": distance,
+                            "score": score,
+                            "entity": entity_dict,
+                        }
 
-                       formatted_results.append(formatted_result)
+                        formatted_results.append(formatted_result)
 
-                   except Exception as e:
-                       logger.error(f"处理单个搜索结果时出错: {e}")
-                       continue
+                    except Exception as e:
+                        logger.error(f"处理单个搜索结果时出错: {e}")
+                        continue
 
-       except Exception as e:
-           logger.error(f"格式化搜索结果时出错: {e}")
-           return []
+        except Exception as e:
+            logger.error(f"格式化搜索结果时出错: {e}")
+            return []
 
-       return formatted_results
+        return formatted_results

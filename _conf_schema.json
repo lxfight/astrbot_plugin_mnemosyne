@@ -6,6 +6,13 @@
         "_special":"select_provider",
         "default":""
     },
+    "embedding_provider_id":{
+        "description":"Embedding 服务提供商",
+        "type":"string",
+        "hint":"选择用于向量嵌入的 Embedding Provider。留空则使用 AstrBot 中配置的第一个 Embedding Provider",
+        "_special":"select_embedding_provider",
+        "default":""
+    },
     "milvus_lite_path":{
         "description":"milvus数据库的lite模式路径",
         "type":"string",
@@ -96,40 +103,6 @@
         "default":10,
         "minimum":2,
         "maximum":50
-    },
-    "embedding_service": {
-        "description": "选择嵌入服务提供商 (openai 或 gemini)",
-        "type": "string",
-        "options": ["openai", "gemini"],
-        "default": "openai"
-    },
-    "embedding_key":{
-        "description":"embedding模型服务的apikey",
-        "type":"string",
-        "obvious_hint":false,
-        "minLength":0
-    },
-    "embedding_url":{
-        "description":"embedding模型服务的端点url",
-        "type":"string",
-        "hint":"目前只针对于OpenAI兼容的接口，填写到V1即可。如选择Gemini，则不填写",
-        "obvious_hint":true,
-        "pattern":"^https?://[a-zA-Z0-9.-]+/.*$",
-        "minLength":0
-    },
-    "embedding_model":{
-        "description":"embedding模型模型名称",
-        "type":"string",
-        "minLength":1
-    },
-    "embedding_dim":{
-        "description":"向量模型输出的维度",
-        "type":"int",
-        "hint":"注意！这个维度大小最好不要随意变动，如果一定要改变向量维度，请修改collection_name。Gemini修改为3072",
-        "obvious_hint":true,
-        "default":1024,
-        "minimum":128,
-        "maximum":4096
     },
     "top_k":{
         "description":"返回的长期记忆的数量",

@@ -72,11 +72,13 @@ class Mnemosyne(Star):
         logger.info("开始初始化 Mnemosyne 插件...")
         # 启动后台异步初始化，但不包括 Embedding Provider 的初始化
         asyncio.create_task(self._initialize_plugin_async())
-        
+
         # 延迟加载 Embedding Provider，只在需要时才加载
         self._embedding_provider_task = None
 
-    def _initialize_embedding_provider(self, silent: bool = False) -> EmbeddingProvider | None:
+    def _initialize_embedding_provider(
+        self, silent: bool = False
+    ) -> EmbeddingProvider | None:
         """
         获取 Embedding Provider，采用优先级策略：
         1. 从配置指定的 Provider ID 获取
@@ -96,21 +98,27 @@ class Mnemosyne(Star):
                 # 安全地检查 provider 是否为 EmbeddingProvider 类型
                 if provider:
                     # 检查 provider 是否具有 EmbeddingProvider 的关键方法
-                    if callable(getattr(provider, "embed_texts", None)) or callable(getattr(provider, "get_embedding", None)):
+                    if callable(getattr(provider, "embed_texts", None)) or callable(
+                        getattr(provider, "get_embedding", None)
+                    ):
                         logger.info(f"✅ 成功从配置加载 Embedding Provider: {emb_id}")
                         # 使用类型断言确保返回正确的类型
                         embedding_provider = cast(EmbeddingProvider, provider)
                         return embedding_provider
                     else:
                         if not silent:
-                            logger.warning(f"获取的 Provider {emb_id} 不是有效的 EmbeddingProvider 类型")
+                            logger.warning(
+                                f"获取的 Provider {emb_id} 不是有效的 EmbeddingProvider 类型"
+                            )
 
             # 优先级 2: 使用框架默认的第一个 Embedding Provider
             # 使用 context 提供的方法获取所有 embedding providers
             embedding_providers = self.context.get_all_embedding_providers()
             if embedding_providers and len(embedding_providers) > 0:
                 provider = embedding_providers[0]
-                provider_id = getattr(provider, 'provider_config', {}).get('id', 'unknown')
+                provider_id = getattr(provider, "provider_config", {}).get(
+                    "id", "unknown"
+                )
                 logger.info(f"✅ 未指定 Embedding Provider，使用默认的: {provider_id}")
                 embedding_provider = cast(EmbeddingProvider, provider)
                 return embedding_provider
@@ -159,7 +167,7 @@ class Mnemosyne(Star):
                         # 尝试通过 get_dim 方法获取
                         if callable(getattr(self.embedding_provider, "get_dim", None)):
                             dim = self.embedding_provider.get_dim()
-                    
+
                     if dim:
                         self.config["embedding_dim"] = dim
                         logger.info(f"检测到 embedding 维度: {dim}")
@@ -171,7 +179,9 @@ class Mnemosyne(Star):
             # 每5秒输出一次等待日志，避免日志刷屏
             current_time = time.time()
             if current_time - last_log_time >= 5.0:
-                logger.debug(f"等待 Embedding Provider 初始化... (已等待 {current_time - start_time:.0f}s)")
+                logger.debug(
+                    f"等待 Embedding Provider 初始化... (已等待 {current_time - start_time:.0f}s)"
+                )
                 last_log_time = current_time
 
             if time.time() - start_time < max_wait:
@@ -201,7 +211,7 @@ class Mnemosyne(Star):
             # 1. Embedding Provider 采用延迟初始化策略
             # 在后台静默尝试加载，但不阻塞插件启动
             logger.info("Embedding Provider 采用延迟初始化策略")
-            
+
             # 启动 Embedding Provider 后台加载任务（静默模式）
             self._embedding_provider_task = asyncio.create_task(
                 self._initialize_embedding_provider_async(max_wait=10.0)
@@ -276,27 +286,26 @@ class Mnemosyne(Star):
                 port = admin_panel_config.get(
                     "port", 8000
                 )  # 从配置中获取端口，默认8000
-                
+
                 # 检查并生成 Admin Panel API 密钥
                 api_key = admin_panel_config.get("api_key")
                 if not api_key:
                     # 生成随机 API 密钥
                     import secrets
+
                     api_key = secrets.token_urlsafe(32)
                     # 更新配置
                     if "admin_panel" not in self.config:
                         self.config["admin_panel"] = {}
                     self.config["admin_panel"]["api_key"] = api_key
-                    logger.warning(
-                        f"⚠️ Admin Panel API 密钥未配置，已自动生成随机密钥。"
-                    )
+                    logger.warning("⚠️ Admin Panel API 密钥未配置，已自动生成随机密钥。")
                     logger.info(f"🔑 Admin Panel API 密钥: {api_key}")
                     logger.info(
-                        f"💡 请妥善保存此密钥，或在配置文件中手动设置 admin_panel.api_key"
+                        "💡 请妥善保存此密钥，或在配置文件中手动设置 admin_panel.api_key"
                     )
                 else:
                     logger.info("✅ Admin Panel API 密钥已配置")
-                
+
                 self.admin_panel_server = AdminPanelServer(
                     self, port=port, host="127.0.0.1"
                 )
@@ -335,28 +344,37 @@ class Mnemosyne(Star):
         # 当会话第一次发生时，插件会从AstrBot中获取上下文历史，之后的会话历史由插件自动管理
         try:
             # 等待 Embedding Provider 加载完成（如果正在加载）
-            if self._embedding_provider_task and not self._embedding_provider_task.done():
+            if (
+                self._embedding_provider_task
+                and not self._embedding_provider_task.done()
+            ):
                 logger.debug("等待 Embedding Provider 加载完成...")
                 try:
-                    await asyncio.wait_for(asyncio.shield(self._embedding_provider_task), timeout=5.0)
+                    await asyncio.wait_for(
+                        asyncio.shield(self._embedding_provider_task), timeout=5.0
+                    )
                     logger.info("Embedding Provider 加载完成")
                 except asyncio.TimeoutError:
                     logger.warning("等待 Embedding Provider 加载超时，继续执行...")
                 except Exception as e:
                     logger.error(f"加载 Embedding Provider 时发生错误: {e}")
-            
+
             # 需要时初始化 Embedding Provider（首次使用）
             if not self._embedding_provider_ready and not self.embedding_provider:
                 logger.info("首次使用记忆功能，尝试获取 Embedding Provider...")
-                self.embedding_provider = self._initialize_embedding_provider(silent=False)
+                self.embedding_provider = self._initialize_embedding_provider(
+                    silent=False
+                )
                 if self.embedding_provider:
                     self._embedding_provider_ready = True
                     # 获取向量维度并更新配置
                     try:
                         dim = getattr(self.embedding_provider, "embedding_dim", None)
-                        if not dim and callable(getattr(self.embedding_provider, "get_dim", None)):
+                        if not dim and callable(
+                            getattr(self.embedding_provider, "get_dim", None)
+                        ):
                             dim = self.embedding_provider.get_dim()
-                        
+
                         if dim:
                             self.config["embedding_dim"] = dim
                             logger.info(f"Embedding 维度: {dim}")
@@ -429,7 +447,7 @@ class Mnemosyne(Star):
         try:
             result = memory_operations.handle_on_llm_resp(self, event, resp)
             # 检查返回值是否是可等待对象，如果不是则直接返回
-            if result and hasattr(result, '__await__'):
+            if result and hasattr(result, "__await__"):
                 await result
         except Exception as e:
             logger.error(f"处理 on_llm_response 钩子时发生捕获异常: {e}", exc_info=True)

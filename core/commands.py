@@ -1,10 +1,11 @@
-"""
-Mnemosyne 插件的命令处理函数实现
-(注意：装饰器已移除，函数接收 self)
-"""
+﻿
+# Mnemosyne 插件的命令处理函数实现
+# (注意：装饰器已移除，函数接收 self)
 
 from datetime import datetime
 from typing import TYPE_CHECKING
+
+from astrbot.api import logger
 
 # 导入 AstrBot API 和类型 (仅需要事件和消息段)
 from astrbot.api.event import AstrMessageEvent
@@ -42,7 +43,7 @@ async def list_collections_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
                 )
         yield event.plain_result(response)
     except Exception as e:
-        self.logger.error(f"执行 'memory list' 命令失败: {str(e)}", exc_info=True)
+        logger.error(f"执行 'memory list' 命令失败: {str(e)}", exc_info=True)
         yield event.plain_result(f"⚠️ 获取集合列表时出错: {str(e)}")
 
 
@@ -74,11 +75,11 @@ async def delete_collection_cmd_impl(
 
     try:
         sender_id = event.get_sender_id()
-        self.logger.warning(
+        logger.warning(
             f"管理员 {sender_id} 请求删除集合: {collection_name} (确认执行)"
         )
         if is_current_collection:
-            self.logger.critical(
+            logger.critical(
                 f"管理员 {sender_id} 正在删除当前插件使用的集合 '{collection_name}'！"
             )
 
@@ -88,9 +89,9 @@ async def delete_collection_cmd_impl(
             if is_current_collection:
                 msg += "\n插件使用的集合已被删除，请尽快处理！"
             yield event.plain_result(msg)
-            self.logger.warning(f"管理员 {sender_id} 成功删除了集合: {collection_name}")
+            logger.warning(f"管理员 {sender_id} 成功删除了集合: {collection_name}")
             if is_current_collection:
-                self.logger.error(
+                logger.error(
                     f"插件当前使用的集合 '{collection_name}' 已被删除，相关功能将不可用。"
                 )
         else:
@@ -99,7 +100,7 @@ async def delete_collection_cmd_impl(
             )
 
     except Exception as e:
-        self.logger.error(
+        logger.error(
             f"执行 'memory drop_collection {collection_name}' 命令时发生严重错误: {str(e)}",
             exc_info=True,
         )
@@ -131,7 +132,7 @@ async def list_records_cmd_impl(
         limit = int(limit)
     except (ValueError, TypeError):
         yield event.plain_result(f"⚠️ limit 参数必须是有效的整数，当前值: {limit}")
-        self.logger.warning(
+        logger.warning(
             f"用户提供了无效的 limit 参数: {limit} (类型: {type(limit).__name__})"
         )
         return
@@ -152,7 +153,7 @@ async def list_records_cmd_impl(
             # 安全检查：验证 session_id 格式
             if not validate_session_id(session_id):
                 yield event.plain_result("⚠️ 会话 ID 格式无效，无法查询记录。")
-                self.logger.warning(f"尝试使用无效的 session_id 查询记录: {session_id}")
+                logger.warning(f"尝试使用无效的 session_id 查询记录: {session_id}")
                 return
 
             # 如果有会话ID，则按会话ID过滤（使用安全的表达式构建）
@@ -160,21 +161,21 @@ async def list_records_cmd_impl(
                 expr = safe_build_milvus_expression("session_id", session_id, "in")
             except ValueError as e:
                 yield event.plain_result(f"⚠️ 构建查询表达式失败: {e}")
-                self.logger.error(f"构建查询表达式时出错: {e}")
+                logger.error(f"构建查询表达式时出错: {e}")
                 return
 
-            self.logger.info(
+            logger.info(
                 f"将按会话 ID '{session_id}' 过滤并查询所有相关记录 (上限 {MAX_TOTAL_FETCH_RECORDS} 条)。"
             )
         else:
             # 如果没有会话ID上下文，查询所有记录
             expr = f"{PRIMARY_FIELD_NAME} >= 0"
-            self.logger.info(
+            logger.info(
                 "未指定会话 ID，将查询集合 '{target_collection}' 中的所有记录 (上限 {MAX_TOTAL_FETCH_RECORDS} 条)。"
             )
             # 或者，如果您的 milvus_manager 支持空表达式查询所有，则 expr = "" 或 None
 
-        # self.logger.debug(f"查询集合 '{target_collection}' 记录: expr='{expr}'") # 上面已有更具体的日志
+        # logger.debug(f"查询集合 '{target_collection}' 记录: expr='{expr}'") # 上面已有更具体的日志
         output_fields = [
             "content",
             "create_time",
@@ -183,7 +184,7 @@ async def list_records_cmd_impl(
             PRIMARY_FIELD_NAME,
         ]
 
-        self.logger.debug(
+        logger.debug(
             f"准备查询 Milvus: 集合='{target_collection}', 表达式='{expr}', 限制={limit},输出字段={output_fields}, 总数上限={MAX_TOTAL_FETCH_RECORDS}"
         )
 
@@ -207,7 +208,7 @@ async def list_records_cmd_impl(
         # 检查查询结果
         if fetched_records is None:
             # 查询失败，milvus_manager.query 通常会返回 None 或抛出异常
-            self.logger.error(
+            logger.error(
                 f"查询集合 '{target_collection}' 失败，milvus_manager.query 返回 None。"
             )
             yield event.plain_result(
@@ -218,7 +219,7 @@ async def list_records_cmd_impl(
         if not fetched_records:
             # 查询成功，但没有返回任何记录
             session_filter_msg = f"在会话 '{session_id}' 中" if session_id else ""
-            self.logger.info(
+            logger.info(
                 f"集合 '{target_collection}' {session_filter_msg} 没有找到任何匹配的记忆记录。"
             )
             yield event.plain_result(
@@ -227,14 +228,14 @@ async def list_records_cmd_impl(
             return
         # 检查是否达到了总数上限
         if len(fetched_records) >= MAX_TOTAL_FETCH_RECORDS:
-            self.logger.warning(
+            logger.warning(
                 f"查询到的记录数量达到总数上限 ({MAX_TOTAL_FETCH_RECORDS})，可能存在更多未获取的记录，导致无法找到更旧的记录，但最新记录应该在获取范围内。"
             )
             yield event.plain_result(
                 f"ℹ️ 警告：查询到的记录数量已达到系统获取最新记录的上限 ({MAX_TOTAL_FETCH_RECORDS})。如果记录非常多，可能无法显示更旧的内容，但最新记录应该已包含在内。"
             )
 
-        self.logger.debug(f"成功获取到 {len(fetched_records)} 条原始记录用于排序。")
+        logger.debug(f"成功获取到 {len(fetched_records)} 条原始记录用于排序。")
         # --- 在获取全部结果后进行排序 (按创建时间倒序) ---
         # 这确保了排序是基于所有获取到的记录，找到真正的最新记录
         try:
@@ -242,11 +243,11 @@ async def list_records_cmd_impl(
             fetched_records.sort(
                 key=lambda x: x.get("create_time", 0) or 0, reverse=True
             )
-            self.logger.debug(
+            logger.debug(
                 f"已将获取到的 {len(fetched_records)} 条记录按 create_time 降序排序。"
             )
         except Exception as sort_e:
-            self.logger.warning(
+            logger.warning(
                 f"对查询结果进行排序时出错: {sort_e}。显示顺序可能不按时间排序。"
             )
             # 如果排序失败，继续处理，但不保证按时间顺序
@@ -279,7 +280,7 @@ async def list_records_cmd_impl(
                 )
             except (TypeError, ValueError, OSError) as time_e:
                 # 处理无效或无法解析的时间戳
-                self.logger.warning(
+                logger.warning(
                     f"记录 {record.get(PRIMARY_FIELD_NAME, '未知ID')} 的时间戳 '{ts}' 无效或解析错误: {time_e}"
                 )
                 time_str = f"无效时间戳({ts})" if ts is not None else "未知时间"
@@ -304,7 +305,7 @@ async def list_records_cmd_impl(
 
     except Exception as e:
         # 捕获所有其他潜在异常
-        self.logger.error(
+        logger.error(
             f"执行 'memory list_records' 命令时发生意外错误 (集合: {target_collection}): {str(e)}",
             exc_info=True,  # 记录完整的错误堆栈
         )
@@ -331,7 +332,7 @@ async def delete_session_memory_cmd_impl(
     # 安全检查：验证 session_id 格式，防止SQL注入
     if not validate_session_id(session_id_to_delete):
         yield event.plain_result("⚠️ 会话 ID 格式无效，无法执行删除操作。")
-        self.logger.warning(f"尝试删除无效的 session_id: {session_id_to_delete}")
+        logger.warning(f"尝试删除无效的 session_id: {session_id_to_delete}")
         return
 
     if confirm != "--confirm":
@@ -353,11 +354,11 @@ async def delete_session_memory_cmd_impl(
             )
         except ValueError as e:
             yield event.plain_result(f"⚠️ 构建删除表达式失败: {e}")
-            self.logger.error(f"构建删除表达式时出错: {e}")
+            logger.error(f"构建删除表达式时出错: {e}")
             return
 
         sender_id = event.get_sender_id()
-        self.logger.warning(
+        logger.warning(
             f"管理员 {sender_id} 请求删除会话 '{session_id_to_delete}' 的所有记忆 (集合: {collection_name}, 表达式: '{expr}') (确认执行)"
         )
 
@@ -371,20 +372,20 @@ async def delete_session_memory_cmd_impl(
                 if hasattr(mutation_result, "delete_count")
                 else "未知"
             )
-            self.logger.info(
+            logger.info(
                 f"已发送删除会话 '{session_id_to_delete}' 记忆的请求。返回的删除计数（可能不准确）: {delete_pk_count}"
             )
             try:
-                self.logger.info(
+                logger.info(
                     f"正在刷新 (Flush) 集合 '{collection_name}' 以应用删除操作..."
                 )
                 self.milvus_manager.flush([collection_name])
-                self.logger.info(f"集合 '{collection_name}' 刷新完成。删除操作已生效。")
+                logger.info(f"集合 '{collection_name}' 刷新完成。删除操作已生效。")
                 yield event.plain_result(
                     f"✅ 已成功删除会话 ID '{session_id_to_delete}' 的所有记忆信息。"
                 )
             except Exception as flush_err:
-                self.logger.error(
+                logger.error(
                     f"刷新集合 '{collection_name}' 以应用删除时出错: {flush_err}",
                     exc_info=True,
                 )
@@ -397,7 +398,7 @@ async def delete_session_memory_cmd_impl(
             )
 
     except Exception as e:
-        self.logger.error(
+        logger.error(
             f"执行 'memory delete_session_memory' 命令时发生严重错误 (Session ID: {session_id_to_delete}): {str(e)}",
             exc_info=True,
         )
@@ -416,11 +417,11 @@ async def get_session_id_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
             yield event.plain_result(
                 "🤔 无法获取当前会话 ID。可能还没有开始对话，或者会话已结束/失效。"
             )
-            self.logger.warning(
+            logger.warning(
                 f"用户 {event.get_sender_id()} 在 {event.unified_msg_origin} 尝试获取 session_id 失败。"
             )
     except Exception as e:
-        self.logger.error(
+        logger.error(
             f"执行 'memory get_session_id' 命令失败: {str(e)}", exc_info=True
         )
         yield event.plain_result(f"⚠️ 获取当前会话 ID 时发生错误: {str(e)}")

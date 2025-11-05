@@ -90,11 +90,11 @@ class AdminPanelServer:
                     "/health",  # 健康检查
                     "/static",  # 静态资源
                 ]
-                
+
                 # 检查是否是公开路径
                 path = request.url.path
                 is_public = any(path.startswith(public_path) for public_path in public_paths)
-                
+
                 # 公开路径直接放行
                 if is_public:
                     return await call_next(request)
