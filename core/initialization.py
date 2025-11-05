@@ -527,7 +527,7 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
 
 def _migrate_data_if_needed(old_dir: str, new_dir: str):
     """
-    如果插件数据曾存储在其他位置，自动将其迁移到新位置。
+    如果插件数据曾存储在其他位置，自动将其迁移到新位置，并删除旧目录。
 
     Args:
         old_dir (str): 旧的数据目录路径
@@ -546,17 +546,45 @@ def _migrate_data_if_needed(old_dir: str, new_dir: str):
             old_files = list(old_path.glob("*"))
             if old_files:
                 new_path.mkdir(parents=True, exist_ok=True)
+                migrated_count = 0
+                skipped_count = 0
+
                 for file in old_files:
                     new_file = new_path / file.name
                     if file.is_file():
                         if not new_file.exists():
                             shutil.copy2(file, new_file)
                             init_logger.info(f"已迁移数据文件: {file.name}")
+                            migrated_count += 1
+                        else:
+                            init_logger.debug(f"跳过已存在的文件: {file.name}")
+                            skipped_count += 1
                     elif file.is_dir():
                         if not new_file.exists():
                             shutil.copytree(file, new_file)
                             init_logger.info(f"已迁移数据目录: {file.name}")
-                init_logger.info(f"已完成从 '{old_dir}' 到 '{new_dir}' 的数据迁移")
+                            migrated_count += 1
+                        else:
+                            init_logger.debug(f"跳过已存在的目录: {file.name}")
+                            skipped_count += 1
+
+                init_logger.info(
+                    f"数据迁移完成: 迁移 {migrated_count} 项, 跳过 {skipped_count} 项"
+                )
+
+                # 迁移成功后，删除旧目录
+                try:
+                    shutil.rmtree(old_path)
+                    init_logger.info(f"已自动删除旧数据目录: {old_dir}")
+                except Exception as e:
+                    init_logger.warning(f"删除旧目录 '{old_dir}' 失败: {e}，请手动删除")
+            else:
+                # 旧目录为空，直接删除
+                try:
+                    old_path.rmdir()
+                    init_logger.info(f"已删除空的旧数据目录: {old_dir}")
+                except Exception as e:
+                    init_logger.debug(f"删除空目录失败: {e}")
         except Exception as e:
             init_logger.warning(f"数据迁移失败: {e}，继续使用新位置")
 
@@ -577,12 +605,12 @@ def initialize_components(plugin: "Mnemosyne", plugin_data_dir=None):
                 init_logger.debug(f"使用传入的插件数据目录: {plugin_data_dir}")
 
             # 检查是否需要迁移旧数据
-            # 旧的相对路径：./mnemosyne_data 或 mnemosyne_data
+            # 旧的相对路径：./data/mnemosyne_data
             from pathlib import Path
 
-            old_relative_dir = Path("./mnemosyne_data")
+            old_relative_dir = Path("./data/mnemosyne_data")
             if old_relative_dir.exists() and Path(plugin_data_dir) != old_relative_dir:
-                init_logger.info("检测到旧的数据目录，启动数据迁移...")
+                init_logger.warning("检测到旧的数据目录，启动数据迁移...")
                 _migrate_data_if_needed(str(old_relative_dir), str(plugin_data_dir))
 
             plugin.msg_counter = MessageCounter(plugin_data_dir=str(plugin_data_dir))
