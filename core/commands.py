@@ -1,18 +1,17 @@
-# -*- coding: utf-8 -*-
 """
 Mnemosyne 插件的命令处理函数实现
 (注意：装饰器已移除，函数接收 self)
 """
 
-from typing import TYPE_CHECKING, Optional
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 # 导入 AstrBot API 和类型 (仅需要事件和消息段)
 from astrbot.api.event import AstrMessageEvent
 
 # 导入必要的模块和常量
-from .constants import PRIMARY_FIELD_NAME, MAX_TOTAL_FETCH_RECORDS
-from .security_utils import validate_session_id, safe_build_milvus_expression
+from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME
+from .security_utils import safe_build_milvus_expression, validate_session_id
 
 # 类型提示
 if TYPE_CHECKING:
@@ -51,7 +50,7 @@ async def delete_collection_cmd_impl(
     self: "Mnemosyne",
     event: AstrMessageEvent,
     collection_name: str,
-    confirm: Optional[str] = None,
+    confirm: str | None = None,
 ):
     """[实现] 删除指定的 Milvus 集合及其所有数据"""
     if not self.milvus_manager or not self.milvus_manager.is_connected():
@@ -110,7 +109,7 @@ async def delete_collection_cmd_impl(
 async def list_records_cmd_impl(
     self: "Mnemosyne",
     event: AstrMessageEvent,
-    collection_name: Optional[str] = None,
+    collection_name: str | None = None,
     limit: int = 5,
 ):
     """[实现] 查询指定集合的最新记忆记录 (按创建时间倒序，自动获取最新)"""
@@ -130,11 +129,13 @@ async def list_records_cmd_impl(
     try:
         # 确保 limit 是整数类型
         limit = int(limit)
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError):
         yield event.plain_result(f"⚠️ limit 参数必须是有效的整数，当前值: {limit}")
-        self.logger.warning(f"用户提供了无效的 limit 参数: {limit} (类型: {type(limit).__name__})")
+        self.logger.warning(
+            f"用户提供了无效的 limit 参数: {limit} (类型: {type(limit).__name__})"
+        )
         return
-    
+
     # 验证范围
     if limit <= 0 or limit > 50:
         # 限制用户请求的显示数量
@@ -153,15 +154,15 @@ async def list_records_cmd_impl(
                 yield event.plain_result("⚠️ 会话 ID 格式无效，无法查询记录。")
                 self.logger.warning(f"尝试使用无效的 session_id 查询记录: {session_id}")
                 return
-            
+
             # 如果有会话ID，则按会话ID过滤（使用安全的表达式构建）
             try:
-                expr = safe_build_milvus_expression('session_id', session_id, 'in')
+                expr = safe_build_milvus_expression("session_id", session_id, "in")
             except ValueError as e:
                 yield event.plain_result(f"⚠️ 构建查询表达式失败: {e}")
                 self.logger.error(f"构建查询表达式时出错: {e}")
                 return
-            
+
             self.logger.info(
                 f"将按会话 ID '{session_id}' 过滤并查询所有相关记录 (上限 {MAX_TOTAL_FETCH_RECORDS} 条)。"
             )
@@ -314,7 +315,7 @@ async def delete_session_memory_cmd_impl(
     self: "Mnemosyne",
     event: AstrMessageEvent,
     session_id: str,
-    confirm: Optional[str] = None,
+    confirm: str | None = None,
 ):
     """[实现] 删除指定会话 ID 相关的所有记忆信息"""
     if not self.milvus_manager or not self.milvus_manager.is_connected():
@@ -326,7 +327,7 @@ async def delete_session_memory_cmd_impl(
         return
 
     session_id_to_delete = session_id.strip().strip('"`')
-    
+
     # 安全检查：验证 session_id 格式，防止SQL注入
     if not validate_session_id(session_id_to_delete):
         yield event.plain_result("⚠️ 会话 ID 格式无效，无法执行删除操作。")
@@ -344,15 +345,17 @@ async def delete_session_memory_cmd_impl(
 
     try:
         collection_name = self.collection_name
-        
+
         # 使用安全的表达式构建方法，防止注入
         try:
-            expr = safe_build_milvus_expression('session_id', session_id_to_delete, '==')
+            expr = safe_build_milvus_expression(
+                "session_id", session_id_to_delete, "=="
+            )
         except ValueError as e:
             yield event.plain_result(f"⚠️ 构建删除表达式失败: {e}")
             self.logger.error(f"构建删除表达式时出错: {e}")
             return
-        
+
         sender_id = event.get_sender_id()
         self.logger.warning(
             f"管理员 {sender_id} 请求删除会话 '{session_id_to_delete}' 的所有记忆 (集合: {collection_name}, 表达式: '{expr}') (确认执行)"

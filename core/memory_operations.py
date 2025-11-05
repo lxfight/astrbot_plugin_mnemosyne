@@ -1,36 +1,35 @@
-# -*- coding: utf-8 -*-
 """
 Mnemosyne 插件核心记忆操作逻辑
 包括 RAG 查询、LLM 响应处理、记忆总结与存储。
 """
 
-import time
 import asyncio
+import time
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Dict, Optional, Any
+from typing import TYPE_CHECKING, Any
 
-from astrbot.api.provider import LLMResponse, ProviderRequest
-from astrbot.api.event import AstrMessageEvent
 from pymilvus.exceptions import MilvusException
 
-from .tools import (
-    remove_mnemosyne_tags,
-    remove_system_mnemosyne_tags,
-    remove_system_content,
-    format_context_to_string,
-)
+from astrbot.api.event import AstrMessageEvent
+from astrbot.api.provider import LLMResponse, ProviderRequest
 
 # 导入必要的类型和模块
 from .constants import (
-    VECTOR_FIELD_NAME,
-    DEFAULT_TOP_K,
     DEFAULT_MILVUS_TIMEOUT,
     DEFAULT_PERSONA_ON_NONE,
+    DEFAULT_TOP_K,
+    VECTOR_FIELD_NAME,
 )
 from .security_utils import (
-    validate_session_id,
-    validate_personality_id,
     safe_build_milvus_expression,
+    validate_personality_id,
+    validate_session_id,
+)
+from .tools import (
+    format_context_to_string,
+    remove_mnemosyne_tags,
+    remove_system_content,
+    remove_system_mnemosyne_tags,
 )
 
 # 类型提示，避免循环导入
@@ -63,8 +62,14 @@ async def handle_query_memory(
         )
 
         # M12 修复: 加强 session_id 空值检查，确保类型和内容都有效
-        if session_id is None or not isinstance(session_id, str) or not session_id.strip():
-            logger.error(f"无法获取有效的 session_id (值: {session_id}, 类型: {type(session_id).__name__})，跳过记忆查询操作")
+        if (
+            session_id is None
+            or not isinstance(session_id, str)
+            or not session_id.strip()
+        ):
+            logger.error(
+                f"无法获取有效的 session_id (值: {session_id}, 类型: {type(session_id).__name__})，跳过记忆查询操作"
+            )
             return
 
         # 检查 context_manager 和 msg_counter 是否可用
@@ -90,12 +95,17 @@ async def handle_query_memory(
             # 1. 向量化用户查询
             # 使用 AstrBot EmbeddingProvider（异步）
             try:
-                if not plugin.embedding_provider:
+                # 等待 Embedding Provider 就绪
+                if not plugin.embedding_provider and not plugin._embedding_provider_ready:
                     logger.warning("Embedding Provider 不可用，无法执行 RAG 搜索")
                     return
 
                 # 使用 AstrBot EmbeddingProvider 的 embed 方法
-                query_vector = await plugin.embedding_provider.embed(req.prompt)
+                if plugin.embedding_provider:
+                    query_vector = await plugin.embedding_provider.get_embedding(req.prompt)
+                else:
+                    logger.error("Embedding Provider 未正确初始化")
+                    return
 
                 if not query_vector:
                     logger.error("无法获取用户查询的 Embedding 向量。")
@@ -191,7 +201,8 @@ async def _check_rag_prerequisites(plugin: "Mnemosyne") -> bool:
     if not plugin.milvus_manager.is_connected():
         logger.warning("Milvus 服务未连接，无法查询长期记忆。")
         return False
-    if not plugin.embedding_provider:
+    # 检查 Embedding Provider 是否就绪，支持延迟加载
+    if not plugin.embedding_provider and not plugin._embedding_provider_ready:
         logger.warning("Embedding Provider 未初始化，部分功能可能受限。")
         return False
     if not plugin.msg_counter:
@@ -200,9 +211,7 @@ async def _check_rag_prerequisites(plugin: "Mnemosyne") -> bool:
     return True
 
 
-async def _get_persona_id(
-    plugin: "Mnemosyne", event: AstrMessageEvent
-) -> Optional[str]:
+async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str | None:
     """
     获取当前会话的人格 ID。
 
@@ -218,7 +227,7 @@ async def _get_persona_id(
         event.unified_msg_origin
     )
     conversation = await plugin.context.conversation_manager.get_conversation(
-        event.unified_msg_origin, session_id
+        event.unified_msg_origin, str(session_id)
     )
     persona_id = conversation.persona_id if conversation else None
 
@@ -247,8 +256,8 @@ async def _get_persona_id(
 async def _check_and_trigger_summary(
     plugin: "Mnemosyne",
     session_id: str,
-    context: List[Dict],
-    persona_id: Optional[str],
+    context: list[dict],
+    persona_id: str | None,
 ):
     """
     检查是否满足总结条件并触发总结任务。
@@ -273,7 +282,7 @@ async def _check_and_trigger_summary(
         task = asyncio.create_task(
             handle_summary_long_memory(plugin, persona_id, session_id, history_contents)
         )
-        
+
         def task_done_callback(t: asyncio.Task):
             """后台任务完成时的回调，用于捕获未处理的异常"""
             try:
@@ -282,8 +291,10 @@ async def _check_and_trigger_summary(
             except asyncio.CancelledError:
                 logger.info(f"总结任务被取消 (session: {session_id})")
             except Exception as e:
-                logger.error(f"后台总结任务执行失败 (session: {session_id}): {e}", exc_info=True)
-        
+                logger.error(
+                    f"后台总结任务执行失败 (session: {session_id}): {e}", exc_info=True
+                )
+
         task.add_done_callback(task_done_callback)
         logger.info("总结历史对话任务已提交到后台执行。")
         plugin.msg_counter.reset_counter(session_id)
@@ -291,10 +302,10 @@ async def _check_and_trigger_summary(
 
 async def _perform_milvus_search(
     plugin: "Mnemosyne",
-    query_vector: List[float],
-    session_id: Optional[str],
-    persona_id: Optional[str],
-) -> Optional[List[Dict]]:
+    query_vector: list[float],
+    session_id: str | None,
+    persona_id: str | None,
+) -> list[dict] | None:
     """
     执行 Milvus 向量搜索。
 
@@ -310,16 +321,18 @@ async def _perform_milvus_search(
     # logger = plugin.logger
     # 防止没有过滤条件引发的潜在错误
     filters = ["memory_id > 0"]
-    
+
     if session_id:
         # 安全检查：验证 session_id 格式
         if not validate_session_id(session_id):
             logger.error(f"session_id 格式验证失败: {session_id}")
             return None
-        
+
         # 使用安全的表达式构建方法
         try:
-            session_filter = safe_build_milvus_expression('session_id', session_id, '==')
+            session_filter = safe_build_milvus_expression(
+                "session_id", session_id, "=="
+            )
             filters.append(session_filter)
         except ValueError as e:
             logger.error(f"构建 session_id 过滤表达式失败: {e}")
@@ -332,13 +345,19 @@ async def _perform_milvus_search(
     if use_personality_filtering and effective_persona_id_for_filter:
         # 安全检查：验证 personality_id 格式
         if not validate_personality_id(effective_persona_id_for_filter):
-            logger.warning(f"personality_id 格式验证失败: {effective_persona_id_for_filter}，跳过人格过滤")
+            logger.warning(
+                f"personality_id 格式验证失败: {effective_persona_id_for_filter}，跳过人格过滤"
+            )
         else:
             # 使用安全的表达式构建方法
             try:
-                persona_filter = safe_build_milvus_expression('personality_id', effective_persona_id_for_filter, '==')
+                persona_filter = safe_build_milvus_expression(
+                    "personality_id", effective_persona_id_for_filter, "=="
+                )
                 filters.append(persona_filter)
-                logger.debug(f"将使用人格 '{effective_persona_id_for_filter}' 过滤记忆。")
+                logger.debug(
+                    f"将使用人格 '{effective_persona_id_for_filter}' 过滤记忆。"
+                )
             except ValueError as e:
                 logger.error(f"构建 personality_id 过滤表达式失败: {e}")
     elif use_personality_filtering:
@@ -390,7 +409,7 @@ async def _perform_milvus_search(
         return detailed_results
 
 
-def _process_milvus_hits(hits) -> List[Dict[str, Any]]:
+def _process_milvus_hits(hits) -> list[dict[str, Any]]:
     """
     处理 Milvus SearchResults 中的 Hits 对象，使用基于索引的遍历方式
     提取有效的记忆实体数据。
@@ -402,7 +421,7 @@ def _process_milvus_hits(hits) -> List[Dict[str, Any]]:
         一个包含提取到的记忆实体字典的列表。如果没有任何有效实体被提取，
         则返回空列表 []。
     """
-    detailed_results: List[Dict[str, Any]] = []  # 初始化结果列表，指定类型
+    detailed_results: list[dict[str, Any]] = []  # 初始化结果列表，指定类型
 
     # 使用索引遍历 hits 对象，以绕过 SequenceIterator 的迭代问题
     if hits:  # 确保 hits 对象不是空的或 None
@@ -453,7 +472,7 @@ def _process_milvus_hits(hits) -> List[Dict[str, Any]]:
 
 # LLM 响应处理相关函数
 def _format_and_inject_memory(
-    plugin: "Mnemosyne", detailed_results: List[Dict], req: ProviderRequest
+    plugin: "Mnemosyne", detailed_results: list[dict], req: ProviderRequest
 ):
     """
     格式化搜索结果并注入到 ProviderRequest 中。
@@ -561,7 +580,7 @@ async def _check_summary_prerequisites(plugin: "Mnemosyne", memory_text: str) ->
 
 async def _get_summary_llm_response(
     plugin: "Mnemosyne", memory_text: str
-) -> Optional[LLMResponse]:
+) -> LLMResponse | None:
     """
     请求 LLM 进行记忆总结。
 
@@ -609,9 +628,7 @@ async def _get_summary_llm_response(
         return None
 
 
-def _extract_summary_text(
-    plugin: "Mnemosyne", llm_response: LLMResponse
-) -> Optional[str]:
+def _extract_summary_text(plugin: "Mnemosyne", llm_response: LLMResponse) -> str | None:
     """
     从 LLM 响应中提取总结文本并进行校验。
 
@@ -645,10 +662,10 @@ def _extract_summary_text(
 
 async def _store_summary_to_milvus(
     plugin: "Mnemosyne",
-    persona_id: Optional[str],
+    persona_id: str | None,
     session_id: str,
     summary_text: str,
-    embedding_vector: List[float],
+    embedding_vector: list[float],
 ):
     """
     将总结文本和向量存储到 Milvus 中。
@@ -702,9 +719,11 @@ async def _store_summary_to_milvus(
     finally:
         # 确保资源清理和错误日志记录
         if mutation_result is None:
-            logger.error(f"Milvus 插入操作失败，未返回结果。集合: {collection_name}, 数据: {summary_text[:100]}...")
+            logger.error(
+                f"Milvus 插入操作失败，未返回结果。集合: {collection_name}, 数据: {summary_text[:100]}..."
+            )
         else:
-            logger.debug(f"Milvus 插入操作完成，正在进行资源清理。")
+            logger.debug("Milvus 插入操作完成，正在进行资源清理。")
 
     if mutation_result and mutation_result.insert_count > 0:
         inserted_ids = mutation_result.primary_keys
@@ -733,7 +752,7 @@ async def _store_summary_to_milvus(
 
 
 async def handle_summary_long_memory(
-    plugin: "Mnemosyne", persona_id: Optional[str], session_id: str, memory_text: str
+    plugin: "Mnemosyne", persona_id: str | None, session_id: str, memory_text: str
 ):
     """
     使用 LLM 总结短期对话历史形成长期记忆，并将其向量化后存入 Milvus。
@@ -796,17 +815,17 @@ async def handle_summary_long_memory(
 async def _periodic_summarization_check(plugin: "Mnemosyne"):
     """
     [后台任务] 定期检查并触发超时的会话总结
-    
+
     S0 优化: 添加异常恢复机制，防止任务崩溃
     """
     logger.info(
         f"启动定期总结检查任务，检查间隔: {plugin.summary_check_interval}秒, 总结时间阈值: {plugin.summary_time_threshold}秒。"
     )
-    
+
     # S0 优化: 异常恢复计数器
     consecutive_errors = 0
     max_consecutive_errors = 5
-    
+
     while True:
         try:
             await asyncio.sleep(plugin.summary_check_interval)  # <--- 等待指定间隔
@@ -866,7 +885,7 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                     logger.error(
                         f"检查或总结会话 {session_id} 时发生错误: {e}", exc_info=True
                     )
-            
+
             # S0 优化: 成功完成一次循环，重置错误计数器
             consecutive_errors = 0
 
@@ -878,19 +897,21 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
             consecutive_errors += 1
             logger.error(
                 f"定期总结检查任务主循环发生错误 (连续错误次数: {consecutive_errors}/{max_consecutive_errors}): {e}",
-                exc_info=True
+                exc_info=True,
             )
-            
+
             # 指数退避策略：等待时间随错误次数增加
-            backoff_time = min(plugin.summary_check_interval * (2 ** (consecutive_errors - 1)), 300)
+            backoff_time = min(
+                plugin.summary_check_interval * (2 ** (consecutive_errors - 1)), 300
+            )
             logger.warning(f"将在 {backoff_time} 秒后重试后台总结任务...")
-            
+
             try:
                 await asyncio.sleep(backoff_time)
             except asyncio.CancelledError:
                 logger.info("等待重试期间任务被取消。")
                 break
-            
+
             # 如果连续错误次数过多，记录严重警告但继续尝试
             if consecutive_errors >= max_consecutive_errors:
                 logger.critical(

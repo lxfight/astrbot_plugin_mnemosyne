@@ -1,34 +1,30 @@
-# -*- coding: utf-8 -*-
 """
 Mnemosyne 插件初始化逻辑
 包含配置加载、Schema 定义、Milvus 连接和设置、其他组件初始化等。
 """
 
-from typing import TYPE_CHECKING
-import asyncio
-import re
 import platform
-from pymilvus import CollectionSchema, FieldSchema, DataType
+from typing import TYPE_CHECKING
 
-from astrbot.core.log import LogManager
+from pymilvus import CollectionSchema, DataType, FieldSchema
+
 from astrbot.api.star import StarTools
+from astrbot.core.log import LogManager
+
+from ..memory_manager.context_manager import ConversationContextManager
+from ..memory_manager.message_counter import MessageCounter
+from ..memory_manager.vector_db.milvus_adapter import MilvusVectorDB
+from ..memory_manager.vector_db.milvus_manager import MilvusManager
 
 # 导入必要的类型和模块
 from .constants import (
     DEFAULT_COLLECTION_NAME,
     DEFAULT_EMBEDDING_DIM,
+    DEFAULT_OUTPUT_FIELDS,
     PRIMARY_FIELD_NAME,
     VECTOR_FIELD_NAME,
-    DEFAULT_OUTPUT_FIELDS,
 )
 from .tools import parse_address
-from .security_utils import create_safe_error_response
-
-from ..memory_manager.message_counter import MessageCounter
-from ..memory_manager.vector_db.milvus_manager import MilvusManager
-from ..memory_manager.vector_db.milvus_adapter import MilvusVectorDB
-from ..memory_manager.embedding import OpenAIEmbeddingAPI, GeminiEmbeddingAPI
-from ..memory_manager.context_manager import ConversationContextManager
 
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
@@ -41,7 +37,7 @@ init_logger = LogManager.GetLogger(log_name="MnemosyneInit")
 def initialize_config_check(plugin: "Mnemosyne"):
     """
     一些必要的参数检查可以放在这里
-    
+
     B0 修复: 修正配置验证逻辑
     """
     astrbot_config = plugin.context.get_config()
@@ -53,9 +49,7 @@ def initialize_config_check(plugin: "Mnemosyne"):
     ]
     # B0 修复: 修正验证逻辑，num_pairs 应该直接与 astrbot_max_context_length 比较
     # 因为 num_pairs 表示的是对话轮数，每轮包含用户和助手两条消息
-    if (
-        astrbot_max_context_length > 0 and num_pairs > astrbot_max_context_length
-    ):
+    if astrbot_max_context_length > 0 and num_pairs > astrbot_max_context_length:
         # 安全处理：不在异常消息中暴露具体配置值
         error_detail = f"num_pairs({num_pairs})不能大于astrbot的配置(最多携带对话数量):{astrbot_max_context_length}"
         init_logger.error(error_detail)
@@ -64,7 +58,9 @@ def initialize_config_check(plugin: "Mnemosyne"):
         )
     elif astrbot_max_context_length == 0:
         # 安全处理：不在异常消息中暴露具体配置值
-        error_detail = f"astrbot 的最大上下文长度配置值为 {astrbot_max_context_length}，必须大于0"
+        error_detail = (
+            f"astrbot 的最大上下文长度配置值为 {astrbot_max_context_length}，必须大于0"
+        )
         init_logger.error(error_detail)
         raise ValueError(
             "配置错误：AstrBot 的最大上下文长度必须大于0。请检查 AstrBot 配置文件中的 max_context_length 设置。"
@@ -84,6 +80,7 @@ def initialize_config_check(plugin: "Mnemosyne"):
             "配置错误：contexts_memory_len 的值超过了 AstrBot 的最大上下文长度限制。请检查配置文件。"
         )
     # ------ contexts_memory_len ------
+
 
 def initialize_config_and_schema(plugin: "Mnemosyne"):
     """解析配置、验证和定义模式/索引参数。"""
@@ -191,17 +188,19 @@ def initialize_milvus(plugin: "Mnemosyne"):
     注意：Windows 系统不支持 Milvus Lite，自动使用标准 Milvus。
     """
     init_logger.debug("开始初始化 Milvus 连接和设置...")
-    connect_args = {} # 用于收集传递给 MilvusManager 的参数
-    is_lite_mode = False # 标记是否为 Lite 模式
+    connect_args = {}  # 用于收集传递给 MilvusManager 的参数
+    is_lite_mode = False  # 标记是否为 Lite 模式
 
     # 检测操作系统：Windows 不支持 Milvus Lite
     is_windows = platform.system() == "Windows"
     if is_windows:
-        init_logger.info("检测到 Windows 系统，Milvus Lite 不支持 Windows，将使用标准 Milvus")
+        init_logger.info(
+            "检测到 Windows 系统，Milvus Lite 不支持 Windows，将使用标准 Milvus"
+        )
 
     try:
         # 1. 优先检查 Milvus Lite 配置（仅在非 Windows 系统上）
-        lite_path = plugin.config.get("milvus_lite_path","") if not is_windows else ""
+        lite_path = plugin.config.get("milvus_lite_path", "") if not is_windows else ""
 
         # 2. 获取标准 Milvus 的地址配置
         milvus_address = plugin.config.get("address")
@@ -212,11 +211,15 @@ def initialize_milvus(plugin: "Mnemosyne"):
             connect_args["lite_path"] = lite_path
             is_lite_mode = True
             if milvus_address:
-                init_logger.warning(f"同时配置了 'milvus_lite_path' 和 'address'，将优先使用 Lite 路径，忽略 'address' ('{milvus_address}')。")
+                init_logger.warning(
+                    f"同时配置了 'milvus_lite_path' 和 'address'，将优先使用 Lite 路径，忽略 'address' ('{milvus_address}')。"
+                )
 
         elif milvus_address:
             # --- 未配置 Lite 路径或为 Windows 系统，使用标准 Milvus 地址 ---
-            init_logger.info(f"将根据 'address' 配置连接标准 Milvus: '{milvus_address}'")
+            init_logger.info(
+                f"将根据 'address' 配置连接标准 Milvus: '{milvus_address}'"
+            )
             is_lite_mode = False
             # 判断 address 是 URI 还是 host:port
             if milvus_address.startswith(("http://", "https://", "unix:")):
@@ -225,7 +228,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
             else:
                 init_logger.debug(f"地址 '{milvus_address}' 将被解析为 host:port。")
                 try:
-                    host, port = parse_address(milvus_address) # 使用工具函数解析
+                    host, port = parse_address(milvus_address)  # 使用工具函数解析
                     connect_args["host"] = host
                     connect_args["port"] = port
                 except ValueError as e:
@@ -240,7 +243,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
 
         # 3. 添加通用参数 (对 Lite 和 Standard 都可能有效)
         #    添加数据库名称 (db_name)
-        db_name = plugin.config.get("db_name", "default") # 提供默认值 'default'
+        db_name = plugin.config.get("db_name", "default")  # 提供默认值 'default'
         # 只有当 db_name 不是 'default' 时才显式添加到参数中，以保持简洁
         if db_name != "default":
             connect_args["db_name"] = db_name
@@ -267,11 +270,11 @@ def initialize_milvus(plugin: "Mnemosyne"):
             for key in ["user", "password", "token", "secure"]:
                 if key in auth_config and auth_config[key] is not None:
                     # 特别处理 'secure'，确保它是布尔值
-                    if key == 'secure':
+                    if key == "secure":
                         value = auth_config[key]
                         if isinstance(value, str):
                             # 从字符串 'true'/'false' (不区分大小写) 转为布尔值
-                            secure_bool = value.lower() == 'true'
+                            secure_bool = value.lower() == "true"
                         else:
                             # 尝试直接转为布尔值
                             secure_bool = bool(value)
@@ -280,55 +283,70 @@ def initialize_milvus(plugin: "Mnemosyne"):
                     else:
                         connect_args[key] = auth_config[key]
                         # 安全处理：永远不记录 password 和 token 的真实值
-                        if key not in ['password', 'token']:
+                        if key not in ["password", "token"]:
                             added_auth_params.append(f"{key}={auth_config[key]}")
                         else:
                             # 使用脱敏处理，只显示配置项存在
-                            added_auth_params.append(f"{key}=***") # 隐藏敏感值
+                            added_auth_params.append(f"{key}=***")  # 隐藏敏感值
 
             if added_auth_params:
-                init_logger.info(f"从配置中添加了标准连接参数: {', '.join(added_auth_params)}")
+                init_logger.info(
+                    f"从配置中添加了标准连接参数: {', '.join(added_auth_params)}"
+                )
             else:
                 init_logger.debug("未找到额外的认证或安全配置。")
 
-        else: # is_lite_mode is True
+        else:  # is_lite_mode is True
             # 检查并警告：如果在 Lite 模式下配置了不适用的参数
             auth_config = plugin.config.get("authentication", {})
-            ignored_keys = [k for k in ["user", "password", "token", "secure"] if k in auth_config and auth_config[k] is not None]
+            ignored_keys = [
+                k
+                for k in ["user", "password", "token", "secure"]
+                if k in auth_config and auth_config[k] is not None
+            ]
             if ignored_keys:
-                init_logger.warning(f"当前为 Milvus Lite 模式，配置中的以下认证/安全参数将被忽略: {ignored_keys}")
-
+                init_logger.warning(
+                    f"当前为 Milvus Lite 模式，配置中的以下认证/安全参数将被忽略: {ignored_keys}"
+                )
 
         # 5. 选择使用 MilvusManager 或 MilvusVectorDB
         use_adapter = plugin.config.get("use_milvus_adapter", False)
-        
+
         # 安全处理：创建用于日志记录的参数副本，敏感信息脱敏
         loggable_connect_args = {}
         for k, v in connect_args.items():
-            if k in ['password', 'token']:
-                loggable_connect_args[k] = '***'  # 完全隐藏敏感值
+            if k in ["password", "token"]:
+                loggable_connect_args[k] = "***"  # 完全隐藏敏感值
             else:
                 loggable_connect_args[k] = v
-        
+
         if use_adapter:
             # 使用新的 MilvusVectorDB 适配器
-            init_logger.info(f"准备使用以下参数初始化 MilvusVectorDB 适配器: {loggable_connect_args}")
+            init_logger.info(
+                f"准备使用以下参数初始化 MilvusVectorDB 适配器: {loggable_connect_args}"
+            )
             plugin.milvus_adapter = MilvusVectorDB(**connect_args)
 
             # 不再在初始化时检查连接，而是延迟到首次使用时
             if not plugin.milvus_adapter:
-                raise RuntimeError(
-                    f"创建 MilvusVectorDB 适配器实例失败。请检查配置。"
-                )
+                raise RuntimeError("创建 MilvusVectorDB 适配器实例失败。请检查配置。")
 
-            mode_name = "Milvus Lite" if plugin.milvus_adapter._manager._is_lite else "标准 Milvus"
-            init_logger.info(f"MilvusVectorDB 适配器已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。")
+            mode_name = (
+                "Milvus Lite"
+                if plugin.milvus_adapter._manager._is_lite
+                else "标准 Milvus"
+            )
+            init_logger.info(
+                f"MilvusVectorDB 适配器已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。"
+            )
 
             # 为了向后兼容，将适配器的 manager 赋值给 milvus_manager
             plugin.milvus_manager = plugin.milvus_adapter._manager
         else:
             # 使用原始的 MilvusManager（默认，保持向后兼容）
-            init_logger.info(f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}")
+            init_logger.info(
+                f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}"
+            )
 
             # 创建 MilvusManager 实例
             # 注意：不在初始化时立即连接，而是延迟到首次使用时连接
@@ -338,12 +356,14 @@ def initialize_milvus(plugin: "Mnemosyne"):
             # 6. 不再在初始化时检查连接，而是记录已准备好
             if not plugin.milvus_manager:
                 mode_name = "Milvus Lite" if is_lite_mode else "标准 Milvus"
-                raise RuntimeError(
-                    f"创建 MilvusManager 实例失败。请检查配置。"
-                )
+                raise RuntimeError("创建 MilvusManager 实例失败。请检查配置。")
 
-            mode_name = "Milvus Lite" if plugin.milvus_manager._is_lite else "标准 Milvus"
-            init_logger.info(f"MilvusManager 已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。")
+            mode_name = (
+                "Milvus Lite" if plugin.milvus_manager._is_lite else "标准 Milvus"
+            )
+            init_logger.info(
+                f"MilvusManager 已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。"
+            )
 
         # 7. 设置集合和索引
         init_logger.debug("开始设置 Milvus 集合和索引...")
@@ -353,7 +373,9 @@ def initialize_milvus(plugin: "Mnemosyne"):
         init_logger.debug("Milvus 初始化流程成功完成。")
 
     except Exception as e:
-        init_logger.error(f"Milvus 初始化或设置过程中发生错误: {e}", exc_info=True) # exc_info=True 会记录堆栈跟踪
+        init_logger.error(
+            f"Milvus 初始化或设置过程中发生错误: {e}", exc_info=True
+        )  # exc_info=True 会记录堆栈跟踪
         plugin.milvus_manager = None  # 确保在初始化失败时 manager 被设为 None
         # 不再抛出异常，允许插件以降级模式运行
 
@@ -362,17 +384,19 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
     """确保 Milvus 集合和索引存在并已加载。"""
     # 检查是否使用适配器
     use_adapter = plugin.config.get("use_milvus_adapter", False)
-    
+
     # 获取管理器实例
     manager = None
-    if use_adapter and hasattr(plugin, 'milvus_adapter'):
+    if use_adapter and hasattr(plugin, "milvus_adapter"):
         manager = plugin.milvus_adapter
-    elif hasattr(plugin, 'milvus_manager'):
+    elif hasattr(plugin, "milvus_manager"):
         manager = plugin.milvus_manager
-    
+
     if not manager or not plugin.collection_schema:
         init_logger.error("无法设置 Milvus 集合/索引：管理器或 Schema 未初始化。")
-        raise RuntimeError("MilvusManager/MilvusVectorDB 或 CollectionSchema 未准备好。")
+        raise RuntimeError(
+            "MilvusManager/MilvusVectorDB 或 CollectionSchema 未准备好。"
+        )
 
     collection_name = plugin.collection_name
 
@@ -388,7 +412,10 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
         # 根据使用的类型选择创建方法
         if use_adapter:
             # 使用适配器创建集合（需要将 CollectionSchema 转换为字典）
-            from ..memory_manager.vector_db.schema_utils import collection_schema_to_dict
+            from ..memory_manager.vector_db.schema_utils import (
+                collection_schema_to_dict,
+            )
+
             schema_dict = collection_schema_to_dict(plugin.collection_schema)
             manager.create_collection(collection_name, schema_dict)
         else:
@@ -403,29 +430,30 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
 
     # 确保集合已加载到内存中以供搜索
     init_logger.info(f"确保集合 '{collection_name}' 已加载到内存...")
-    if not manager.load_collection(collection_name):
-        # 加载失败可能是资源问题或索引未就绪，打印错误但可能允许插件继续（取决于容错策略）
-        init_logger.error(
-            f"加载集合 '{collection_name}' 失败。搜索功能可能无法正常工作或效率低下。"
-        )
-        # 可以考虑在这里抛出异常，如果加载是强制要求的话
-        # raise RuntimeError(f"加载 Milvus 集合 '{collection_name}' 失败。")
-    else:
-        init_logger.info(f"集合 '{collection_name}' 已成功加载。")
+    try:
+        if not manager.load_collection(collection_name):
+            # 加载失败可能是资源问题或索引未就绪，打印错误但允许插件继续
+            init_logger.error(
+                f"加载集合 '{collection_name}' 失败。搜索功能可能无法正常工作或效率低下。"
+            )
+        else:
+            init_logger.info(f"集合 '{collection_name}' 已成功加载。")
+    except Exception as e:
+        init_logger.warning(f"加载集合 '{collection_name}' 时出错: {e}。将在首次使用时重试加载。")
 
 
 def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
     """检查向量字段的索引是否存在，如果不存在则创建它。"""
     # 检查是否使用适配器
     use_adapter = plugin.config.get("use_milvus_adapter", False)
-    
+
     # 获取管理器实例
     manager = None
-    if use_adapter and hasattr(plugin, 'milvus_adapter'):
+    if use_adapter and hasattr(plugin, "milvus_adapter"):
         manager = plugin.milvus_adapter._manager  # 适配器内部的管理器
-    elif hasattr(plugin, 'milvus_manager'):
+    elif hasattr(plugin, "milvus_manager"):
         manager = plugin.milvus_manager
-    
+
     if not manager:
         return
 
@@ -502,8 +530,8 @@ def _migrate_data_if_needed(old_dir: str, new_dir: str):
         old_dir (str): 旧的数据目录路径
         new_dir (str): 新的数据目录路径
     """
-    from pathlib import Path
     import shutil
+    from pathlib import Path
 
     old_path = Path(old_dir)
     new_path = Path(new_dir)
@@ -548,16 +576,21 @@ def initialize_components(plugin: "Mnemosyne", plugin_data_dir=None):
             # 检查是否需要迁移旧数据
             # 旧的相对路径：./mnemosyne_data 或 mnemosyne_data
             from pathlib import Path
+
             old_relative_dir = Path("./mnemosyne_data")
             if old_relative_dir.exists() and Path(plugin_data_dir) != old_relative_dir:
                 init_logger.info("检测到旧的数据目录，启动数据迁移...")
                 _migrate_data_if_needed(str(old_relative_dir), plugin_data_dir)
 
             plugin.msg_counter = MessageCounter(plugin_data_dir=plugin_data_dir)
-            init_logger.debug(f"使用插件数据目录初始化 MessageCounter: {plugin_data_dir}")
+            init_logger.debug(
+                f"使用插件数据目录初始化 MessageCounter: {plugin_data_dir}"
+            )
         except RuntimeError as e:
             # 如果获取失败，使用 MessageCounter 的后备机制
-            init_logger.warning(f"无法获取数据目录，将使用 MessageCounter 的后备方案: {e}")
+            init_logger.warning(
+                f"无法获取数据目录，将使用 MessageCounter 的后备方案: {e}"
+            )
             plugin.msg_counter = MessageCounter()
 
         init_logger.info("消息计数器和上下文管理器初始化成功。")
@@ -580,14 +613,14 @@ def check_schema_consistency(
     """
     # 检查是否使用适配器
     use_adapter = plugin.config.get("use_milvus_adapter", False)
-    
+
     # 获取管理器实例
     manager = None
-    if use_adapter and hasattr(plugin, 'milvus_adapter'):
+    if use_adapter and hasattr(plugin, "milvus_adapter"):
         manager = plugin.milvus_adapter._manager  # 适配器内部的管理器
-    elif hasattr(plugin, 'milvus_manager'):
+    elif hasattr(plugin, "milvus_manager"):
         manager = plugin.milvus_manager
-    
+
     if not manager or not manager.has_collection(collection_name):
         # init_logger.info(f"集合 '{collection_name}' 不存在，无需检查一致性。")
         return True  # 没有可供比较的现有集合

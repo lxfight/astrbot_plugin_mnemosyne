@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
 """
 Mnemosyne 插件工具函数
 """
 
 import functools
 import re
-from typing import List, Dict, Set, Union
 from urllib.parse import urlparse
 
 from astrbot.api.event import AstrMessageEvent
@@ -47,8 +45,8 @@ def content_to_str(func):
 
 
 def remove_mnemosyne_tags(
-    contents: List[Dict[str, str]], contexts_memory_len: int = 0
-) -> List[Dict[str, str]]:
+    contents: list[dict[str, str]], contexts_memory_len: int = 0
+) -> list[dict[str, str]]:
     """
     使用正则表达式去除LLM上下文中的<mnemosyne> </mnemosyne>标签对。
     - contexts_memory_len > 0: 保留最新的N个标签对。
@@ -59,7 +57,7 @@ def remove_mnemosyne_tags(
         return contents
 
     compiled_regex = re.compile(r"<Mnemosyne>.*?</Mnemosyne>", re.DOTALL)
-    cleaned_contents: List[Dict[str, str]] = []
+    cleaned_contents: list[dict[str, str]] = []
 
     if contexts_memory_len == 0:
         for content_item in contents:
@@ -72,7 +70,7 @@ def remove_mnemosyne_tags(
             else:
                 cleaned_contents.append(content_item)
     else:  # contexts_memory_len > 0
-        all_mnemosyne_blocks: List[str] = []
+        all_mnemosyne_blocks: list[str] = []
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
@@ -80,7 +78,7 @@ def remove_mnemosyne_tags(
                     found_blocks = compiled_regex.findall(original_text)
                     all_mnemosyne_blocks.extend(found_blocks)
 
-        blocks_to_keep: Set[str] = set(all_mnemosyne_blocks[-contexts_memory_len:])
+        blocks_to_keep: set[str] = set(all_mnemosyne_blocks[-contexts_memory_len:])
 
         def replace_logic(match: re.Match) -> str:
             block = match.group(0)
@@ -89,7 +87,7 @@ def remove_mnemosyne_tags(
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
-                
+
                 # M14 修复: 改进逻辑流程，确保正确处理各种情况
                 # 使用 elif 形成互斥逻辑，避免重复处理
                 if isinstance(original_text, list):
@@ -100,13 +98,17 @@ def remove_mnemosyne_tags(
                     if compiled_regex.search(original_text):
                         # 内容包含标签，进行清理
                         cleaned_text = compiled_regex.sub(replace_logic, original_text)
-                        cleaned_contents.append({"role": "user", "content": cleaned_text})
+                        cleaned_contents.append(
+                            {"role": "user", "content": cleaned_text}
+                        )
                     else:
                         # 内容不包含标签，直接保留
                         cleaned_contents.append(content_item)
                 else:
                     # 3. 其他类型（不应该出现），记录警告并保留原始内容
-                    logger.warning(f"遇到意外的 content 类型: {type(original_text).__name__}，将保留原始内容")
+                    logger.warning(
+                        f"遇到意外的 content 类型: {type(original_text).__name__}，将保留原始内容"
+                    )
                     cleaned_contents.append(content_item)
             else:
                 # 非 user 角色的消息，直接保留
@@ -131,8 +133,8 @@ def remove_system_mnemosyne_tags(text: str, contexts_memory_len: int = 0) -> str
     if contexts_memory_len == 0:
         cleaned_text = compiled_regex.sub("", text)
     else:
-        all_mnemosyne_blocks: List[str] = compiled_regex.findall(text)
-        blocks_to_keep: Set[str] = set(all_mnemosyne_blocks[-contexts_memory_len:])
+        all_mnemosyne_blocks: list[str] = compiled_regex.findall(text)
+        blocks_to_keep: set[str] = set(all_mnemosyne_blocks[-contexts_memory_len:])
 
         def replace_logic(match: re.Match) -> str:
             block = match.group(0)
@@ -147,8 +149,8 @@ def remove_system_mnemosyne_tags(text: str, contexts_memory_len: int = 0) -> str
 
 
 def remove_system_content(
-    contents: List[Dict[str, str]], contexts_memory_len: int = 0
-) -> List[Dict[str, str]]:
+    contents: list[dict[str, str]], contexts_memory_len: int = 0
+) -> list[dict[str, str]]:
     """
     从LLM上下文中移除较旧的系统提示 ('role'='system' 的消息)，
     保留指定数量的最新的 system 消息，并维持整体消息顺序。
@@ -159,10 +161,11 @@ def remove_system_content(
         return contents
 
     system_message_indices = [
-        i for i, msg in enumerate(contents)
+        i
+        for i, msg in enumerate(contents)
         if isinstance(msg, dict) and msg.get("role") == "system"
     ]
-    indices_to_remove: Set[int] = set()
+    indices_to_remove: set[int] = set()
     num_system_messages = len(system_message_indices)
 
     if num_system_messages > contexts_memory_len:
@@ -177,7 +180,7 @@ def remove_system_content(
 
 
 def format_context_to_string(
-    context_history: List[Union[Dict[str, str], str]], length: int = 10
+    context_history: list[dict[str, str] | str], length: int = 10
 ) -> str:
     """
     从上下文历史记录中提取最后 'length' 条用户和AI的对话消息，
@@ -186,13 +189,13 @@ def format_context_to_string(
     if length <= 0:
         return ""
 
-    selected_contents: List[str] = []
+    selected_contents: list[str] = []
     count = 0
 
     for message in reversed(context_history):
         if count >= length:
             break
-            
+
         role = None
         content = None
 

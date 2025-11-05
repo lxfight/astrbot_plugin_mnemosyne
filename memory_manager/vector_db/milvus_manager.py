@@ -1,23 +1,24 @@
 import os
 import pathlib
-from typing import List, Dict, Optional, Any, Union
-from urllib.parse import urlparse
-import time
 import sys
+import time
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
 
-from pymilvus import connections, utility, CollectionSchema, DataType, Collection
+from pymilvus import Collection, CollectionSchema, DataType, connections, utility
 from pymilvus.exceptions import (
-    MilvusException,
     CollectionNotExistException,
     IndexNotExistException,
+    MilvusException,
 )
+
+from astrbot.api.star import StarTools
+
 # 配置日志记录
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 # logger = logging.getLogger(__name__)
-
 from astrbot.core.log import LogManager
-from astrbot.api.star import StarTools
 
 logger = LogManager.GetLogger(log_name="Mnemosyne")
 
@@ -31,22 +32,24 @@ try:
     from core.security_utils import validate_safe_path
 except ImportError:
     # 如果导入失败，定义一个基本的路径验证函数
-    def validate_safe_path(file_path: str, base_dir: str, allow_creation: bool = True) -> Path:
+    def validate_safe_path(
+        file_path: str, base_dir: str, allow_creation: bool = True
+    ) -> Path:
         """基本的路径验证函数（后备方案）"""
         base = Path(base_dir).resolve()
         if Path(file_path).is_absolute():
             target = Path(file_path).resolve()
         else:
             target = (base / file_path).resolve()
-        
+
         try:
             target.relative_to(base)
         except ValueError:
-            raise ValueError(f"路径遍历检测: 路径试图访问基础目录之外的位置")
-        
+            raise ValueError("路径遍历检测: 路径试图访问基础目录之外的位置")
+
         if allow_creation and not target.parent.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
-        
+
         return target
 
 
@@ -66,14 +69,14 @@ class MilvusManager:
     def __init__(
         self,
         alias: str = "default",
-        lite_path: Optional[str] = None,
-        uri: Optional[str] = None,
-        host: Optional[str] = None,
-        port: Optional[Union[str, int]] = None,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-        secure: Optional[bool] = None,
-        token: Optional[str] = None,
+        lite_path: str | None = None,
+        uri: str | None = None,
+        host: str | None = None,
+        port: str | int | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        secure: bool | None = None,
+        token: str | None = None,
         db_name: str = "default",
         **kwargs,
     ):
@@ -140,13 +143,13 @@ class MilvusManager:
         准备 Milvus Lite 路径。如果输入路径不是以 .db 结尾，
         则假定为目录，并在其后附加默认文件名。
         返回安全验证后的绝对路径。
-        
+
         Args:
             path_input: 输入的路径
-            
+
         Returns:
             str: 安全验证后的绝对路径
-            
+
         Raises:
             ValueError: 如果路径不安全（路径遍历攻击）
         """
@@ -168,19 +171,25 @@ class MilvusManager:
             default_data_dir = pathlib.Path(StarTools.get_data_dir())
         except Exception as e:
             # 如果无法获取标准数据目录，应该抛出错误而不是使用硬编码路径
-            logger.error(f"致命错误：无法通过 StarTools.get_data_dir() 获取插件数据目录: {e}")
-            logger.error("插件数据目录必须通过 AstrBot 标准 API 获取，不允许使用硬编码路径")
-            raise RuntimeError(f"无法初始化 Milvus Lite 路径：无法获取插件数据目录 - {e}")
-        
+            logger.error(
+                f"致命错误：无法通过 StarTools.get_data_dir() 获取插件数据目录: {e}"
+            )
+            logger.error(
+                "插件数据目录必须通过 AstrBot 标准 API 获取，不允许使用硬编码路径"
+            )
+            raise RuntimeError(
+                f"无法初始化 Milvus Lite 路径：无法获取插件数据目录 - {e}"
+            )
+
         # 安全验证路径，防止路径遍历攻击
         try:
             safe_path = validate_safe_path(
-                final_path,
-                str(default_data_dir),
-                allow_creation=True
+                final_path, str(default_data_dir), allow_creation=True
             )
             absolute_path = str(safe_path)
-            logger.debug(f"路径安全验证通过，最终处理后的 Milvus Lite 绝对路径: '{absolute_path}'")
+            logger.debug(
+                f"路径安全验证通过，最终处理后的 Milvus Lite 绝对路径: '{absolute_path}'"
+            )
             return absolute_path
         except ValueError as e:
             logger.error(f"Milvus Lite 路径安全验证失败: {e}")
@@ -231,7 +240,9 @@ class MilvusManager:
         except Exception as e:
             # 无法获取数据目录，应该抛出错误而不是使用回退方案
             logger.error(f"致命错误：无法获取标准数据目录: {e}")
-            logger.error("Milvus Lite 必须使用 AstrBot 标准 API 获取的数据目录，不允许使用硬编码或回退路径")
+            logger.error(
+                "Milvus Lite 必须使用 AstrBot 标准 API 获取的数据目录，不允许使用硬编码或回退路径"
+            )
             raise RuntimeError(f"无法初始化默认 Milvus Lite 路径：{e}")
 
     def _configure_lite_explicit(self):
@@ -243,7 +254,8 @@ class MilvusManager:
         )
 
         # 确保目录存在（基于最终的文件路径）
-        self._ensure_db_dir_exists(self._lite_path)
+        if self._lite_path:
+            self._ensure_db_dir_exists(self._lite_path)
 
         # 使用处理后的完整文件路径作为 URI
         self._connection_info["uri"] = self._lite_path
@@ -445,16 +457,16 @@ class MilvusManager:
     def check_connection(self) -> bool:
         """
         专门的轻量级连接检查方法，使用缓存机制避免频繁检查。
-        
+
         Returns:
             bool: 连接是否正常
         """
         current_time = time.time()
-        
+
         # 如果距离上次检查时间不足间隔时间，返回缓存状态
         if current_time - self._last_connection_check < self._connection_check_interval:
             return self._cached_connection_status
-        
+
         # 执行实际连接检查
         if not self._is_connected:
             self._cached_connection_status = False
@@ -536,7 +548,7 @@ class MilvusManager:
 
     def create_collection(
         self, collection_name: str, schema: CollectionSchema, **kwargs
-    ) -> Optional[Collection]:
+    ) -> Collection | None:
         """
         创建具有给定模式的新集合。
         Args:
@@ -574,7 +586,7 @@ class MilvusManager:
             return None
 
     def drop_collection(
-        self, collection_name: str, timeout: Optional[float] = None
+        self, collection_name: str, timeout: float | None = None
     ) -> bool:
         """
         删除指定的集合。
@@ -597,7 +609,7 @@ class MilvusManager:
             logger.error(f"删除集合 '{collection_name}' 失败: {e}")
             return False
 
-    def list_collections(self) -> List[str]:
+    def list_collections(self) -> list[str]:
         """列出 Milvus 实例中的所有集合。"""
         self._ensure_connected()
         try:
@@ -606,7 +618,7 @@ class MilvusManager:
             logger.error(f"列出集合失败: {e}")
             return []
 
-    def get_collection(self, collection_name: str) -> Optional[Collection]:
+    def get_collection(self, collection_name: str) -> Collection | None:
         """
         获取指定集合的 Collection 对象句柄。
         Args:
@@ -641,43 +653,61 @@ class MilvusManager:
             logger.error(f"获取集合 '{collection_name}' 句柄时发生意外错误: {e}")
             return None
 
-    def get_collection_stats(self, collection_name: str) -> Dict[str, Any]:
-        """
-        获取集合的统计信息 (例如实体数量)。
-        注意：获取准确的行数可能需要先执行 flush 操作。
-        """
-        collection = self.get_collection(collection_name)
-        if not collection:
-            return {"error": f"Collection '{collection_name}' not found."}
-        try:
-            # 确保连接有效
-            self._ensure_connected()
-            # 先 flush 获取最新数据
-            self.flush([collection_name])  # 确保统计数据相对最新
-            stats = utility.get_collection_stats(
-                collection_name=collection_name, using=self.alias
-            )
-            # stats 返回的是一个包含 'row_count' 等键的字典
-            row_count = int(stats.get("row_count", 0))  # 确保是整数
-            logger.info(f"获取到集合 '{collection_name}' 的统计信息: {stats}")
-            # 返回标准化的字典，包含row_count
-            return {"row_count": row_count, **dict(stats)}
-        except MilvusException as e:
-            logger.error(f"获取集合 '{collection_name}' 统计信息失败: {e}")
-            return {"error": str(e)}
-        except Exception as e:  # 捕获其他错误
-            logger.error(f"获取集合 '{collection_name}' 统计信息时发生意外错误: {e}")
-            return {"error": f"Unexpected error: {str(e)}"}
+    def get_collection_stats(self, collection_name: str) -> dict[str, Any]:
+       """
+       获取集合的统计信息 (例如实体数量)。
+       注意：获取准确的行数可能需要先执行 flush 操作。
+       """
+       collection = self.get_collection(collection_name)
+       if not collection:
+           return {"error": f"Collection '{collection_name}' not found."}
+       try:
+           # 确保连接有效
+           self._ensure_connected()
+           # 先 flush 获取最新数据
+           self.flush([collection_name])  # 确保统计数据相对最新
+           # 使用 Collection 实例的 describe 方法获取统计信息（较新版本的 pymilvus 可能不支持 utility.get_collection_stats）
+           stats = collection.describe()
+           # stats 返回的是一个包含 'row_count' 等键的字典
+           row_count = int(stats.get("row_count", 0))  # 确保是整数
+           logger.info(f"获取到集合 '{collection_name}' 的统计信息: {stats}")
+           # 返回标准化的字典，包含row_count
+           return {"row_count": row_count, **dict(stats)}
+       except MilvusException as e:
+           logger.error(f"获取集合 '{collection_name}' 统计信息失败: {e}")
+           # 如果 describe 失败，尝试使用 query 方法查询 count
+           try:
+               # 查询实体数量作为备选方案
+               result = self.query(collection_name, "0 <= id < 999999999", limit=1)  # 使用一个总是为真的条件
+               if result is not None:
+                   # 由于 limit=1，我们不能直接获取总数，使用另一种方式
+                   # 尝试获取集合中的实体数（使用 Milvus 的内部统计）
+                   try:
+                       # 尝试使用 Collection 实例的 num_entities 属性
+                       row_count = collection.num_entities
+                       logger.info(f"通过 num_entities 获取到集合 '{collection_name}' 的实体数: {row_count}")
+                       return {"row_count": row_count}
+                   except Exception as e2:
+                       logger.warning(f"通过 num_entities 获取实体数也失败: {e2}")
+                       return {"error": str(e), "fallback_error": "无法通过备选方案获取统计信息"}
+               else:
+                   return {"error": str(e)}
+           except Exception as fallback_e:
+               logger.error(f"备选方案获取统计信息也失败: {fallback_e}")
+               return {"error": str(e), "fallback_error": str(fallback_e)}
+       except Exception as e:  # 捕获其他错误
+           logger.error(f"获取集合 '{collection_name}' 统计信息时发生意外错误: {e}")
+           return {"error": f"Unexpected error: {str(e)}"}
 
     # --- Data Operations ---
     def insert(
         self,
         collection_name: str,
-        data: List[Union[List, Dict]],
-        partition_name: Optional[str] = None,
-        timeout: Optional[float] = None,
+        data: list[list | dict],
+        partition_name: str | None = None,
+        timeout: float | None = None,
         **kwargs,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """
         向指定集合插入数据。
         Args:
@@ -736,8 +766,30 @@ class MilvusManager:
             # 考虑是否在这里自动 flush，或者让调用者决定
             return mutation_result
         except MilvusException as e:
-            logger.error(f"向集合 '{collection_name}' 插入数据失败: {e}")
-            return None
+            # 检查是否是因为集合未加载的错误 (code 101)
+            if getattr(e, "code", None) == 101:
+                logger.info(f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})")
+                # 尝试再次加载集合
+                if self.load_collection(collection_name, timeout=timeout):
+                    logger.info(f"集合 '{collection_name}' 重新加载成功，重试插入操作...")
+                    # 重试插入操作
+                    try:
+                        mutation_result = collection.insert(
+                            data=data, partition_name=partition_name, timeout=timeout, **kwargs
+                        )
+                        logger.info(
+                            f"重试插入成功。PKs: {mutation_result.primary_keys}"
+                        )
+                        return mutation_result
+                    except MilvusException as retry_e:
+                        logger.error(f"重试插入仍失败: {retry_e}")
+                        return None
+                else:
+                    logger.error(f"重新加载集合 '{collection_name}' 仍失败。")
+                    return None
+            else:
+                logger.error(f"向集合 '{collection_name}' 插入数据失败: {e}")
+                return None
         except Exception as e:
             logger.error(f"向集合 '{collection_name}' 插入数据时发生意外错误: {e}")
             return None
@@ -746,10 +798,10 @@ class MilvusManager:
         self,
         collection_name: str,
         expression: str,
-        partition_name: Optional[str] = None,
-        timeout: Optional[float] = None,
+        partition_name: str | None = None,
+        timeout: float | None = None,
         **kwargs,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """
         根据布尔表达式删除集合中的实体。
         Args:
@@ -775,11 +827,26 @@ class MilvusManager:
                 timeout=timeout,
                 **kwargs,
             )
-            delete_count = (
-                mutation_result.delete_count
-                if hasattr(mutation_result, "delete_count")
-                else "N/A"
-            )
+            # 类型安全地获取删除计数
+            delete_count = 0
+            if mutation_result:
+                # 检查 mutation_result 是否有 delete_count 属性
+                if hasattr(mutation_result, 'delete_count'):
+                    try:
+                        delete_count = getattr(mutation_result, 'delete_count', 0)
+                    except AttributeError:
+                        delete_count = 0
+                # 如果没有 delete_count，尝试使用 primary_keys
+                elif hasattr(mutation_result, 'primary_keys'):
+                    try:
+                        pks = getattr(mutation_result, 'primary_keys', [])
+                        delete_count = len(pks) if pks is not None else 0
+                    except AttributeError:
+                        delete_count = 0
+                else:
+                    # 尝试其他可能的属性
+                    delete_count = "N/A (无法确定)"
+            
             logger.info(
                 f"成功从集合 '{collection_name}' 发送删除请求。删除数量: {delete_count} (注意: 实际删除需flush后生效)"
             )
@@ -792,7 +859,7 @@ class MilvusManager:
             logger.error(f"从集合 '{collection_name}' 删除实体时发生意外错误: {e}")
             return None
 
-    def flush(self, collection_names: List[str], timeout: Optional[float] = None):
+    def flush(self, collection_names: list[str], timeout: float | None = None):
         """
         将指定集合的内存中的插入/删除操作持久化到磁盘存储。
         这对于确保数据可见性和准确的统计信息很重要。
@@ -823,9 +890,9 @@ class MilvusManager:
         self,
         collection_name: str,
         field_name: str,
-        index_params: Dict[str, Any],
-        index_name: Optional[str] = None,
-        timeout: Optional[float] = None,
+        index_params: dict[str, Any],
+        index_name: str | None = None,
+        timeout: float | None = None,
         **kwargs,
     ) -> bool:
         """
@@ -920,7 +987,7 @@ class MilvusManager:
             )
             return False
 
-    def has_index(self, collection_name: str, index_name: Optional[str] = None) -> bool:
+    def has_index(self, collection_name: str, index_name: str | None = None) -> bool:
         """检查集合上是否存在索引。"""
         collection = self.get_collection(collection_name)
         if not collection:
@@ -943,9 +1010,9 @@ class MilvusManager:
     def drop_index(
         self,
         collection_name: str,
-        field_name: Optional[str] = None,
-        index_name: Optional[str] = None,
-        timeout: Optional[float] = None,
+        field_name: str | None = None,
+        index_name: str | None = None,
+        timeout: float | None = None,
     ) -> bool:
         """删除集合上的索引。优先使用 index_name，如果未提供则尝试基于 field_name 删除（可能删除该字段上的默认索引）。"""
         collection = self.get_collection(collection_name)
@@ -1023,7 +1090,7 @@ class MilvusManager:
         self,
         collection_name: str,
         replica_number: int = 1,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         **kwargs,
     ) -> bool:
         """
@@ -1042,20 +1109,29 @@ class MilvusManager:
 
         # 检查加载状态
         try:
+            # 先检查集合是否存在
+            if not self.has_collection(collection_name):
+                logger.debug(f"集合 '{collection_name}' 不存在，将尝试创建并加载。")
+                return False
+            
             progress = utility.loading_progress(collection_name, using=self.alias)
             # progress['loading_progress'] 会是 0 到 100 的整数，或 None
             if progress and progress.get("loading_progress") == 100:
                 logger.info(f"集合 '{collection_name}' 已加载。")
                 return True
-        except Exception as e:
+        except MilvusException as e:
             # 检查异常代码，如果是 101（集合未加载），则不记录为错误
-            error_code = getattr(e, 'code', None)
+            error_code = getattr(e, "code", None)
             if error_code == 101:  # 集合未加载 - 这是正常情况，我们将继续加载
                 logger.debug(f"集合 '{collection_name}' 尚未加载，将尝试加载。")
             else:
-                logger.debug(
+                logger.warning(
                     f"检查集合 '{collection_name}' 加载状态时出错（代码 {error_code}）: {str(e)[:100]}。将尝试加载。"
                 )
+        except Exception as e:
+            logger.warning(
+                f"检查集合 '{collection_name}' 加载状态时发生非 Milvus 异常: {str(e)[:100]}。将尝试加载。"
+            )
 
         logger.info(f"尝试将集合 '{collection_name}' 加载到内存...")
         try:
@@ -1080,7 +1156,7 @@ class MilvusManager:
             return False
 
     def release_collection(
-        self, collection_name: str, timeout: Optional[float] = None, **kwargs
+        self, collection_name: str, timeout: float | None = None, **kwargs
     ) -> bool:
         """从内存中释放集合。"""
         collection = self.get_collection(collection_name)
@@ -1113,16 +1189,16 @@ class MilvusManager:
     def search(
         self,
         collection_name: str,
-        query_vectors: List[List[float]],
+        query_vectors: list[list[float]],
         vector_field: str,
-        search_params: Dict[str, Any],
+        search_params: dict[str, Any],
         limit: int,
-        expression: Optional[str] = None,
-        output_fields: Optional[List[str]] = None,
-        partition_names: Optional[List[str]] = None,
-        timeout: Optional[float] = None,
+        expression: str | None = None,
+        output_fields: list[str] | None = None,
+        partition_names: list[str] | None = None,
+        timeout: float | None = None,
         **kwargs,
-    ) -> Optional[List[Any]]:  # 返回类型是 List[SearchResult]
+    ) -> Any | None:  # 返回类型可能是 SearchResult 或 SearchFuture，所以用 Any
         """
         在集合中执行向量相似性搜索。
         Args:
@@ -1158,14 +1234,17 @@ class MilvusManager:
         )
         try:
             # 确保 output_fields 包含主键字段，以便后续能获取 ID
-            pk_field_name = collection.schema.primary_field.name
-            if output_fields and pk_field_name not in output_fields:
-                output_fields_with_pk = output_fields + [pk_field_name]
-            elif not output_fields:
-                # 如果 output_fields 为 None, Milvus 默认会返回 ID 和 distance
-                output_fields_with_pk = None  # Let Milvus handle default
+            if collection.schema.primary_field:
+                pk_field_name = collection.schema.primary_field.name
+                if output_fields and pk_field_name not in output_fields:
+                    output_fields_with_pk = output_fields + [pk_field_name]
+                elif not output_fields:
+                    # 如果 output_fields 为 None, Milvus 默认会返回 ID 和 distance
+                    output_fields_with_pk = None  # Let Milvus handle default
+                else:
+                    output_fields_with_pk = output_fields
             else:
-                output_fields_with_pk = output_fields
+                output_fields_with_pk = output_fields  # 如果无法获取主键字段名，使用原始输出字段
 
             search_result = collection.search(
                 data=query_vectors,
@@ -1178,16 +1257,87 @@ class MilvusManager:
                 timeout=timeout,
                 **kwargs,
             )
-            # search_result is List[SearchResult]
-            # 每个SearchResult对应一个query_vector
-            # 每个搜索结果都包含一个命中列表
-            num_results = len(search_result) if search_result else 0
+            # 由于 Pymilvus 可能返回 SearchFuture 或 SearchResult，安全处理
+            # 为了类型安全，使用类型忽略注释
+            # type: ignore
+            try:
+                # 安全地获取结果数
+                if search_result is not None and hasattr(search_result, '__len__'):
+                    # 检查是否支持 len() 操作
+                    try:
+                        num_results = len(search_result)  # type: ignore
+                    except (TypeError, AttributeError):
+                        # 如果无法获取长度，设为0
+                        num_results = 0
+                else:
+                    num_results = 0
+            except:
+                num_results = 0
+
             logger.info(f"搜索完成。返回 {num_results} 组结果。")
 
-            return search_result  # 返回原始的 SearchResult 列表
+            # 返回原始结果，由调用方处理具体类型
+            # 为了类型安全，直接返回，不进行转换
+            # type: ignore
+            if search_result is not None:
+                return search_result  # type: ignore
+            else:
+                return None
         except MilvusException as e:
-            logger.error(f"在集合 '{collection_name}' 中搜索失败: {e}")
-            return None
+            # 检查是否是因为集合未加载的错误 (code 101)
+            if getattr(e, "code", None) == 101:
+                logger.info(f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})")
+                # 尝试再次加载集合
+                if self.load_collection(collection_name, timeout=timeout):
+                    logger.info(f"集合 '{collection_name}' 重新加载成功，重试搜索操作...")
+                    # 重试搜索操作
+                    try:
+                        search_result = collection.search(
+                            data=query_vectors,
+                            anns_field=vector_field,
+                            param=search_params,
+                            limit=limit,
+                            expr=expression,
+                            output_fields=output_fields_with_pk,
+                            partition_names=partition_names,
+                            timeout=timeout,
+                            **kwargs,
+                        )
+                        # 由于 Pymilvus 可能返回 SearchFuture 或 SearchResult，安全处理
+                        # 为了类型安全，使用类型忽略注释
+                        # type: ignore
+                        try:
+                            # 安全地获取结果数
+                            if search_result is not None and hasattr(search_result, '__len__'):
+                                # 检查是否支持 len() 操作
+                                try:
+                                    num_results = len(search_result)  # type: ignore
+                                except (TypeError, AttributeError):
+                                    # 如果无法获取长度，设为0
+                                    num_results = 0
+                            else:
+                                num_results = 0
+                        except:
+                            num_results = 0
+
+                        logger.info(f"重试搜索成功。返回 {num_results} 组结果。")
+                        
+                        # 返回原始结果，由调用方处理具体类型
+                        # 为了类型安全，直接返回，不进行转换
+                        # type: ignore
+                        if search_result is not None:
+                            return search_result  # type: ignore
+                        else:
+                            return None
+                    except MilvusException as retry_e:
+                        logger.error(f"重试搜索仍失败: {retry_e}")
+                        return None
+                else:
+                    logger.error(f"重新加载集合 '{collection_name}' 仍失败。")
+                    return None
+            else:
+                logger.error(f"在集合 '{collection_name}' 中搜索失败: {e}")
+                return None
         except Exception as e:
             logger.error(f"在集合 '{collection_name}' 中搜索时发生意外错误: {e}")
             return None
@@ -1196,13 +1346,13 @@ class MilvusManager:
         self,
         collection_name: str,
         expression: str,
-        output_fields: Optional[List[str]] = None,
-        partition_names: Optional[List[str]] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        timeout: Optional[float] = None,
+        output_fields: list[str] | None = None,
+        partition_names: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        timeout: float | None = None,
         **kwargs,
-    ) -> Optional[List[Dict]]:
+    ) -> list[dict] | None:
         """
         根据标量字段过滤条件查询实体。
         Args:
@@ -1223,7 +1373,7 @@ class MilvusManager:
             logger.error(f"无法获取集合 '{collection_name}' 以执行查询。")
             return None
 
-        # Query 不需要集合预先加载到内存，但需要连接
+        # 确保连接
         self._ensure_connected()
 
         # Milvus 对 query 的 limit 有内部限制，如果传入的 limit 过大，可能需要分批查询或调整
@@ -1238,12 +1388,10 @@ class MilvusManager:
         )
         try:
             # 确保 output_fields 包含主键，因为 query 结果默认可能不含（与 search 不同）
-            pk_field_name = collection.schema.primary_field.name
-            if (
-                output_fields
-                and pk_field_name not in output_fields
-                and "*" not in output_fields
-            ):
+            pk_field_name = None
+            if collection.schema.primary_field:
+                pk_field_name = collection.schema.primary_field.name
+            if pk_field_name and output_fields and pk_field_name not in output_fields and "*" not in output_fields:
                 query_output_fields = output_fields + [pk_field_name]
             elif not output_fields:
                 # 如果 None, 尝试获取所有非向量字段 + PK
@@ -1253,7 +1401,7 @@ class MilvusManager:
                     if f.dtype != DataType.FLOAT_VECTOR
                     and f.dtype != DataType.BINARY_VECTOR
                 ]
-                if pk_field_name not in query_output_fields:
+                if pk_field_name and pk_field_name not in query_output_fields:
                     query_output_fields.append(pk_field_name)
             else:  # Already contains PK or '*'
                 query_output_fields = output_fields
@@ -1271,8 +1419,34 @@ class MilvusManager:
             logger.info(f"查询完成。返回 {len(query_results)} 个实体。")
             return query_results
         except MilvusException as e:
-            logger.error(f"在集合 '{collection_name}' 中执行查询失败: {e}")
-            return None
+            # 检查是否是因为集合未加载的错误 (code 101)
+            if getattr(e, "code", None) == 101:
+                logger.info(f"检测到集合 '{collection_name}' 未加载，尝试重新加载... (错误: {e})")
+                # 尝试再次加载集合
+                if self.load_collection(collection_name, timeout=timeout):
+                    logger.info(f"集合 '{collection_name}' 重新加载成功，重试查询操作...")
+                    # 重试查询操作
+                    try:
+                        query_results = collection.query(
+                            expr=expression,
+                            output_fields=query_output_fields,
+                            partition_names=partition_names,
+                            limit=effective_limit,
+                            offset=offset,
+                            timeout=timeout,
+                            **kwargs,
+                        )
+                        logger.info(f"重试查询成功。返回 {len(query_results)} 个实体。")
+                        return query_results
+                    except MilvusException as retry_e:
+                        logger.error(f"重试查询仍失败: {retry_e}")
+                        return None
+                else:
+                    logger.error(f"重新加载集合 '{collection_name}' 仍失败。")
+                    return None
+            else:
+                logger.error(f"在集合 '{collection_name}' 中执行查询失败: {e}")
+                return None
         except Exception as e:
             logger.error(f"在集合 '{collection_name}' 中执行查询时发生意外错误: {e}")
             return None
@@ -1300,10 +1474,10 @@ class MilvusManager:
             )
         # 返回 False 表示如果发生异常，不抑制异常的传播
 
-    def get_connection_info(self) -> Dict[str, Any]:
+    def get_connection_info(self) -> dict[str, Any]:
         """
         返回当前连接信息用于调试
-        
+
         Returns:
             Dict[str, Any]: 包含连接信息的字典，包括：
                 - alias: 连接别名
@@ -1315,84 +1489,158 @@ class MilvusManager:
         # 创建不包含敏感信息的连接参数副本
         safe_connection_info = {}
         for key, value in self._connection_info.items():
-            if key in ['password', 'token']:
-                safe_connection_info[key] = '******' if value else None
+            if key in ["password", "token"]:
+                safe_connection_info[key] = "******" if value else None
             else:
                 safe_connection_info[key] = value
-        
+
         return {
-            'alias': self.alias,
-            'is_connected': self._is_connected,
-            'is_lite': self._is_lite,
-            'connection_params': safe_connection_info,
-            'last_check_time': self._last_connection_check,
-            'connection_check_interval': self._connection_check_interval,
-            'cached_connection_status': self._cached_connection_status
+            "alias": self.alias,
+            "is_connected": self._is_connected,
+            "is_lite": self._is_lite,
+            "connection_params": safe_connection_info,
+            "last_check_time": self._last_connection_check,
+            "connection_check_interval": self._connection_check_interval,
+            "cached_connection_status": self._cached_connection_status,
         }
 
-    def format_search_results(self, raw_results) -> List[Dict[str, Any]]:
-        """
-        格式化搜索结果为统一格式
-        
-        Args:
-            raw_results: Milvus 搜索返回的原始结果 (List[SearchResult])
-            
-        Returns:
-            List[Dict[str, Any]]: 格式化后的搜索结果列表，每个元素包含：
-                - id: 实体 ID
-                - distance: 相似度距离
-                - score: 相似度分数 (1 - distance，适用于 L2 距离)
-                - entity: 实体数据字典
-        """
-        if not raw_results:
-            return []
-        
-        formatted_results = []
-        
-        try:
-            # raw_results 是 List[SearchResult]，每个 SearchResult 对应一个查询向量
-            for search_result in raw_results:
-                # 每个 SearchResult 包含多个 Hit 对象
-                for hit in search_result:
-                    # 检查 hit 对象是否包含必要属性
-                    if not all(hasattr(hit, attr) for attr in ["id", "distance", "entity"]):
-                        logger.warning(f"搜索结果对象缺少必要属性: {hit}")
-                        continue
-                    
-                    try:
-                        # 获取实体数据
-                        entity_dict = {}
-                        if hasattr(hit.entity, "to_dict"):
-                            entity_dict = hit.entity.to_dict()
-                        elif hasattr(hit.entity, "__dict__"):
-                            entity_dict = vars(hit.entity)
-                        else:
-                            # 尝试将实体转换为字典
-                            try:
-                                entity_dict = dict(hit.entity)
-                            except (TypeError, ValueError):
-                                logger.warning(f"无法将实体转换为字典: {hit.entity}")
-                                entity_dict = {}
-                        
-                        # 计算相似度分数 (对于 L2 距离，分数越高越相似)
-                        distance = float(hit.distance)
-                        score = 1.0 / (1.0 + distance)  # 转换为 0-1 范围的分数
-                        
-                        formatted_result = {
-                            "id": hit.id,
-                            "distance": distance,
-                            "score": score,
-                            "entity": entity_dict
-                        }
-                        
-                        formatted_results.append(formatted_result)
-                        
-                    except Exception as e:
-                        logger.error(f"处理单个搜索结果时出错: {e}")
-                        continue
-                        
-        except Exception as e:
-            logger.error(f"格式化搜索结果时出错: {e}")
-            return []
-        
-        return formatted_results
+    def format_search_results(self, raw_results) -> list[dict[str, Any]]:
+       """
+       格式化搜索结果为统一格式
+
+       Args:
+           raw_results: Milvus 搜索返回的原始结果 (List[SearchResult])
+
+       Returns:
+           List[Dict[str, Any]]: 格式化后的搜索结果列表，每个元素包含：
+               - id: 实体 ID
+               - distance: 相似度距离
+               - score: 相似度分数 (1 - distance，适用于 L2 距离)
+               - entity: 实体数据字典
+       """
+       if not raw_results:
+           return []
+
+       formatted_results = []
+
+       try:
+           # raw_results 可能是 List[SearchResult] 或其他类型，需要安全处理
+           # 首先检查是否为可迭代的
+           if not hasattr(raw_results, '__iter__'):
+               logger.warning(f"raw_results 不是可迭代对象: {type(raw_results)}")
+               return []
+
+           for search_result in raw_results:
+               # 检查 search_result 是否为可迭代的（SearchResult 通常包含多个命中）
+               if hasattr(search_result, '__iter__'):
+                   # 处理每个搜索结果中的命中项
+                   for hit in search_result:
+                       # 检查 hit 对象是否包含必要属性
+                       if not all(
+                           hasattr(hit, attr) for attr in ["id", "distance"]
+                       ):
+                           logger.warning(f"搜索结果对象缺少必要属性: {hit}")
+                           continue
+
+                       try:
+                           # 获取实体数据 - 有些搜索结果可能不直接提供 entity，需要从 hit 中获取
+                           entity_dict = {}
+                           # 尝试获取 entity，如果不存在则从 hit 的属性中构建
+                           if hasattr(hit, 'entity') and hit.entity is not None:
+                               entity_data = hit.entity
+                               if hasattr(entity_data, "to_dict"):
+                                   entity_dict = entity_data.to_dict()
+                               elif hasattr(entity_data, "__dict__"):
+                                   entity_dict = vars(entity_data)
+                               else:
+                                   try:
+                                       entity_dict = dict(entity_data)
+                                   except (TypeError, ValueError):
+                                       logger.warning(f"无法将实体转换为字典: {entity_data}")
+                                       entity_dict = {}
+                           else:
+                               # 如果没有实体对象，尝试直接从 hit 获取字段
+                               for attr_name in dir(hit):
+                                   if not attr_name.startswith('_') and attr_name not in ['id', 'distance']:
+                                       try:
+                                           attr_value = getattr(hit, attr_name)
+                                           if not callable(attr_value):
+                                               entity_dict[attr_name] = attr_value
+                                       except:
+                                           continue
+
+                           # 计算相似度分数 (对于 L2 距离，分数越高越相似)
+                           distance = float(hit.distance)
+                           score = 1.0 / (1.0 + distance)  # 转换为 0-1 范围的分数
+
+                           formatted_result = {
+                               "id": hit.id,
+                               "distance": distance,
+                               "score": score,
+                               "entity": entity_dict,
+                           }
+
+                           formatted_results.append(formatted_result)
+
+                       except Exception as e:
+                           logger.error(f"处理单个搜索结果时出错: {e}")
+                           continue
+               else:
+                   # 如果 search_result 不是可迭代的，说明 raw_results 可能是单个结果
+                   # 检查它是否是单个命中对象
+                   hit = search_result
+                   if not all(
+                       hasattr(hit, attr) for attr in ["id", "distance"]
+                   ):
+                       logger.warning(f"搜索结果对象缺少必要属性: {hit}")
+                       continue
+
+                   try:
+                       # 获取实体数据
+                       entity_dict = {}
+                       # 尝试获取 entity，如果不存在则从 hit 中获取
+                       if hasattr(hit, 'entity') and hit.entity is not None:
+                           entity_data = hit.entity
+                           if hasattr(entity_data, "to_dict"):
+                               entity_dict = entity_data.to_dict()
+                           elif hasattr(entity_data, "__dict__"):
+                               entity_dict = vars(entity_data)
+                           else:
+                               try:
+                                   entity_dict = dict(entity_data)
+                               except (TypeError, ValueError):
+                                   logger.warning(f"无法将实体转换为字典: {entity_data}")
+                                   entity_dict = {}
+                       else:
+                           # 如果没有实体对象，尝试直接从 hit 获取字段
+                           for attr_name in dir(hit):
+                               if not attr_name.startswith('_') and attr_name not in ['id', 'distance']:
+                                   try:
+                                       attr_value = getattr(hit, attr_name)
+                                       if not callable(attr_value):
+                                           entity_dict[attr_name] = attr_value
+                                   except:
+                                       continue
+
+                       # 计算相似度分数 (对于 L2 距离，分数越高越相似)
+                       distance = float(hit.distance)
+                       score = 1.0 / (1.0 + distance)  # 转换为 0-1 范围的分数
+
+                       formatted_result = {
+                           "id": hit.id,
+                           "distance": distance,
+                           "score": score,
+                           "entity": entity_dict,
+                       }
+
+                       formatted_results.append(formatted_result)
+
+                   except Exception as e:
+                       logger.error(f"处理单个搜索结果时出错: {e}")
+                       continue
+
+       except Exception as e:
+           logger.error(f"格式化搜索结果时出错: {e}")
+           return []
+
+       return formatted_results

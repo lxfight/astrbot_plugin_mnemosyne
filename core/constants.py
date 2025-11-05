@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Mnemosyne 插件常量定义
 """
