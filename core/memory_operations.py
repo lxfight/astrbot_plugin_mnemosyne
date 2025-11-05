@@ -237,27 +237,15 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str |
     persona_id = conversation.persona_id if conversation else None
 
     if not persona_id or persona_id == "[%None]":
-        # 使用最新的persona_manager API获取默认人格
-        try:
-            # M24 修复: get_default_persona_v3 返回协程，需要 await
-            default_persona = (
-                await plugin.context.persona_manager.get_default_persona_v3()
-            )
-            persona_id = default_persona.get("name") if default_persona else None
-        except Exception as e:
-            logger.warning(f"获取默认人格失败: {e}")
-            persona_id = None
-
-        if not persona_id:
-            logger.warning(
-                f"当前会话 (ID: {session_id}) 及全局均未配置人格，将使用占位符 '{DEFAULT_PERSONA_ON_NONE}' 进行记忆操作（如果启用人格过滤）。"
-            )
-            if plugin.config.get("use_personality_filtering", False):
-                persona_id = DEFAULT_PERSONA_ON_NONE
-            else:
-                persona_id = None
+        # 不使用默认人格，避免记忆错乱
+        # 当会话没有配置人格时，使用占位符或None，而不是回退到默认人格
+        logger.warning(
+            f"当前会话 (ID: {session_id}) 未配置人格，将使用占位符 '{DEFAULT_PERSONA_ON_NONE}' 进行记忆操作（如果启用人格过滤）。"
+        )
+        if plugin.config.get("use_personality_filtering", False):
+            persona_id = DEFAULT_PERSONA_ON_NONE
         else:
-            logger.info(f"当前会话无人格，使用默认人格: '{persona_id}'")
+            persona_id = None
     return persona_id
 
 
