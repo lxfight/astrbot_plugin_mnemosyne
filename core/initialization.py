@@ -211,6 +211,90 @@ def initialize_milvus(plugin: "Mnemosyne"):
         # 2. 获取标准 Milvus 的地址配置
         milvus_address = plugin.config.get("address")
 
+        # ========== 修复：在创建 MilvusManager 前主动准备 Milvus Lite 数据目录 ==========
+        # 这是为了解决 issue 中描述的问题：当用户删除 milvus_data 文件夹后重载插件，
+        # 应该自动重新创建目录，而不是等到连接时才发现目录不存在
+        if lite_path and not is_windows:
+            # 用户显式配置了 Milvus Lite 路径
+            is_lite_mode = True
+            init_logger.info("检测到 Milvus Lite 配置，提前准备数据目录...")
+
+            try:
+                from pathlib import Path  # noqa: I001
+                import os
+
+                # 使用 StarTools 获取标准数据目录
+                plugin_data_dir = StarTools.get_data_dir()
+                data_dir_path = Path(plugin_data_dir)
+
+                # 确定数据库文件的完整路径
+                if os.path.isabs(lite_path):
+                    db_file_path = lite_path
+                else:
+                    # 相对路径，相对于插件数据目录
+                    db_file_path = str(data_dir_path / lite_path)
+
+                # 如果路径不是以 .db 结尾，附加默认文件名
+                if not db_file_path.endswith(".db"):
+                    db_file_path = os.path.join(db_file_path, "mnemosyne_lite.db")
+
+                # 获取目录路径
+                db_dir = os.path.dirname(db_file_path)
+
+                # 主动创建目录
+                if not os.path.exists(db_dir):
+                    init_logger.info(f"Milvus Lite 数据目录不存在，正在创建: {db_dir}")
+                    os.makedirs(db_dir, exist_ok=True)
+                    init_logger.info(f"✅ 已成功创建 Milvus Lite 数据目录: {db_dir}")
+                else:
+                    init_logger.debug(f"✅ Milvus Lite 数据目录已存在: {db_dir}")
+
+                # 验证目录可写
+                if not os.access(db_dir, os.W_OK):
+                    raise PermissionError(f"Milvus Lite 数据目录不可写: {db_dir}")
+
+                init_logger.info(f"✅ Milvus Lite 数据目录验证通过: {db_dir}")
+
+            except Exception as e:
+                init_logger.error(f"准备 Milvus Lite 数据目录失败: {e}", exc_info=True)
+                raise RuntimeError(f"无法初始化 Milvus Lite 数据目录: {e}") from e
+
+        elif not lite_path and not milvus_address and not is_windows:
+            # 既没有配置 lite_path 也没有配置 address，将使用默认 Lite 模式
+            is_lite_mode = True
+            init_logger.warning(
+                "未配置 Milvus Lite 路径和标准 Milvus 地址，将使用默认 Milvus Lite 模式"
+            )
+
+            try:
+                from pathlib import Path  # noqa: I001
+                import os
+
+                # 使用 StarTools 获取标准数据目录作为默认目录
+                plugin_data_dir = StarTools.get_data_dir()
+                db_dir = Path(plugin_data_dir)
+
+                # 确保默认数据目录存在
+                if not db_dir.exists():
+                    init_logger.info(f"创建默认 Milvus Lite 数据目录: {db_dir}")
+                    db_dir.mkdir(parents=True, exist_ok=True)
+                    init_logger.info(f"✅ 已创建默认数据目录: {db_dir}")
+                else:
+                    init_logger.debug(f"✅ 默认数据目录已存在: {db_dir}")
+
+                # 验证目录可写
+                if not os.access(str(db_dir), os.W_OK):
+                    raise PermissionError(f"默认数据目录不可写: {db_dir}")
+
+                init_logger.info(f"✅ 默认 Milvus Lite 数据目录验证通过: {db_dir}")
+
+            except Exception as e:
+                init_logger.error(
+                    f"准备默认 Milvus Lite 数据目录失败: {e}", exc_info=True
+                )
+                raise RuntimeError(f"无法初始化默认数据目录: {e}") from e
+        # ========== 修复结束 ==========
+
         if lite_path and not is_windows:
             # --- 检测到 Milvus Lite 配置（非 Windows）---
             init_logger.info(f"检测到 Milvus Lite 配置，将使用本地路径: '{lite_path}'")
@@ -405,6 +489,52 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
         )
 
     collection_name = plugin.collection_name
+
+    # ========== 修复：在检查集合前先明确验证连接状态 ==========
+    # 这样可以提前发现连接问题，给出明确的错误信息，而不是等到 has_collection 调用时才发现
+    try:
+        init_logger.debug("验证 Milvus 连接状态...")
+
+        # 如果尚未连接，尝试建立连接
+        if not manager.is_connected():
+            init_logger.info("Milvus 尚未连接，尝试建立连接...")
+            manager.connect()
+
+        # 再次验证连接状态
+        if not manager.is_connected():
+            raise ConnectionError("无法建立 Milvus 连接")
+
+        init_logger.info("✅ Milvus 连接状态正常")
+
+    except Exception as e:
+        # 获取管理器类型以提供更精确的错误信息
+        try:
+            if use_adapter:
+                # MilvusVectorDB 适配器内部有 _manager 属性
+                mode_name = (
+                    "Milvus Lite"
+                    if getattr(getattr(manager, "_manager", None), "_is_lite", False)
+                    else "标准 Milvus"
+                )
+            else:
+                # MilvusManager 直接有 _is_lite 属性
+                mode_name = (
+                    "Milvus Lite"
+                    if getattr(manager, "_is_lite", False)
+                    else "标准 Milvus"
+                )
+        except (AttributeError, TypeError):
+            # 如果无法获取类型信息，使用通用名称
+            mode_name = "Milvus"
+
+        init_logger.error(
+            f"{mode_name} 连接失败: {e}\n"
+            f"提示：如果是 Milvus Lite，请检查数据目录权限和磁盘空间；"
+            f"如果是标准 Milvus，请检查服务是否运行和网络连接",
+            exc_info=True,
+        )
+        raise ConnectionError(f"无法连接到 {mode_name}: {e}") from e
+    # ========== 修复结束 ==========
 
     # 检查集合是否存在
     if manager.has_collection(collection_name):

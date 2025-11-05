@@ -220,13 +220,14 @@ class MilvusManager:
                 logger.error(
                     f"无法为 Milvus Lite 创建目录 '{db_dir}': {e}。请检查权限。"
                 )
-                # 也许应该在这里抛出异常，因为无法创建目录会导致连接失败
-                # raise OSError(f"无法为 Milvus Lite 创建目录 '{db_dir}': {e}") from e
+                # 修复：抛出异常，阻止后续初始化，让问题立即暴露
+                raise OSError(f"无法为 Milvus Lite 创建目录 '{db_dir}': {e}") from e
             except Exception as e:  # 捕获其他潜在错误
                 logger.error(
                     f"尝试为 Milvus Lite 创建目录 '{db_dir}' 时发生意外错误: {e}。"
                 )
-                # raise # 重新抛出，让上层知道出错了
+                # 修复：重新抛出异常
+                raise
 
     def _get_default_lite_path(self) -> str:
         """计算默认的 Milvus Lite 数据路径（使用 AstrBot 标准 API）。"""
