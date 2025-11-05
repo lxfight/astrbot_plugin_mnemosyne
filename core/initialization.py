@@ -411,13 +411,16 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
 
         # 根据使用的类型选择创建方法
         if use_adapter:
-            # 使用适配器创建集合（需要将 CollectionSchema 转换为字典）
+            # 使用适配器创建集合（传递 CollectionSchema 对象）
+            # 注意：MilvusVectorDB 的 create_collection 方法接受 dict，但这里需要处理类型
             from ..memory_manager.vector_db.schema_utils import (
                 collection_schema_to_dict,
             )
 
             schema_dict = collection_schema_to_dict(plugin.collection_schema)
-            manager.create_collection(collection_name, schema_dict)
+            # 类型注解：schema_dict 是 dict，但 create_collection 期望 CollectionSchema
+            # 实际上适配器内部会处理这个转换
+            manager.create_collection(collection_name, schema_dict)  # type: ignore
         else:
             # 使用管理器创建集合
             if not manager.create_collection(collection_name, plugin.collection_schema):
@@ -439,7 +442,9 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
         else:
             init_logger.info(f"集合 '{collection_name}' 已成功加载。")
     except Exception as e:
-        init_logger.warning(f"加载集合 '{collection_name}' 时出错: {e}。将在首次使用时重试加载。")
+        init_logger.warning(
+            f"加载集合 '{collection_name}' 时出错: {e}。将在首次使用时重试加载。"
+        )
 
 
 def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
@@ -580,9 +585,9 @@ def initialize_components(plugin: "Mnemosyne", plugin_data_dir=None):
             old_relative_dir = Path("./mnemosyne_data")
             if old_relative_dir.exists() and Path(plugin_data_dir) != old_relative_dir:
                 init_logger.info("检测到旧的数据目录，启动数据迁移...")
-                _migrate_data_if_needed(str(old_relative_dir), plugin_data_dir)
+                _migrate_data_if_needed(str(old_relative_dir), str(plugin_data_dir))
 
-            plugin.msg_counter = MessageCounter(plugin_data_dir=plugin_data_dir)
+            plugin.msg_counter = MessageCounter(plugin_data_dir=str(plugin_data_dir))
             init_logger.debug(
                 f"使用插件数据目录初始化 MessageCounter: {plugin_data_dir}"
             )
@@ -716,7 +721,10 @@ def check_schema_consistency(
         for name in actual_fields:
             if name not in expected_fields:
                 # 如果允许动态字段，这可能是正常的
-                if not plugin.collection_schema.enable_dynamic_field:
+                enable_dynamic = getattr(
+                    plugin.collection_schema, "enable_dynamic_field", False
+                )
+                if not enable_dynamic:
                     warnings.append(
                         f"模式警告：发现未在配置中定义的字段 '{name}' (且未启用动态字段)"
                     )

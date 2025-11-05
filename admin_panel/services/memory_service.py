@@ -448,7 +448,7 @@ class MemoryService:
             )
 
             # 统计每个会话
-            session_data = defaultdict(
+            session_data: dict[str, dict[str, Any]] = defaultdict(
                 lambda: {
                     "session_id": "",
                     "memory_count": 0,
@@ -459,29 +459,32 @@ class MemoryService:
 
             for result in results:
                 session_id = result.get("session_id", "unknown")
-                create_time = result.get("create_time")
+                create_time_raw = result.get("create_time")
 
-                if isinstance(create_time, (int, float)):
-                    create_time = datetime.fromtimestamp(create_time)
-                elif isinstance(create_time, str):
+                create_time: datetime
+                if isinstance(create_time_raw, (int, float)):
+                    create_time = datetime.fromtimestamp(create_time_raw)
+                elif isinstance(create_time_raw, str):
                     try:
-                        create_time = datetime.fromisoformat(create_time)
+                        create_time = datetime.fromisoformat(create_time_raw)
                     except (ValueError, TypeError):
                         create_time = datetime.now()
+                else:
+                    create_time = datetime.now()
 
                 session_info = session_data[session_id]
                 session_info["session_id"] = session_id
-                session_info["memory_count"] += 1
+                session_info["memory_count"] = session_info["memory_count"] + 1
 
-                if (
-                    session_info["last_memory_time"] is None
-                    or create_time > session_info["last_memory_time"]
+                last_time = session_info["last_memory_time"]
+                if last_time is None or (
+                    isinstance(last_time, datetime) and create_time > last_time
                 ):
                     session_info["last_memory_time"] = create_time
 
-                if (
-                    session_info["first_memory_time"] is None
-                    or create_time < session_info["first_memory_time"]
+                first_time = session_info["first_memory_time"]
+                if first_time is None or (
+                    isinstance(first_time, datetime) and create_time < first_time
                 ):
                     session_info["first_memory_time"] = create_time
 
@@ -496,14 +499,13 @@ class MemoryService:
 
             # 格式化时间
             for session in sessions[:limit]:
-                if session["last_memory_time"]:
-                    session["last_memory_time"] = session[
-                        "last_memory_time"
-                    ].isoformat()
-                if session["first_memory_time"]:
-                    session["first_memory_time"] = session[
-                        "first_memory_time"
-                    ].isoformat()
+                last_time = session.get("last_memory_time")
+                if last_time and isinstance(last_time, datetime):
+                    session["last_memory_time"] = last_time.isoformat()
+
+                first_time = session.get("first_memory_time")
+                if first_time and isinstance(first_time, datetime):
+                    session["first_memory_time"] = first_time.isoformat()
 
             return sessions[:limit]
 

@@ -5,7 +5,7 @@ Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 
 import asyncio
 import time
-from typing import cast
+from typing import Any, cast
 
 # --- 类型定义和依赖库 ---
 from pymilvus import CollectionSchema
@@ -57,6 +57,7 @@ class Mnemosyne(Star):
         self.output_fields_for_query: list[str] = []
         self.collection_name: str = DEFAULT_COLLECTION_NAME
         self.milvus_manager: MilvusManager | None = None
+        self.milvus_adapter: Any = None  # MilvusVectorDB 适配器（可选）
         self.msg_counter: MessageCounter | None = None
         self.context_manager: ConversationContextManager | None = None
         self.embedding_provider: EmbeddingProvider | None = None
