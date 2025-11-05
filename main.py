@@ -632,12 +632,14 @@ class Mnemosyne(Star):
         # 清理 Milvus 连接
         if self.milvus_manager and self.milvus_manager.is_connected():
             try:
-                if (
-                    not self.milvus_manager._is_lite
-                    and self.milvus_manager.has_collection(self.collection_name)
-                ):
-                    logger.info(f"正在从内存中释放集合 '{self.collection_name}'...")
-                    self.milvus_manager.release_collection(self.collection_name)
+                # 不再释放集合，避免下次启动时重新加载导致启动过慢
+                # Milvus Lite 不需要手动管理内存，独立部署的 Milvus 由其自己负责
+                # if (
+                #     not self.milvus_manager._is_lite
+                #     and self.milvus_manager.has_collection(self.collection_name)
+                # ):
+                #     logger.info(f"正在从内存中释放集合 '{self.collection_name}'...")
+                #     self.milvus_manager.release_collection(self.collection_name)
 
                 logger.info("正在断开与 Milvus 的连接...")
                 self.milvus_manager.disconnect()
