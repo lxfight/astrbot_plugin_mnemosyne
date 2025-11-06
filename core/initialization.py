@@ -185,15 +185,25 @@ def initialize_config_and_schema(plugin: "Mnemosyne"):
         raise  # 重新抛出异常，以便在主 __init__ 中捕获
 
 
-def initialize_milvus(plugin: "Mnemosyne"):
+def initialize_milvus(plugin: "Mnemosyne", plugin_data_dir: str | None = None):
     """
     初始化 MilvusManager。
     根据配置决定连接到 Milvus Lite 或标准 Milvus 服务器，
     并进行必要的集合与索引设置。
 
     注意：Windows 系统不支持 Milvus Lite，自动使用标准 Milvus。
+    
+    Args:
+        plugin: Mnemosyne 插件实例
+        plugin_data_dir: 插件数据目录路径，必须从 main.py 传入
     """
     init_logger.debug("开始初始化 Milvus 连接和设置...")
+    
+    # 验证必须的 plugin_data_dir 参数
+    if plugin_data_dir is None:
+        init_logger.error("initialize_milvus 必须接收 plugin_data_dir 参数")
+        raise ValueError("plugin_data_dir 参数不能为 None，必须从 main.py 传入")
+    
     connect_args = {}  # 用于收集传递给 MilvusManager 的参数
     is_lite_mode = False  # 标记是否为 Lite 模式
 
@@ -223,8 +233,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
                 from pathlib import Path  # noqa: I001
                 import os
 
-                # 使用 StarTools 获取标准数据目录
-                plugin_data_dir = StarTools.get_data_dir()
+                # 使用传入的插件数据目录
                 data_dir_path = Path(plugin_data_dir)
 
                 # 确定数据库文件的完整路径
@@ -270,8 +279,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
                 from pathlib import Path  # noqa: I001
                 import os
 
-                # 使用 StarTools 获取标准数据目录作为默认目录
-                plugin_data_dir = StarTools.get_data_dir()
+                # 使用传入的插件数据目录作为默认目录
                 db_dir = Path(plugin_data_dir)
 
                 # 确保默认数据目录存在
@@ -399,7 +407,11 @@ def initialize_milvus(plugin: "Mnemosyne"):
                     f"当前为 Milvus Lite 模式，配置中的以下认证/安全参数将被忽略: {ignored_keys}"
                 )
 
-        # 5. 选择使用 MilvusManager 或 MilvusVectorDB
+        # 5. 将插件数据目录添加到连接参数中
+        connect_args["plugin_data_dir"] = plugin_data_dir
+        init_logger.debug(f"已将插件数据目录添加到连接参数: {plugin_data_dir}")
+
+        # 6. 选择使用 MilvusManager 或 MilvusVectorDB
         use_adapter = plugin.config.get("use_milvus_adapter", False)
 
         # 安全处理：创建用于日志记录的参数副本，敏感信息脱敏
@@ -407,6 +419,8 @@ def initialize_milvus(plugin: "Mnemosyne"):
         for k, v in connect_args.items():
             if k in ["password", "token"]:
                 loggable_connect_args[k] = "***"  # 完全隐藏敏感值
+            elif k == "plugin_data_dir":
+                loggable_connect_args[k] = v  # 数据目录不是敏感信息，可以显示
             else:
                 loggable_connect_args[k] = v
 

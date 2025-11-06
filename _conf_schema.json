@@ -156,6 +156,16 @@
                 "default": 8000,
                 "minimum": 1024,
                 "maximum": 65535
+            },
+            "host": {
+                "description": "管理面板监听地址",
+                "type": "string",
+                "hint": "管理面板Web服务器监听的IP地址。默认127.0.0.1（仅本机访问），设置为0.0.0.0可允许外部访问（需注意安全风险）",
+                "obvious_hint": true,
+                "default": "127.0.0.1",
+                "pattern": "^(127\\.0\\.0\\.1|0\\.0\\.0\\.0|localhost|((25[0-5]|(2[0-4]|1\\d|[1-9]|)\\d)\\.?\\b){4})$",
+                "minLength": 7,
+                "maxLength": 15
             }
         }
     }

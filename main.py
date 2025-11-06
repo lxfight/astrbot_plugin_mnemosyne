@@ -261,7 +261,9 @@ class Mnemosyne(Star):
 
             # Milvus 初始化：失败时不阻止插件启动，允许降级运行
             try:
-                initialization.initialize_milvus(self)
+                # 将 plugin_data_dir 转换为字符串（如果是 Path 对象）
+                plugin_data_dir_str = str(plugin_data_dir) if plugin_data_dir else None
+                initialization.initialize_milvus(self, plugin_data_dir_str)
                 self._initialized_components.append("milvus")
             except Exception as e:
                 logger.warning(
@@ -287,6 +289,9 @@ class Mnemosyne(Star):
                 port = admin_panel_config.get(
                     "port", 8000
                 )  # 从配置中获取端口，默认8000
+                host = admin_panel_config.get(
+                    "host", "127.0.0.1"
+                )  # 从配置中获取监听地址，默认127.0.0.1
 
                 # 检查并生成 Admin Panel API 密钥
                 api_key = admin_panel_config.get("api_key", "").strip()
@@ -317,7 +322,7 @@ class Mnemosyne(Star):
                     logger.info("Admin Panel API 密钥已配置（固定密钥）")
 
                 self.admin_panel_server = AdminPanelServer(
-                    self, port=port, host="127.0.0.1", api_key=api_key
+                    self, port=port, host=host, api_key=api_key
                 )
                 # 在独立线程中启动服务器
                 import threading
@@ -327,7 +332,7 @@ class Mnemosyne(Star):
                         target=self.admin_panel_server.run_in_thread, daemon=True
                     )
                     self.admin_panel_thread.start()
-                    logger.info(f" Admin Panel 服务器已启动在端口 {port}")
+                    logger.info(f" Admin Panel 服务器已启动在 {host}:{port}")
             except Exception as e:
                 logger.warning(f"⚠️ 启动 Admin Panel 服务器失败: {e}")
 
