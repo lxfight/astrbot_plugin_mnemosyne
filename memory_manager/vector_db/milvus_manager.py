@@ -78,6 +78,7 @@ class MilvusManager:
         secure: bool | None = None,
         token: str | None = None,
         db_name: str = "default",
+        plugin_data_dir: str | None = None,
         **kwargs,
     ):
         """
@@ -95,10 +96,12 @@ class MilvusManager:
             secure (Optional[bool]): 是否对标准 Milvus 连接使用 TLS/SSL。
             token (Optional[str]): 标准 Milvus 认证 Token/API Key。
             db_name (str): 要连接的数据库名称 (Milvus 2.2+)。
+            plugin_data_dir (Optional[str]): 插件数据目录路径，用于 Milvus Lite 模式。
             **kwargs: 传递给 connections.connect 的其他参数。
         """
 
         self.alias = alias
+        self._plugin_data_dir = plugin_data_dir  # 存储插件数据目录
         self._original_lite_path = lite_path  # 保留原始输入以供参考
         self._lite_path = (
             self._prepare_lite_path(lite_path) if lite_path is not None else None
@@ -152,6 +155,7 @@ class MilvusManager:
 
         Raises:
             ValueError: 如果路径不安全（路径遍历攻击）
+            RuntimeError: 如果无法获取插件数据目录
         """
         # 标准化路径分隔符
         path_input = os.path.normpath(path_input)
@@ -165,21 +169,23 @@ class MilvusManager:
                 f"提供的 lite_path '{path_input}' 未以 '.db' 结尾。假定为目录/基名，自动附加默认文件名 'mnemosyne_lite.db'。"
             )
 
-        # 使用 AstrBot 标准 API 获取插件数据目录
-        # 不允许回退到硬编码路径 - 必须使用 StarTools
-        try:
-            default_data_dir = pathlib.Path(StarTools.get_data_dir())
-        except Exception as e:
-            # 如果无法获取标准数据目录，应该抛出错误而不是使用硬编码路径
-            logger.error(
-                f"致命错误：无法通过 StarTools.get_data_dir() 获取插件数据目录: {e}"
-            )
-            logger.error(
-                "插件数据目录必须通过 AstrBot 标准 API 获取，不允许使用硬编码路径"
-            )
-            raise RuntimeError(
-                f"无法初始化 Milvus Lite 路径：无法获取插件数据目录 - {e}"
-            )
+        # 使用传入的插件数据目录，而不是调用 StarTools.get_data_dir()
+        if not self._plugin_data_dir:
+            # 如果没有传入插件数据目录，尝试使用 StarTools（这可能会失败）
+            try:
+                default_data_dir = pathlib.Path(StarTools.get_data_dir())
+                logger.warning(
+                    "未传入 plugin_data_dir 参数，尝试通过 StarTools.get_data_dir() 获取（可能失败）"
+                )
+            except Exception as e:
+                logger.error(f"致命错误：无法获取插件数据目录: {e}")
+                logger.error("请在创建 MilvusManager 时传入 plugin_data_dir 参数")
+                raise RuntimeError(
+                    f"无法初始化 Milvus Lite 路径：无法获取插件数据目录 - {e}"
+                ) from e
+        else:
+            default_data_dir = pathlib.Path(self._plugin_data_dir)
+            logger.debug(f"使用传入的插件数据目录: {default_data_dir}")
 
         # 安全验证路径，防止路径遍历攻击
         try:
@@ -230,21 +236,36 @@ class MilvusManager:
                 raise
 
     def _get_default_lite_path(self) -> str:
-        """计算默认的 Milvus Lite 数据路径（使用 AstrBot 标准 API）。"""
+        """计算默认的 Milvus Lite 数据路径。"""
         try:
-            # 使用 AstrBot 标准 API 获取插件数据目录
-            default_dir = pathlib.Path(StarTools.get_data_dir())
+            # 使用传入的插件数据目录
+            if not self._plugin_data_dir:
+                # 如果没有传入，尝试使用 StarTools（可能失败）
+                try:
+                    default_dir = pathlib.Path(StarTools.get_data_dir())
+                    logger.warning(
+                        "未传入 plugin_data_dir 参数，尝试通过 StarTools.get_data_dir() 获取（可能失败）"
+                    )
+                except Exception as e:
+                    logger.error(f"致命错误：无法获取插件数据目录: {e}")
+                    logger.error("请在创建 MilvusManager 时传入 plugin_data_dir 参数")
+                    raise RuntimeError(f"无法初始化默认 Milvus Lite 路径：{e}") from e
+            else:
+                default_dir = pathlib.Path(self._plugin_data_dir)
+                logger.debug(f"使用传入的插件数据目录: {default_dir}")
+
             # 使用 _prepare_lite_path 来确保最终路径是带 .db 的文件路径
             default_path = self._prepare_lite_path(str(default_dir))
             logger.info(f"使用标准数据目录的默认 Milvus Lite 路径: '{default_path}'")
             return default_path
+        except RuntimeError:
+            # 直接重新抛出 RuntimeError
+            raise
         except Exception as e:
-            # 无法获取数据目录，应该抛出错误而不是使用回退方案
+            # 其他异常转换为 RuntimeError
             logger.error(f"致命错误：无法获取标准数据目录: {e}")
-            logger.error(
-                "Milvus Lite 必须使用 AstrBot 标准 API 获取的数据目录，不允许使用硬编码或回退路径"
-            )
-            raise RuntimeError(f"无法初始化默认 Milvus Lite 路径：{e}")
+            logger.error("Milvus Lite 必须使用插件数据目录，不允许使用硬编码或回退路径")
+            raise RuntimeError(f"无法初始化默认 Milvus Lite 路径：{e}") from e
 
     def _configure_lite_explicit(self):
         """配置使用显式指定的 Milvus Lite 路径。"""

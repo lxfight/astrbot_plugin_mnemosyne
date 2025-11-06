@@ -196,6 +196,7 @@ def initialize_milvus(plugin: "Mnemosyne"):
     init_logger.debug("开始初始化 Milvus 连接和设置...")
     connect_args = {}  # 用于收集传递给 MilvusManager 的参数
     is_lite_mode = False  # 标记是否为 Lite 模式
+    plugin_data_dir = None  # 初始化 plugin_data_dir 变量
 
     # 检测操作系统：Windows 不支持 Milvus Lite
     is_windows = platform.system() == "Windows"
@@ -205,6 +206,15 @@ def initialize_milvus(plugin: "Mnemosyne"):
         )
 
     try:
+        # 0. 尽早获取 plugin_data_dir，无论使用哪种模式都需要
+        try:
+            plugin_data_dir = StarTools.get_data_dir()
+            init_logger.debug(f"已获取插件数据目录: {plugin_data_dir}")
+        except Exception as e:
+            init_logger.warning(f"无法通过 StarTools 获取插件数据目录: {e}")
+            # 如果无法获取，后续在需要时会报错
+            plugin_data_dir = None
+
         # 1. 优先检查 Milvus Lite 配置（仅在非 Windows 系统上）
         lite_path = plugin.config.get("milvus_lite_path", "") if not is_windows else ""
 
@@ -223,8 +233,9 @@ def initialize_milvus(plugin: "Mnemosyne"):
                 from pathlib import Path  # noqa: I001
                 import os
 
-                # 使用 StarTools 获取标准数据目录
-                plugin_data_dir = StarTools.get_data_dir()
+                # 使用已获取的 plugin_data_dir
+                if not plugin_data_dir:
+                    raise RuntimeError("无法获取插件数据目录")
                 data_dir_path = Path(plugin_data_dir)
 
                 # 确定数据库文件的完整路径
@@ -270,8 +281,9 @@ def initialize_milvus(plugin: "Mnemosyne"):
                 from pathlib import Path  # noqa: I001
                 import os
 
-                # 使用 StarTools 获取标准数据目录作为默认目录
-                plugin_data_dir = StarTools.get_data_dir()
+                # 使用已获取的 plugin_data_dir
+                if not plugin_data_dir:
+                    raise RuntimeError("无法获取插件数据目录")
                 db_dir = Path(plugin_data_dir)
 
                 # 确保默认数据目录存在
@@ -401,6 +413,11 @@ def initialize_milvus(plugin: "Mnemosyne"):
 
         # 5. 选择使用 MilvusManager 或 MilvusVectorDB
         use_adapter = plugin.config.get("use_milvus_adapter", False)
+
+        # 添加 plugin_data_dir 参数到连接参数中
+        if plugin_data_dir:
+            connect_args["plugin_data_dir"] = plugin_data_dir
+            init_logger.debug(f"已将 plugin_data_dir 添加到连接参数: {plugin_data_dir}")
 
         # 安全处理：创建用于日志记录的参数副本，敏感信息脱敏
         loggable_connect_args = {}
