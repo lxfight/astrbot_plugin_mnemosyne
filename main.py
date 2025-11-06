@@ -321,8 +321,10 @@ class Mnemosyne(Star):
                 else:
                     logger.info("Admin Panel API 密钥已配置（固定密钥）")
 
+                # 将 plugin_data_dir 转换为字符串（如果是 Path 对象）
+                plugin_data_dir_str = str(plugin_data_dir) if plugin_data_dir else None
                 self.admin_panel_server = AdminPanelServer(
-                    self, port=port, host=host, api_key=api_key
+                    self, port=port, host=host, api_key=api_key, data_dir=plugin_data_dir_str
                 )
                 # 在独立线程中启动服务器
                 import threading

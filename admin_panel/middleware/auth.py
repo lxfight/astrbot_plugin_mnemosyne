@@ -10,7 +10,6 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from astrbot.api.star import StarTools
 from astrbot.core.log import LogManager
 
 logger = LogManager.GetLogger(log_name="AdminPanelAuth")
@@ -93,18 +92,22 @@ def load_token_from_file(file_path: Path) -> str | None:
 class APIKeyAuth:
     """API Key 强制认证管理器"""
 
-    def __init__(self, api_key: str | None = None, data_dir: Path | None = None):
+    def __init__(self, api_key: str | None = None, data_dir: Path | str | None = None):
         """
         初始化认证管理器
 
         Args:
             api_key: API 密钥，如果为 None 或空则生成动态 token
-            data_dir: 数据目录路径，用于存储生成的 token（使用 StarTools.get_data_dir() 获取）
+            data_dir: 数据目录路径，用于存储生成的 token（必须从外部传入，不能在此调用 StarTools.get_data_dir()）
         """
-        # 使用 AstrBot 标准 API 获取插件数据目录
+        # 数据目录必须从外部传入
         if data_dir is None:
-            data_dir = Path(StarTools.get_data_dir()) / "admin_panel"
-        self.data_dir = Path(data_dir)
+            logger.error("APIKeyAuth 必须接收 data_dir 参数，不能为 None")
+            logger.error("data_dir 应该从 main.py 中获取后传递进来")
+            raise ValueError("data_dir 参数不能为 None，必须从 main.py 传入")
+
+        # 确保使用 admin_panel 子目录
+        self.data_dir = Path(data_dir) / "admin_panel"
         self.token_file = self.data_dir / ".api_token"
         self.api_key: str = ""  # 初始化为空字符串，后续会被赋值
         self.is_auto_generated = False
@@ -155,7 +158,9 @@ class APIKeyAuth:
         # 计算 token 的哈希值用于日志（不记录完整 token）
         if self.api_key:  # 确保 api_key 不为空
             token_hash = hashlib.sha256(self.api_key.encode()).hexdigest()[:8]
-            logger.info(f"Admin Panel API 强制认证已启用（Token Hash: {token_hash}...）")
+            logger.info(
+                f"Admin Panel API 强制认证已启用（Token Hash: {token_hash}...）"
+            )
 
     def verify_request(self, request: dict[str, Any]) -> bool:
         """

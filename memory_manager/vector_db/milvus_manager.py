@@ -13,11 +13,6 @@ from pymilvus.exceptions import (
     MilvusException,
 )
 
-from astrbot.api.star import StarTools
-
-# 配置日志记录
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-# logger = logging.getLogger(__name__)
 from astrbot.core.log import LogManager
 
 logger = LogManager.GetLogger(log_name="Mnemosyne")
@@ -171,16 +166,14 @@ class MilvusManager:
 
         # 使用传入的插件数据目录，而不是调用 StarTools.get_data_dir()
         if self._plugin_data_dir is None:
-            logger.error(
-                "致命错误：未提供 plugin_data_dir 参数"
-            )
+            logger.error("致命错误：未提供 plugin_data_dir 参数")
             logger.error(
                 "MilvusManager 必须通过构造函数接收 plugin_data_dir 参数，不能在内部调用 StarTools.get_data_dir()"
             )
             raise RuntimeError(
                 "无法初始化 Milvus Lite 路径：未提供 plugin_data_dir 参数"
             )
-        
+
         default_data_dir = pathlib.Path(self._plugin_data_dir)
 
         # 安全验证路径，防止路径遍历攻击
@@ -235,11 +228,11 @@ class MilvusManager:
         """计算默认的 Milvus Lite 数据路径（使用传入的数据目录）。"""
         if self._plugin_data_dir is None:
             logger.error("致命错误：未提供 plugin_data_dir 参数")
-            logger.error(
-                "Milvus Lite 必须通过构造函数接收 plugin_data_dir 参数"
+            logger.error("Milvus Lite 必须通过构造函数接收 plugin_data_dir 参数")
+            raise RuntimeError(
+                "无法初始化默认 Milvus Lite 路径：未提供 plugin_data_dir"
             )
-            raise RuntimeError(f"无法初始化默认 Milvus Lite 路径：未提供 plugin_data_dir")
-        
+
         try:
             default_dir = pathlib.Path(self._plugin_data_dir)
             # 使用 _prepare_lite_path 来确保最终路径是带 .db 的文件路径

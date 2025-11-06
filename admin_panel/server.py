@@ -32,6 +32,7 @@ class AdminPanelServer:
         port: int = 8000,
         host: str = "127.0.0.1",
         api_key: str = "",
+        data_dir: str | None = None,
     ):
         """
         初始化服务器
@@ -41,11 +42,13 @@ class AdminPanelServer:
             port: 服务器端口
             host: 服务器主机
             api_key: API密钥（如果为空则从配置中读取）
+            data_dir: 数据目录路径（用于存储认证token等数据）
         """
         self.plugin = plugin_instance
         self.port = port
         self.host = host
         self.api_key = api_key  # 保存传入的API密钥
+        self.data_dir = data_dir  # 保存数据目录
         self.app = FastAPI(
             title="Mnemosyne Admin Panel",
             description="Mnemosyne 插件的 Web 管理面板",

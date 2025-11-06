@@ -192,18 +192,18 @@ def initialize_milvus(plugin: "Mnemosyne", plugin_data_dir: str | None = None):
     并进行必要的集合与索引设置。
 
     注意：Windows 系统不支持 Milvus Lite，自动使用标准 Milvus。
-    
+
     Args:
         plugin: Mnemosyne 插件实例
         plugin_data_dir: 插件数据目录路径，必须从 main.py 传入
     """
     init_logger.debug("开始初始化 Milvus 连接和设置...")
-    
+
     # 验证必须的 plugin_data_dir 参数
     if plugin_data_dir is None:
         init_logger.error("initialize_milvus 必须接收 plugin_data_dir 参数")
         raise ValueError("plugin_data_dir 参数不能为 None，必须从 main.py 传入")
-    
+
     connect_args = {}  # 用于收集传递给 MilvusManager 的参数
     is_lite_mode = False  # 标记是否为 Lite 模式
 
