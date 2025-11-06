@@ -185,18 +185,21 @@ def initialize_config_and_schema(plugin: "Mnemosyne"):
         raise  # 重新抛出异常，以便在主 __init__ 中捕获
 
 
-def initialize_milvus(plugin: "Mnemosyne"):
+def initialize_milvus(plugin: "Mnemosyne", plugin_data_dir: str | None = None):
     """
     初始化 MilvusManager。
     根据配置决定连接到 Milvus Lite 或标准 Milvus 服务器，
     并进行必要的集合与索引设置。
 
     注意：Windows 系统不支持 Milvus Lite，自动使用标准 Milvus。
+
+    Args:
+        plugin: Mnemosyne 插件实例
+        plugin_data_dir: 插件数据目录路径，应从 main.py 传入
     """
     init_logger.debug("开始初始化 Milvus 连接和设置...")
     connect_args = {}  # 用于收集传递给 MilvusManager 的参数
     is_lite_mode = False  # 标记是否为 Lite 模式
-    plugin_data_dir = None  # 初始化 plugin_data_dir 变量
 
     # 检测操作系统：Windows 不支持 Milvus Lite
     is_windows = platform.system() == "Windows"
@@ -206,14 +209,11 @@ def initialize_milvus(plugin: "Mnemosyne"):
         )
 
     try:
-        # 0. 尽早获取 plugin_data_dir，无论使用哪种模式都需要
-        try:
-            plugin_data_dir = StarTools.get_data_dir()
-            init_logger.debug(f"已获取插件数据目录: {plugin_data_dir}")
-        except Exception as e:
-            init_logger.warning(f"无法通过 StarTools 获取插件数据目录: {e}")
-            # 如果无法获取，后续在需要时会报错
-            plugin_data_dir = None
+        # 验证 plugin_data_dir 是否已传入
+        if not plugin_data_dir:
+            init_logger.warning(
+                "plugin_data_dir 未传入，这可能会导致 Milvus Lite 初始化失败"
+            )
 
         # 1. 优先检查 Milvus Lite 配置（仅在非 Windows 系统上）
         lite_path = plugin.config.get("milvus_lite_path", "") if not is_windows else ""
