@@ -196,6 +196,50 @@ class Mnemosyne(Star):
         )
         return False
 
+    async def _ensure_milvus_connection_async(self):
+        """
+        在 Embedding Provider 加载完成后，确保 Milvus 连接已建立
+        这个方法会在插件初始化完成后自动运行，无需用户手动触发
+        """
+        try:
+            # 等待 Embedding Provider 加载完成
+            if self._embedding_provider_task:
+                logger.debug("等待 Embedding Provider 加载完成后再连接 Milvus...")
+                await self._embedding_provider_task
+
+            # 检查 Milvus Manager 是否已初始化
+            if not self.milvus_manager:
+                logger.warning("Milvus Manager 未初始化，跳过自动连接")
+                return
+
+            # 检查是否已连接
+            if self.milvus_manager.is_connected():
+                logger.info("✅ Milvus 已连接")
+                return
+
+            # 尝试建立连接
+            logger.info("正在建立 Milvus 连接...")
+            self.milvus_manager.connect()
+
+            if self.milvus_manager.is_connected():
+                logger.info("✅ Milvus 连接成功")
+
+                # 如果 Embedding Provider 已就绪，确保集合已创建
+                if self._embedding_provider_ready:
+                    try:
+                        logger.info("正在初始化 Milvus 集合...")
+                        initialization.setup_milvus_collection_and_index(
+                            self, skip_if_not_ready=False
+                        )
+                        logger.info("✅ Milvus 集合初始化完成")
+                    except Exception as e:
+                        logger.warning(f"Milvus 集合初始化失败: {e}")
+            else:
+                logger.warning("Milvus 连接建立失败")
+
+        except Exception as e:
+            logger.error(f"自动建立 Milvus 连接时出错: {e}", exc_info=True)
+
     async def _initialize_plugin_async(self):
         """
         非阻塞的异步初始化流程
@@ -221,6 +265,9 @@ class Mnemosyne(Star):
             self._embedding_provider_task = asyncio.create_task(
                 self._initialize_embedding_provider_async(max_wait=10.0)
             )
+
+            # 启动 Milvus 连接后台任务（在 Embedding Provider 加载后执行）
+            asyncio.create_task(self._ensure_milvus_connection_async())
 
             # 2. 继续初始化其他组件
             try:
