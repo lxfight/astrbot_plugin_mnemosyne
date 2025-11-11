@@ -57,9 +57,19 @@ async def handle_query_memory(
     try:
         # --- 获取会话和人格信息 ---
         persona_id = await _get_persona_id(plugin, event)
-        session_id = await plugin.context.conversation_manager.get_curr_conversation_id(
-            event.unified_msg_origin
-        )
+        # 直接使用 unified_msg_origin 作为 session_id，确保多Bot场景下的记忆隔离
+        session_id = event.unified_msg_origin
+
+        # 【新增】触发运行时自动迁移
+        if session_id and ":" in session_id:
+            # 异步触发迁移，不阻塞查询
+            from .migration_utils import migrate_session_data_if_needed
+
+            asyncio.create_task(
+                migrate_session_data_if_needed(
+                    plugin, session_id, plugin.collection_name
+                )
+            )
 
         # M12 修复: 加强 session_id 空值检查，确保类型和内容都有效
         if (
@@ -162,9 +172,8 @@ async def handle_on_llm_resp(
         return
 
     try:
-        session_id = await plugin.context.conversation_manager.get_curr_conversation_id(
-            event.unified_msg_origin
-        )
+        # 直接使用 unified_msg_origin 作为 session_id
+        session_id = event.unified_msg_origin
         if not session_id:
             logger.error("无法获取当前 session_id,无法记录 LLM 响应到Mnemosyne。")
             return
@@ -228,11 +237,14 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str |
         人格 ID 字符串，如果没有人格或发生错误则为 None。
     """
     # logger = plugin.logger
-    session_id = await plugin.context.conversation_manager.get_curr_conversation_id(
-        event.unified_msg_origin
+    # 获取 conversation_id 用于获取人格配置
+    conversation_id = (
+        await plugin.context.conversation_manager.get_curr_conversation_id(
+            event.unified_msg_origin
+        )
     )
     conversation = await plugin.context.conversation_manager.get_conversation(
-        event.unified_msg_origin, str(session_id)
+        event.unified_msg_origin, str(conversation_id)
     )
     persona_id = conversation.persona_id if conversation else None
 
@@ -240,7 +252,7 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str |
         # 不使用默认人格，避免记忆错乱
         # 当会话没有配置人格时，使用占位符或None，而不是回退到默认人格
         logger.warning(
-            f"当前会话 (ID: {session_id}) 未配置人格，将使用占位符 '{DEFAULT_PERSONA_ON_NONE}' 进行记忆操作（如果启用人格过滤）。"
+            f"当前会话 (ID: {event.unified_msg_origin}) 未配置人格，将使用占位符 '{DEFAULT_PERSONA_ON_NONE}' 进行记忆操作（如果启用人格过滤）。"
         )
         if plugin.config.get("use_personality_filtering", False):
             persona_id = DEFAULT_PERSONA_ON_NONE
@@ -809,7 +821,9 @@ async def handle_summary_long_memory(
                 return
 
             # 使用 AstrBot EmbeddingProvider 的 get_embedding 方法
-            embedding_vector = await plugin.embedding_provider.get_embedding(summary_text)
+            embedding_vector = await plugin.embedding_provider.get_embedding(
+                summary_text
+            )
 
             if not embedding_vector:
                 logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")

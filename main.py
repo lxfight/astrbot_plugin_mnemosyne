@@ -69,6 +69,7 @@ class Mnemosyne(Star):
         self._initialization_successful = False
         self._initialized_components = []
         self._embedding_provider_ready = False
+        self._migrated_sessions: set[str] = set()  # 用于记录已迁移的会话
 
         logger.info("开始初始化 Mnemosyne 插件...")
         # 启动后台异步初始化，但不包括 Embedding Provider 的初始化
@@ -324,7 +325,11 @@ class Mnemosyne(Star):
                 # 将 plugin_data_dir 转换为字符串（如果是 Path 对象）
                 plugin_data_dir_str = str(plugin_data_dir) if plugin_data_dir else None
                 self.admin_panel_server = AdminPanelServer(
-                    self, port=port, host=host, api_key=api_key, data_dir=plugin_data_dir_str
+                    self,
+                    port=port,
+                    host=host,
+                    api_key=api_key,
+                    data_dir=plugin_data_dir_str,
                 )
                 # 在独立线程中启动服务器
                 import threading
@@ -550,9 +555,8 @@ class Mnemosyne(Star):
             if is_group_chat(event):
                 yield event.plain_result("⚠️ 未开启群聊会话隔离，禁止清除群聊长期记忆")
                 return
-        session_id = await self.context.conversation_manager.get_curr_conversation_id(
-            event.unified_msg_origin
-        )
+        # 直接使用 unified_msg_origin 作为 session_id
+        session_id = event.unified_msg_origin
         if session_id:  # 确保session_id不为None
             async for result in commands.delete_session_memory_cmd_impl(
                 self, event, session_id, confirm
