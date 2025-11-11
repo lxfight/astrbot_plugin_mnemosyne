@@ -8,17 +8,18 @@ async function loadConfig() {
     showLoading(true);
     
     try {
-        const data = await apiCall('/config/current');
+        // 修复: 使用正确的API路径 /api/config
+        const data = await apiCall('/config');
         AppState.configData = data;
         originalConfig = JSON.parse(JSON.stringify(data)); // 深拷贝
         
-        // 渲染配置表单
-        renderConfigForm(data.config);
+        // 渲染配置表单 - 后端返回的就是config对象，不需要.config
+        renderConfigForm(data);
         
         showToast('配置加载成功', 'success');
     } catch (error) {
         console.error('加载配置失败:', error);
-        showConfigError('配置加载失败');
+        showConfigError('配置加载失败: ' + error.message);
     } finally {
         showLoading(false);
     }
@@ -171,7 +172,8 @@ async function saveConfig() {
     showLoading(true);
     
     try {
-        await apiCall('/config/update', 'POST', { config: formData });
+        // 修复: 使用正确的API路径，直接发送formData
+        await apiCall('/config', 'POST', formData);
         
         showToast('配置保存成功', 'success');
         
@@ -241,7 +243,8 @@ function resetConfig() {
     }
     
     if (originalConfig) {
-        renderConfigForm(originalConfig.config);
+        // 修复: 后端返回的就是config对象
+        renderConfigForm(originalConfig);
         showToast('配置已重置', 'info');
     }
 }
@@ -249,7 +252,8 @@ function resetConfig() {
 // 导出配置
 async function exportConfig() {
     try {
-        const configJson = JSON.stringify(AppState.configData.config, null, 2);
+        // 修复: 后端返回的就是config对象
+        const configJson = JSON.stringify(AppState.configData, null, 2);
         const blob = new Blob([configJson], { type: 'application/json' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -267,18 +271,27 @@ async function exportConfig() {
     }
 }
 
-// 显示错误
+// 显示错误 (使用DOM创建，避免XSS)
 function showConfigError(message) {
     const container = document.getElementById('config-form');
     if (container) {
-        container.innerHTML = `
-            <div style="padding: 2rem; text-align: center; color: var(--danger-color);">
-                <p>❌ ${message}</p>
-                <button class="btn btn-primary" onclick="loadConfig()" style="margin-top: 1rem;">
-                    重试
-                </button>
-            </div>
-        `;
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
+        
+        const p = document.createElement('p');
+        p.textContent = `❌ ${message}`;
+        
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary';
+        btn.style.marginTop = '1rem';
+        btn.textContent = '重试';
+        btn.onclick = loadConfig;
+        
+        errorDiv.appendChild(p);
+        errorDiv.appendChild(btn);
+        
+        container.innerHTML = '';
+        container.appendChild(errorDiv);
     }
 }
 

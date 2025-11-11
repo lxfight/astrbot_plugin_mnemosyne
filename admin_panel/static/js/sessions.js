@@ -21,17 +21,21 @@ async function loadSessions() {
     }
 }
 
-// 渲染会话列表
+// 渲染会话列表 (使用DOM创建，避免XSS)
 function renderSessionsList(sessions) {
     const container = document.getElementById('sessions-list');
     if (!container) return;
     
     if (!sessions || sessions.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <p>暂无会话数据</p>
-            </div>
-        `;
+        // 使用DOM创建空状态
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'empty-state';
+        const p = document.createElement('p');
+        p.textContent = '暂无会话数据';
+        emptyDiv.appendChild(p);
+        
+        container.innerHTML = '';
+        container.appendChild(emptyDiv);
         return;
     }
     
@@ -156,18 +160,27 @@ async function deleteSession(sessionId) {
     }
 }
 
-// 显示错误
+// 显示错误 (使用DOM创建，避免XSS)
 function showSessionsError(message) {
     const container = document.getElementById('sessions-list');
     if (container) {
-        container.innerHTML = `
-            <div style="padding: 2rem; text-align: center; color: var(--danger-color);">
-                <p>❌ ${message}</p>
-                <button class="btn btn-primary" onclick="loadSessions()" style="margin-top: 1rem;">
-                    重试
-                </button>
-            </div>
-        `;
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
+        
+        const p = document.createElement('p');
+        p.textContent = `❌ ${message}`;
+        
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary';
+        btn.style.marginTop = '1rem';
+        btn.textContent = '重试';
+        btn.onclick = loadSessions;
+        
+        errorDiv.appendChild(p);
+        errorDiv.appendChild(btn);
+        
+        container.innerHTML = '';
+        container.appendChild(errorDiv);
     }
 }
 

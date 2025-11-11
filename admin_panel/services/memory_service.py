@@ -167,6 +167,9 @@ class MemoryService:
                             "persona_id"
                         )
 
+                        # 获取memory_type字段（如果存在）
+                        memory_type = result.get("memory_type", "long_term")
+
                         record = MemoryRecord(
                             memory_id=str(result.get("memory_id", "")),
                             session_id=result.get("session_id", ""),
@@ -174,6 +177,8 @@ class MemoryService:
                             create_time=create_time,
                             persona_id=persona_id_value,
                         )
+                        # 将memory_type添加到metadata中，以便前端使用
+                        record.metadata["memory_type"] = memory_type
                         records.append(record)
                     except Exception as e:
                         self.logger.error(f"转换记忆记录失败: {e}")

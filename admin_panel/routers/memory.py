@@ -86,6 +86,45 @@ def setup_memory_routes(app, plugin_instance):
             logger.error(f"获取会话列表失败: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    # API: 批量删除记忆
+    @router.post("/api/memories/delete")
+    async def batch_delete_memories(request: Request):
+        try:
+            body = await request.json()
+            memory_ids = body.get("memory_ids", [])
+
+            if not memory_ids or not isinstance(memory_ids, list):
+                raise HTTPException(status_code=400, detail="memory_ids 参数无效")
+
+            # 验证每个 memory_id
+            import re
+
+            for memory_id in memory_ids:
+                if not isinstance(memory_id, str) or not re.match(
+                    r"^[a-zA-Z0-9_-]+$", memory_id
+                ):
+                    raise HTTPException(
+                        status_code=400, detail=f"memory_id 格式无效: {memory_id}"
+                    )
+
+            # 批量删除
+            deleted_count = 0
+            for memory_id in memory_ids:
+                success = await memory_service.delete_memory(memory_id)
+                if success:
+                    deleted_count += 1
+
+            return {
+                "success": True,
+                "message": f"已删除 {deleted_count} 条记忆",
+                "deleted_count": deleted_count,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"批量删除记忆失败: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
+
     # API: 删除单条记忆
     @router.delete("/api/memories/{memory_id}")
     async def delete_memory(memory_id: str, request: Request):
@@ -150,7 +189,49 @@ def setup_memory_routes(app, plugin_instance):
             logger.error(f"删除会话记忆失败: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
-    # API: 导出记忆
+    # API: 导出记忆 (支持GET和POST两种方法)
+    @router.get("/api/memories/export")
+    async def export_memories_get(
+        request: Request,
+        format: str = Query("json"),
+        session_id: str | None = Query(None),
+        start_date: str | None = Query(None),
+        end_date: str | None = Query(None),
+    ):
+        """GET方法导出记忆"""
+        try:
+            start_datetime = datetime.fromisoformat(start_date) if start_date else None
+            end_datetime = datetime.fromisoformat(end_date) if end_date else None
+
+            content = await memory_service.export_memories(
+                format=format,
+                session_id=session_id,
+                start_date=start_datetime,
+                end_date=end_datetime,
+            )
+
+            if content is None:
+                raise HTTPException(status_code=500, detail="导出失败")
+
+            # 生成文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"memories_export_{timestamp}.{format}"
+
+            # 返回文件内容
+            from fastapi.responses import Response
+
+            media_type = "application/json" if format == "json" else "text/csv"
+            return Response(
+                content=content,
+                media_type=media_type,
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"导出记忆失败: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
+
     @router.post("/api/memories/export")
     async def export_memories(
         request: Request,

@@ -87,20 +87,22 @@ async function loadMemories(params = {}) {
     try {
         // 构建查询参数
         const queryParams = new URLSearchParams();
-        if (currentSearchParams.session_id) {
-            queryParams.append('session_id', currentSearchParams.session_id);
+        // 确保正确传递 session_id 和 persona_id
+        if (currentSearchParams.session_id && currentSearchParams.session_id.trim()) {
+            queryParams.append('session_id', currentSearchParams.session_id.trim());
         }
-        if (currentSearchParams.persona_id) {
-            queryParams.append('persona_id', currentSearchParams.persona_id);
+        if (currentSearchParams.persona_id && currentSearchParams.persona_id.trim()) {
+            queryParams.append('persona_id', currentSearchParams.persona_id.trim());
         }
-        if (currentSearchParams.keyword) {
-            queryParams.append('keyword', currentSearchParams.keyword);
+        if (currentSearchParams.keyword && currentSearchParams.keyword.trim()) {
+            queryParams.append('keyword', currentSearchParams.keyword.trim());
         }
         queryParams.append('limit', currentSearchParams.page_size);
         queryParams.append('offset', (currentSearchParams.page - 1) * currentSearchParams.page_size);
         queryParams.append('sort_by', 'create_time');
         queryParams.append('sort_order', 'desc');
         
+        console.log('查询参数:', queryParams.toString());
         const data = await apiCall(`/memories/search?${queryParams.toString()}`, 'POST', {});
         
         if (data && data.records) {
@@ -191,7 +193,8 @@ function createMemoryItem(memory) {
     sessionSpan.textContent = `会话: ${memory.session_id}`;
     const timeSpan = document.createElement('span');
     timeSpan.className = 'memory-time';
-    timeSpan.textContent = formatTime(memory.timestamp);
+    // 修复: 使用 create_time 而不是 timestamp
+    timeSpan.textContent = formatTime(memory.create_time || memory.timestamp);
     headerDiv.appendChild(sessionSpan);
     headerDiv.appendChild(timeSpan);
     
@@ -203,7 +206,9 @@ function createMemoryItem(memory) {
     footerDiv.className = 'memory-footer';
     const typeSpan = document.createElement('span');
     typeSpan.className = 'memory-type';
-    typeSpan.textContent = getMemoryTypeText(memory.memory_type);
+    // 修复: 从 metadata 中获取 memory_type
+    const memoryType = memory.metadata?.memory_type || memory.memory_type || 'long_term';
+    typeSpan.textContent = getMemoryTypeText(memoryType);
     footerDiv.appendChild(typeSpan);
     
     if (memory.similarity_score !== null) {
@@ -242,7 +247,7 @@ function createMemoryItem(memory) {
     return div;
 }
 
-// 渲染分页
+// 渲染分页 (使用DOM创建，避免XSS)
 function renderPagination(pagination) {
     const container = document.getElementById('memories-pagination');
     if (!container) return;
@@ -260,35 +265,50 @@ function renderPagination(pagination) {
         return;
     }
     
-    let html = '<div class="pagination">';
+    // 使用DOM方法创建分页元素
+    const paginationDiv = document.createElement('div');
+    paginationDiv.className = 'pagination';
     
-    // 上一页
+    // 上一页按钮
     if (page > 1) {
-        html += `<button class="btn btn-secondary" onclick="loadMemories({page: ${page - 1}})">上一页</button>`;
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'btn btn-secondary';
+        prevBtn.textContent = '上一页';
+        prevBtn.onclick = () => loadMemories({page: page - 1});
+        paginationDiv.appendChild(prevBtn);
     }
     
     // 页码信息
-    html += `<span class="page-info">第 ${page} / ${total_pages} 页，共 ${total} 条</span>`;
+    const pageInfo = document.createElement('span');
+    pageInfo.className = 'page-info';
+    pageInfo.textContent = `第 ${page} / ${total_pages} 页，共 ${total} 条`;
+    paginationDiv.appendChild(pageInfo);
     
-    // 下一页
+    // 下一页按钮
     if (page < total_pages) {
-        html += `<button class="btn btn-secondary" onclick="loadMemories({page: ${page + 1}})">下一页</button>`;
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'btn btn-secondary';
+        nextBtn.textContent = '下一页';
+        nextBtn.onclick = () => loadMemories({page: page + 1});
+        paginationDiv.appendChild(nextBtn);
     }
     
-    html += '</div>';
-    container.innerHTML = html;
+    container.innerHTML = '';
+    container.appendChild(paginationDiv);
 }
 
 // 搜索记忆
 async function searchMemories() {
     const keyword = document.getElementById('search-keyword')?.value || '';
-    const sessionId = document.getElementById('search-session')?.value || null;
+    const sessionId = document.getElementById('search-session-id')?.value || null;
+    const personaId = document.getElementById('search-persona-id')?.value || null;
     const startDate = document.getElementById('search-start-date')?.value || null;
     const endDate = document.getElementById('search-end-date')?.value || null;
     
     await loadMemories({
         keyword,
         session_id: sessionId,
+        persona_id: personaId,
         start_date: startDate,
         end_date: endDate,
         page: 1
@@ -301,8 +321,11 @@ async function resetSearch() {
     if (document.getElementById('search-keyword')) {
         document.getElementById('search-keyword').value = '';
     }
-    if (document.getElementById('search-session')) {
-        document.getElementById('search-session').value = '';
+    if (document.getElementById('search-session-id')) {
+        document.getElementById('search-session-id').value = '';
+    }
+    if (document.getElementById('search-persona-id')) {
+        document.getElementById('search-persona-id').value = '';
     }
     if (document.getElementById('search-start-date')) {
         document.getElementById('search-start-date').value = '';
@@ -315,6 +338,7 @@ async function resetSearch() {
     await loadMemories({
         keyword: '',
         session_id: null,
+        persona_id: null,
         start_date: null,
         end_date: null,
         page: 1
@@ -494,8 +518,11 @@ function viewMemoryDetail(memoryId) {
     
     addDetailItem('记忆ID', memory.memory_id);
     addDetailItem('会话ID', memory.session_id);
-    addDetailItem('时间', formatTime(memory.timestamp));
-    addDetailItem('类型', getMemoryTypeText(memory.memory_type));
+    // 修复: 使用 create_time 而不是 timestamp
+    addDetailItem('时间', formatTime(memory.create_time || memory.timestamp));
+    // 修复: 从 metadata 中获取 memory_type
+    const memoryType = memory.metadata?.memory_type || memory.memory_type || 'long_term';
+    addDetailItem('类型', getMemoryTypeText(memoryType));
     
     if (memory.similarity_score !== null) {
         addDetailItem('相似度', memory.similarity_score.toFixed(3));
@@ -545,16 +572,26 @@ async function exportMemories(format = 'json') {
     showLoading(true);
     
     try {
-        const params = new URLSearchParams({
-            format,
-            ...currentSearchParams
-        });
+        // 构建查询参数
+        const params = new URLSearchParams({ format });
         
-        // 使用 fetch 下载文件
+        // 只添加有值的参数
+        if (currentSearchParams.session_id) {
+            params.append('session_id', currentSearchParams.session_id);
+        }
+        if (currentSearchParams.start_date) {
+            params.append('start_date', currentSearchParams.start_date);
+        }
+        if (currentSearchParams.end_date) {
+            params.append('end_date', currentSearchParams.end_date);
+        }
+        
+        // 使用 fetch 下载文件，添加会话令牌
         const response = await fetch(`${API_BASE}/memories/export?${params}`, {
             method: 'GET',
             headers: {
-                'Accept': 'application/json'
+                'Accept': 'application/json',
+                'X-Session-Token': AppState.sessionToken
             }
         });
         
@@ -602,18 +639,27 @@ function getMemoryTypeText(type) {
     return types[type] || type;
 }
 
-// 显示错误
+// 显示错误 (使用DOM创建，避免XSS)
 function showMemoriesError(message) {
     const container = document.getElementById('memories-list');
     if (container) {
-        container.innerHTML = `
-            <div style="padding: 2rem; text-align: center; color: var(--danger-color);">
-                <p>❌ ${message}</p>
-                <button class="btn btn-primary" onclick="loadMemories()" style="margin-top: 1rem;">
-                    重试
-                </button>
-            </div>
-        `;
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
+        
+        const p = document.createElement('p');
+        p.textContent = `❌ ${message}`;
+        
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary';
+        btn.style.marginTop = '1rem';
+        btn.textContent = '重试';
+        btn.onclick = () => loadMemories();
+        
+        errorDiv.appendChild(p);
+        errorDiv.appendChild(btn);
+        
+        container.innerHTML = '';
+        container.appendChild(errorDiv);
     }
 }
 
