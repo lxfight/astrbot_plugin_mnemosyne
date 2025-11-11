@@ -1,20 +1,18 @@
-﻿
-# Mnemosyne 插件的命令处理函数实现
+﻿# Mnemosyne 插件的命令处理函数实现
 # (注意：装饰器已移除，函数接收 self)
 
+import json
+import time as time_module
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from astrbot.api import logger
-
-# 导入 AstrBot API 和类型 (仅需要事件和消息段)
 from astrbot.api.event import AstrMessageEvent
 
-# 导入必要的模块和常量
 from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME
 from .security_utils import safe_build_milvus_expression, validate_session_id
 
-# 类型提示
 if TYPE_CHECKING:
     from ..main import Mnemosyne
 
@@ -75,9 +73,7 @@ async def delete_collection_cmd_impl(
 
     try:
         sender_id = event.get_sender_id()
-        logger.warning(
-            f"管理员 {sender_id} 请求删除集合: {collection_name} (确认执行)"
-        )
+        logger.warning(f"管理员 {sender_id} 请求删除集合: {collection_name} (确认执行)")
         if is_current_collection:
             logger.critical(
                 f"管理员 {sender_id} 正在删除当前插件使用的集合 '{collection_name}'！"
@@ -421,7 +417,311 @@ async def get_session_id_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
                 f"用户 {event.get_sender_id()} 在 {event.unified_msg_origin} 尝试获取 session_id 失败。"
             )
     except Exception as e:
-        logger.error(
-            f"执行 'memory get_session_id' 命令失败: {str(e)}", exc_info=True
-        )
+        logger.error(f"执行 'memory get_session_id' 命令失败: {str(e)}", exc_info=True)
         yield event.plain_result(f"⚠️ 获取当前会话 ID 时发生错误: {str(e)}")
+
+
+async def init_memory_system_cmd_impl(
+    self: "Mnemosyne",
+    event: AstrMessageEvent,
+    force: str | None = None,
+):
+    """[实现] 初始化或重新初始化记忆系统"""
+    if not self.milvus_manager:
+        yield event.plain_result("⚠️ Milvus 服务未初始化。")
+        return
+
+    # 尝试确保连接 - MilvusManager 使用延迟连接，首次操作时才会真正连接
+    try:
+        # 通过调用一个轻量级操作来触发连接（如果尚未连接）
+        if not self.milvus_manager.is_connected():
+            # 尝试连接
+            self.milvus_manager.list_collections()
+    except Exception as e:
+        logger.error(f"尝试连接 Milvus 失败: {e}")
+        yield event.plain_result(
+            f"⚠️ 无法连接到 Milvus 服务: {e}\n请检查 Milvus 配置和服务状态。"
+        )
+        return
+
+    try:
+        # 检查 embedding provider 是否就绪
+        if not self.embedding_provider or not self._embedding_provider_ready:
+            yield event.plain_result(
+                "⚠️ Embedding Provider 尚未就绪。\n"
+                "请确保已在 AstrBot 中配置并启用 Embedding Provider。\n"
+                "配置完成后请重试此命令。"
+            )
+            return
+
+        # 获取当前 embedding 维度
+        current_dim = None
+        try:
+            current_dim = getattr(self.embedding_provider, "embedding_dim", None)
+            if not current_dim and callable(
+                getattr(self.embedding_provider, "get_dim", None)
+            ):
+                current_dim = self.embedding_provider.get_dim()
+        except Exception as e:
+            logger.error(f"获取 embedding 维度失败: {e}")
+            yield event.plain_result(f"⚠️ 无法获取 Embedding Provider 的维度信息: {e}")
+            return
+
+        if not current_dim or not isinstance(current_dim, int) or current_dim <= 0:
+            yield event.plain_result(
+                f"⚠️ Embedding Provider 返回的维度无效: {current_dim}\n"
+                "请检查 Embedding Provider 配置。"
+            )
+            return
+
+        collection_name = self.collection_name
+        needs_migration = False
+        old_dim = None
+
+        # 检查集合是否已存在
+        if self.milvus_manager.has_collection(collection_name):
+            # 检查现有集合的维度
+            collection = self.milvus_manager.get_collection(collection_name)
+            if collection:
+                for field in collection.schema.fields:
+                    if field.name == "embedding":  # 向量字段名
+                        old_dim = field.params.get("dim")
+                        if old_dim != current_dim:
+                            needs_migration = True
+                            logger.warning(
+                                f"检测到维度不匹配: 集合维度={old_dim}, 模型维度={current_dim}"
+                            )
+                        break
+
+            if needs_migration:
+                if force != "--force":
+                    yield event.plain_result(
+                        f"⚠️ 维度不匹配警告 ⚠️\n\n"
+                        f"现有集合 '{collection_name}' 的向量维度为 {old_dim}\n"
+                        f"当前 Embedding Provider 的维度为 {current_dim}\n\n"
+                        f"需要重新初始化集合以匹配新维度。\n"
+                        f"旧数据的文本内容将被保留并使用新维度重新生成向量。\n\n"
+                        f"⚠️ 此操作将：\n"
+                        f"1. 备份当前集合的文本数据\n"
+                        f"2. 删除旧集合\n"
+                        f"3. 创建新集合（使用新维度）\n"
+                        f"4. 重新生成向量并导入数据\n\n"
+                        f"如果确认执行，请运行:\n"
+                        f"`/memory init --force`"
+                    )
+                    return
+
+                # 执行数据迁移
+                yield event.plain_result(
+                    f"🔄 开始迁移数据...\n从维度 {old_dim} 迁移到 {current_dim}"
+                )
+
+                # 检查插件数据目录
+                if not self.plugin_data_dir:
+                    yield event.plain_result("⚠️ 无法获取插件数据目录，迁移中止")
+                    logger.error("plugin_data_dir 未初始化，无法进行备份")
+                    return
+
+                # 创建备份目录
+
+                backup_dir = Path(self.plugin_data_dir) / "backups"
+                try:
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    yield event.plain_result(f"⚠️ 无法创建备份目录: {e}，迁移中止")
+                    logger.error(f"创建备份目录失败: {e}")
+                    return
+
+                timestamp = int(time_module.time())
+                backup_file = (
+                    backup_dir
+                    / f"memory_backup_{collection_name}_{old_dim}to{current_dim}_{timestamp}.json"
+                )
+
+                # 分批导出旧数据
+                logger.info(f"开始分批导出集合 '{collection_name}' 的所有数据...")
+                yield event.plain_result("📦 正在分批导出所有记忆数据...")
+
+                all_records = []
+                batch_size = 16384  # Milvus 单次查询上限
+                offset = 0
+
+                try:
+                    while True:
+                        batch_records = self.milvus_manager.query(
+                            collection_name=collection_name,
+                            expression=f"{PRIMARY_FIELD_NAME} >= 0",
+                            output_fields=[
+                                "content",
+                                "create_time",
+                                "session_id",
+                                "personality_id",
+                            ],
+                            limit=batch_size,
+                            offset=offset,
+                        )
+
+                        if not batch_records:
+                            break
+
+                        all_records.extend(batch_records)
+                        offset += len(batch_records)
+
+                        logger.info(f"已导出 {len(all_records)} 条记录...")
+
+                        # 如果本批次少于batch_size，说明已经到达末尾
+                        if len(batch_records) < batch_size:
+                            break
+
+                    if not all_records:
+                        logger.warning("旧集合中没有数据，将创建新集合。")
+
+                except Exception as e:
+                    logger.error(f"导出旧数据失败: {e}")
+                    yield event.plain_result(f"⚠️ 导出旧数据失败: {e}，迁移中止")
+                    return
+
+                record_count = len(all_records)
+
+                # 保存备份到文件 - 备份失败则终止整个操作
+                try:
+                    backup_data = {
+                        "collection_name": collection_name,
+                        "old_dimension": old_dim,
+                        "new_dimension": current_dim,
+                        "timestamp": timestamp,
+                        "record_count": record_count,
+                        "records": all_records,
+                    }
+                    with open(backup_file, "w", encoding="utf-8") as f:
+                        json.dump(backup_data, f, ensure_ascii=False, indent=2)
+                    logger.info(f"已将 {record_count} 条记录备份到: {backup_file}")
+                    yield event.plain_result(
+                        f"✅ 已导出并备份 {record_count} 条记录\n"
+                        f"备份文件: {backup_file.name}"
+                    )
+                except Exception as e:
+                    logger.error(f"保存备份文件失败: {e}")
+                    yield event.plain_result(
+                        f"⚠️ 保存备份文件失败: {e}\n"
+                        f"为保证数据安全，迁移操作已终止。\n"
+                        f"请检查磁盘空间和文件权限后重试。"
+                    )
+                    return
+
+                old_records = all_records
+
+                # 删除旧集合
+                logger.info(f"删除旧集合 '{collection_name}'...")
+                if not self.milvus_manager.drop_collection(collection_name):
+                    yield event.plain_result("⚠️ 删除旧集合失败")
+                    return
+                yield event.plain_result("✅ 已删除旧集合")
+
+                # 更新 schema 并创建新集合
+                logger.info("更新 schema 并创建新集合...")
+                self.config["embedding_dim"] = current_dim
+
+                # 重新初始化 schema
+                from . import initialization
+
+                initialization.initialize_config_and_schema(self)
+
+                # 创建新集合
+                initialization.setup_milvus_collection_and_index(
+                    self, skip_if_not_ready=False
+                )
+                yield event.plain_result(f"✅ 已创建新集合（维度: {current_dim}）")
+
+                # 重新生成向量并导入
+                if old_records:
+                    yield event.plain_result(
+                        f"🔄 正在重新生成 {record_count} 条记录的向量..."
+                    )
+                    success_count = 0
+                    fail_count = 0
+
+                    for i, record in enumerate(old_records):
+                        try:
+                            content = record.get("content", "")
+                            if not content:
+                                continue
+
+                            # 生成新向量
+                            embedding = await self.embedding_provider.get_embedding(
+                                content
+                            )
+                            if not embedding:
+                                fail_count += 1
+                                continue
+
+                            # 插入新记录 - 使用类型标注避免 Pylance 错误
+                            insert_data: list = [
+                                {
+                                    "personality_id": record.get("personality_id", ""),
+                                    "session_id": record.get("session_id", ""),
+                                    "content": content,
+                                    "embedding": embedding,
+                                    "create_time": record.get(
+                                        "create_time", int(datetime.now().timestamp())
+                                    ),
+                                }
+                            ]
+
+                            result = self.milvus_manager.insert(
+                                collection_name, insert_data
+                            )
+                            if result:
+                                success_count += 1
+                            else:
+                                fail_count += 1
+
+                            # 每10条记录报告一次进度
+                            if (i + 1) % 10 == 0:
+                                yield event.plain_result(
+                                    f"进度: {i + 1}/{record_count} "
+                                    f"(成功: {success_count}, 失败: {fail_count})"
+                                )
+
+                        except Exception as e:
+                            logger.error(f"处理记录 {i} 时出错: {e}")
+                            fail_count += 1
+
+                    # Flush 确保数据持久化
+                    self.milvus_manager.flush([collection_name])
+
+                    yield event.plain_result(
+                        f"✅ 数据迁移完成！\n"
+                        f"成功: {success_count} 条\n"
+                        f"失败: {fail_count} 条\n"
+                        f"新维度: {current_dim}"
+                    )
+                else:
+                    yield event.plain_result("✅ 迁移完成（无旧数据）")
+
+            else:
+                # 维度匹配，无需迁移
+                yield event.plain_result(
+                    f"✅ 集合 '{collection_name}' 已存在且维度匹配 ({current_dim})。\n"
+                    "无需重新初始化。"
+                )
+        else:
+            # 集合不存在，创建新集合
+            yield event.plain_result(f"📝 集合 '{collection_name}' 不存在，正在创建...")
+
+            self.config["embedding_dim"] = current_dim
+            from . import initialization
+
+            initialization.initialize_config_and_schema(self)
+            initialization.setup_milvus_collection_and_index(
+                self, skip_if_not_ready=False
+            )
+
+            yield event.plain_result(
+                f"✅ 已成功创建集合 '{collection_name}' (维度: {current_dim})\n"
+                "记忆系统已就绪！"
+            )
+
+    except Exception as e:
+        logger.error(f"执行 'memory init' 命令失败: {str(e)}", exc_info=True)
+        yield event.plain_result(f"⚠️ 初始化失败: {str(e)}")

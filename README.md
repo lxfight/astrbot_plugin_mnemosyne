@@ -96,6 +96,7 @@
 ### 命令系统
 
 ```
+/memory init [--force]                    初始化/迁移记忆系统（管理员，首次安装必须）
 /memory list                              查看所有记忆集合
 /memory list_records [collection] [limit] 列出指定集合的记忆记录
 /memory get_session_id                    获取当前会话 ID
@@ -103,6 +104,11 @@
 /memory delete_session_memory [id] [confirm]  删除指定会话记忆（管理员）
 /memory drop_collection [name] [confirm] 删除整个集合（管理员）
 ```
+
+**重要命令说明：**
+
+- `/memory init` - 首次安装后必须执行，用于创建正确维度的集合
+- `/memory init --force` - 强制重新初始化，用于维度迁移（会保留数据）
 
 ### 配置选项
 
@@ -148,7 +154,7 @@
 - AstrBot v4.0.0+
 - Python 3.8+
 - Milvus 数据库（可选择 Milvus Lite 或 Standalone）
-- 已配置的 Embedding Provider
+- **⚠️ 必须先配置 Embedding Provider**
 
 ### 安装步骤
 
@@ -193,12 +199,14 @@ uv pip install -r requirements.txt
 <td><strong>3</strong></td>
 <td>
 
-**配置插件**
+**⚠️ 配置 Embedding Provider（必须）**
 
-在 AstrBot WebUI 中进行插件配置，设置：
-- LLM Provider（用于记忆总结）
-- Embedding Provider（用于向量化）
-- 记忆管理参数
+在 AstrBot WebUI 中**必须先配置** Embedding Provider，插件需要使用其向量维度来创建集合。
+
+支持的 Embedding Provider：
+- OpenAI Embedding
+- Gemini Embedding
+- 其他兼容的 Embedding 服务
 
 </td>
 </tr>
@@ -206,13 +214,50 @@ uv pip install -r requirements.txt
 <td><strong>4</strong></td>
 <td>
 
-**启动服务**
+**配置插件**
 
-重启 AstrBot，插件将自动初始化
+在 AstrBot WebUI 中进行插件配置，设置：
+- LLM Provider（用于记忆总结）
+- 记忆管理参数（如 num_pairs、top_k 等）
+
+</td>
+</tr>
+<tr>
+<td><strong>5</strong></td>
+<td>
+
+**初始化记忆系统**
+
+启动 AstrBot 后，执行以下命令初始化记忆系统：
+
+```
+/memory init
+```
+
+这将：
+- 检测 Embedding Provider 的向量维度
+- 创建匹配维度的 Milvus 集合
+- 建立必要的索引
+
+**首次安装必须执行此命令！**
 
 </td>
 </tr>
 </table>
+
+### 🔄 维度迁移（老用户）
+
+如果您更换了 Embedding Provider 或模型，导致向量维度变化，系统会自动检测并提示您迁移数据：
+
+1. 执行 `/memory init` 检查维度
+2. 如果维度不匹配，系统会提示需要迁移
+3. 执行 `/memory init --force` 确认迁移
+
+**迁移过程：**
+- ✅ 自动备份文本内容
+- ✅ 使用新维度重新生成向量
+- ✅ 保留所有历史记忆数据
+- ⚠️ 迁移过程可能需要一些时间，取决于记忆数量
 
 详细的部署指南请参阅：**[快速启动指南 (QUICKSTART.md)](./QUICKSTART.md)**
 

@@ -86,13 +86,40 @@ def initialize_config_and_schema(plugin: "Mnemosyne"):
     """解析配置、验证和定义模式/索引参数。"""
     init_logger.debug("开始初始化配置和 Schema...")
     try:
-        # 优先从 embedding_provider 获取维度，如果未设置则使用默认值
-        # embedding_dim 将在 main.py 中从 embedding_provider 动态获取并存储到 config 中
-        embedding_dim = plugin.config.get("embedding_dim", DEFAULT_EMBEDDING_DIM)
-        if not isinstance(embedding_dim, int) or embedding_dim <= 0:
+        # 优先尝试从 embedding_provider 动态获取维度
+        embedding_dim = None
+
+        # 尝试从已经初始化的 embedding_provider 获取维度
+        if hasattr(plugin, "embedding_provider") and plugin.embedding_provider:
+            try:
+                dim = getattr(plugin.embedding_provider, "embedding_dim", None)
+                if not dim and callable(
+                    getattr(plugin.embedding_provider, "get_dim", None)
+                ):
+                    dim = plugin.embedding_provider.get_dim()
+
+                if dim and isinstance(dim, int) and dim > 0:
+                    embedding_dim = dim
+                    plugin.config["embedding_dim"] = dim
+                    init_logger.info(f"从 embedding_provider 获取到向量维度: {dim}")
+            except Exception as e:
+                init_logger.debug(f"尝试从 embedding_provider 获取维度时出错: {e}")
+
+        # 如果无法从 provider 获取，尝试从配置文件读取
+        if embedding_dim is None:
+            embedding_dim = plugin.config.get("embedding_dim", None)
+            if embedding_dim and isinstance(embedding_dim, int) and embedding_dim > 0:
+                init_logger.info(f"从配置文件获取到 embedding_dim: {embedding_dim}")
+
+        # 如果仍然没有有效值，使用默认值
+        if (
+            embedding_dim is None
+            or not isinstance(embedding_dim, int)
+            or embedding_dim <= 0
+        ):
             init_logger.warning(
-                f"embedding_dim 无效 ({embedding_dim})，使用默认值 {DEFAULT_EMBEDDING_DIM}。"
-                f"embedding_dim 将在 Embedding Provider 就绪后自动更新。"
+                f"无法从 embedding_provider 或配置获取有效的 embedding_dim，使用默认值 {DEFAULT_EMBEDDING_DIM}。"
+                f"注意：如果实际模型维度与默认值不匹配，可能导致无法存储记忆。"
             )
             embedding_dim = DEFAULT_EMBEDDING_DIM
 
@@ -469,9 +496,10 @@ def initialize_milvus(plugin: "Mnemosyne", plugin_data_dir: str | None = None):
                 f"MilvusManager 已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。"
             )
 
-        # 7. 设置集合和索引
+        # 7. 设置集合和索引 - 延迟创建策略
         init_logger.debug("开始设置 Milvus 集合和索引...")
-        setup_milvus_collection_and_index(plugin)
+        # 使用 skip_if_not_ready=True，如果 embedding provider 未就绪则跳过
+        setup_milvus_collection_and_index(plugin, skip_if_not_ready=True)
         init_logger.info("Milvus 集合和索引设置流程已调用。")
 
         init_logger.debug("Milvus 初始化流程成功完成。")
@@ -484,8 +512,16 @@ def initialize_milvus(plugin: "Mnemosyne", plugin_data_dir: str | None = None):
         # 不再抛出异常，允许插件以降级模式运行
 
 
-def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
-    """确保 Milvus 集合和索引存在并已加载。"""
+def setup_milvus_collection_and_index(
+    plugin: "Mnemosyne", skip_if_not_ready: bool = False
+):
+    """
+    确保 Milvus 集合和索引存在并已加载。
+
+    Args:
+        plugin: Mnemosyne 插件实例
+        skip_if_not_ready: 如果为 True，当 embedding_provider 未就绪时跳过集合创建
+    """
     # 检查是否使用适配器
     use_adapter = plugin.config.get("use_milvus_adapter", False)
 
@@ -503,6 +539,14 @@ def setup_milvus_collection_and_index(plugin: "Mnemosyne"):
         )
 
     collection_name = plugin.collection_name
+
+    # 如果设置了跳过标志且 embedding provider 未就绪，则延迟创建
+    if skip_if_not_ready and not getattr(plugin, "_embedding_provider_ready", False):
+        init_logger.warning(
+            f"Embedding Provider 尚未就绪，跳过集合 '{collection_name}' 的自动创建。"
+            f"集合将在首次使用或执行 /memory init 命令时创建。"
+        )
+        return
 
     # ========== 修复：在检查集合前先明确验证连接状态 ==========
     # 这样可以提前发现连接问题，给出明确的错误信息，而不是等到 has_collection 调用时才发现

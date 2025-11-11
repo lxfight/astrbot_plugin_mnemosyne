@@ -64,6 +64,7 @@ class Mnemosyne(Star):
         self.provider = None
         self.admin_panel_server: AdminPanelServer | None = None  # 管理面板服务器
         self.admin_panel_thread = None  # 管理面板服务器线程
+        self.plugin_data_dir: str | None = None  # 插件数据目录
 
         # --- 初始化状态标记 ---
         self._initialization_successful = False
@@ -200,15 +201,17 @@ class Mnemosyne(Star):
         非阻塞的异步初始化流程
         """
         try:
-            # 0. 先在主模块中获取数据目录
+            # 0. 先在主模块中获取数据目录并保存到实例
             plugin_data_dir = None
             try:
                 from astrbot.api.star import StarTools
 
                 plugin_data_dir = StarTools.get_data_dir()
+                self.plugin_data_dir = str(plugin_data_dir) if plugin_data_dir else None
                 logger.info(f"已获取插件数据目录: {plugin_data_dir}")
             except Exception as e:
                 logger.warning(f"无法获取插件数据目录: {e}，将使用后备方案")
+                self.plugin_data_dir = None
 
             # 1. Embedding Provider 采用延迟初始化策略
             # 在后台静默尝试加载，但不阻塞插件启动
@@ -572,6 +575,18 @@ class Mnemosyne(Star):
         使用示例：/memory get_session_id
         """
         async for result in commands.get_session_id_cmd_impl(self, event):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @memory_group.command("init")  # type: ignore
+    async def init_memory_system_cmd(
+        self, event: AstrMessageEvent, force: str | None = None
+    ):
+        """[管理员] 初始化或重新初始化记忆系统（检查维度并迁移数据）
+        使用示例：/memory init [--force]
+        """
+        async for result in commands.init_memory_system_cmd_impl(self, event, force):
             yield result
         return
 
