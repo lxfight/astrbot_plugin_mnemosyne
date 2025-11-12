@@ -12,8 +12,9 @@ from pymilvus.exceptions import MilvusException
 
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.provider import LLMResponse, ProviderRequest
+from astrbot.core.log import LogManager
 
-# 导入必要的类型和模块
+from .chatroom_parser import ChatroomContextParser
 from .constants import (
     DEFAULT_MILVUS_TIMEOUT,
     DEFAULT_PERSONA_ON_NONE,
@@ -35,8 +36,6 @@ from .tools import (
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
     from ..main import Mnemosyne
-
-from astrbot.core.log import LogManager
 
 logger = LogManager.GetLogger(__name__)
 
@@ -113,10 +112,21 @@ async def handle_query_memory(
                     logger.warning("Embedding Provider 不可用，无法执行 RAG 搜索")
                     return
 
+                # ===== 提取真实用户消息用于 RAG 搜索 =====
+                # 自动检测并提取（如果不是特殊格式则返回原值）
+                actual_query = ChatroomContextParser.extract_actual_message(req.prompt)
+
+                if actual_query != req.prompt:
+                    logger.info(
+                        f"检测到群聊上下文格式，已提取真实消息用于 RAG 搜索 "
+                        f"(原始: {len(req.prompt)}字符 → 提取: {len(actual_query)}字符)"
+                    )
+
                 # 使用 AstrBot EmbeddingProvider 的 embed 方法
                 if plugin.embedding_provider:
+                    # 使用提取的真实消息进行向量化
                     query_vector = await plugin.embedding_provider.get_embedding(
-                        req.prompt
+                        actual_query
                     )
                 else:
                     logger.error("Embedding Provider 未正确初始化")
