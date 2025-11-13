@@ -95,6 +95,11 @@
         "type":"bool",
         "default":true
     },
+    "use_session_filtering":{
+        "description":"记忆查询时是否使用会话过滤。如果禁用，所有会话将共享记忆",
+        "type":"bool",
+        "default":true
+    },
     "num_pairs":{
         "description":"记忆总结的对话轮数",
         "type":"int",
