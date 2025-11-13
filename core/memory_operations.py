@@ -348,23 +348,30 @@ async def _perform_milvus_search(
     # 防止没有过滤条件引发的潜在错误
     filters = ["memory_id > 0"]
 
-    if session_id:
-        # 安全检查：验证 session_id 格式
-        if not validate_session_id(session_id):
-            logger.error(f"session_id 格式验证失败: {session_id}")
-            return None
+    # 检查是否启用了会话过滤
+    use_session_filtering = plugin.config.get("use_session_filtering", True)
+    
+    if use_session_filtering:
+        if session_id:
+            # 安全检查：验证 session_id 格式
+            if not validate_session_id(session_id):
+                logger.error(f"session_id 格式验证失败: {session_id}")
+                return None
 
-        # 使用安全的表达式构建方法
-        try:
-            session_filter = safe_build_milvus_expression(
-                "session_id", session_id, "=="
-            )
-            filters.append(session_filter)
-        except ValueError as e:
-            logger.error(f"构建 session_id 过滤表达式失败: {e}")
-            return None
+            # 使用安全的表达式构建方法
+            try:
+                session_filter = safe_build_milvus_expression(
+                    "session_id", session_id, "=="
+                )
+                filters.append(session_filter)
+                logger.debug(f"已启用会话过滤，将使用会话 '{session_id}' 过滤记忆。")
+            except ValueError as e:
+                logger.error(f"构建 session_id 过滤表达式失败: {e}")
+                return None
+        else:
+            logger.warning("无法获取当前 session_id，将不按 session 过滤记忆！")
     else:
-        logger.warning("无法获取当前 session_id，将不按 session 过滤记忆！")
+        logger.info("会话过滤已禁用，将在所有会话中搜索记忆。")
 
     use_personality_filtering = plugin.config.get("use_personality_filtering", False)
     effective_persona_id_for_filter = persona_id
