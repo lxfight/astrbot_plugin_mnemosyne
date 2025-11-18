@@ -115,9 +115,8 @@ async def list_records_cmd_impl(
         return
 
     # 获取当前会话的 session_id (如果需要按会话过滤)
-    session_id = await self.context.conversation_manager.get_curr_conversation_id(
-        event.unified_msg_origin
-    )
+    # 直接使用 unified_msg_origin 作为 session_id，与存储时保持一致
+    session_id = event.unified_msg_origin
     # session_id = "session_1" # 如果要测试特定会话或无会话过滤，可以在这里硬编码或设为 None
 
     target_collection = collection_name or self.collection_name
@@ -404,9 +403,8 @@ async def delete_session_memory_cmd_impl(
 async def get_session_id_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
     """[实现] 获取当前与您对话的会话 ID"""
     try:
-        session_id = await self.context.conversation_manager.get_curr_conversation_id(
-            event.unified_msg_origin
-        )
+        # 直接使用 unified_msg_origin 作为 session_id，与存储时保持一致
+        session_id = event.unified_msg_origin
         if session_id:
             yield event.plain_result(f"当前会话 ID: {session_id}")
         else:
