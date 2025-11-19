@@ -114,8 +114,11 @@ async def migrate_session_data_if_needed(
 
         for candidate in candidates:
             try:
+                # 转义特殊字符，防止 Milvus 表达式注入
+                escaped_candidate = candidate.replace('"', '\\"')
+                
                 # 构建查询表达式：session_id 等于候选值
-                expression = f'session_id == "{candidate}"'
+                expression = f'session_id == "{escaped_candidate}"'
 
                 # 查询记录
                 results = plugin.milvus_manager.query(
@@ -126,9 +129,13 @@ async def migrate_session_data_if_needed(
                 )
 
                 if results:
-                    # 过滤出不包含冒号的记录（旧格式）
+                    # 过滤出需要迁移的旧格式记录：
+                    # 1. session_id 不包含冒号（旧格式标志）
+                    # 2. session_id 与 unified_msg_origin 不同（确实需要更新）
                     old_records = [
-                        r for r in results if ":" not in r.get("session_id", "")
+                        r for r in results
+                        if ":" not in r.get("session_id", "")
+                        and r.get("session_id") != unified_msg_origin
                     ]
                     if old_records:
                         records_to_migrate.extend(old_records)
@@ -151,11 +158,10 @@ async def migrate_session_data_if_needed(
         # 批量准备更新数据
         records_for_upsert = []
         for record in records_to_migrate:
-            # 更新 session_id 字段
+            # 更新 session_id 字段为新的 unified_msg_origin 格式
             record["session_id"] = unified_msg_origin
-            # 添加迁移标记
-            if "migrated_at" not in record:
-                record["migrated_at"] = int(time.time())
+            # 注意：不添加 migrated_at 字段，因为 schema 中可能没有定义
+            # 如果需要迁移标记，应该在 schema 中先添加该字段
             records_for_upsert.append(record)
 
         # 使用 upsert 批量更新（Milvus 2.3+）
