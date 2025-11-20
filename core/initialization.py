@@ -48,8 +48,9 @@ def initialize_config_check(plugin: "Mnemosyne"):
     astrbot_max_context_length = astrbot_config["provider_settings"][
         "max_context_length"
     ]
-    # 一轮对话包含用户和助手两条消息，所以需要 num_pairs * 2
-    if astrbot_max_context_length > 0 and num_pairs * 2 > astrbot_max_context_length:
+    # 修复：放宽限制，允许 num_pairs 最大等于 astrbot_max_context_length
+    # 一轮对话包含用户和助手两条消息，但总结时不必强制要求小于 max_context_length 的一半
+    if astrbot_max_context_length > 0 and num_pairs > astrbot_max_context_length:
         # 安全处理：不在异常消息中暴露具体配置值
         error_detail = f"num_pairs({num_pairs})不能大于astrbot的配置(最多携带对话数量):{astrbot_max_context_length}"
         init_logger.error(error_detail)
