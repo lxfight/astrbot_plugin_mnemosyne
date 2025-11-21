@@ -478,13 +478,6 @@ class Mnemosyne(Star):
                         logger.error(f"获取当前使用的 provider 失败: {e}")
                         return
                 else:
-                    # 验证 provider_id 格式
-                    import re
-
-                    if not re.match(r"^[a-zA-Z0-9_-]+$", provider_id):
-                        logger.error(f"provider_id 格式无效: {provider_id}")
-                        return
-
                     # 尝试获取指定的 provider
                     try:
                         self.provider = self.context.get_provider_by_id(provider_id)
