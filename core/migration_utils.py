@@ -3,11 +3,7 @@ Mnemosyne 插件的数据迁移工具
 用于运行时自动迁移旧格式的 session_id 到 unified_msg_origin 格式
 """
 
-import asyncio
-import time
-from typing import TYPE_CHECKING, Any
-
-from pymilvus import Collection
+from typing import TYPE_CHECKING
 
 from astrbot.core.log import LogManager
 
@@ -114,11 +110,12 @@ async def migrate_session_data_if_needed(
 
         for candidate in candidates:
             try:
-                # 转义特殊字符，防止 Milvus 表达式注入
-                escaped_candidate = candidate.replace('"', '\\"')
-                
-                # 构建查询表达式：session_id 等于候选值
-                expression = f'session_id == "{escaped_candidate}"'
+                # 【诊断日志】记录候选值
+                logger.debug(f"[迁移] 检查候选值: {candidate}")
+
+                # 构建查询表达式：session_id 等于候选值（不转义）
+                expression = f'session_id == "{candidate}"'
+                logger.debug(f"[迁移] 查询表达式: {expression}")
 
                 # 查询记录
                 results = plugin.milvus_manager.query(
@@ -133,7 +130,8 @@ async def migrate_session_data_if_needed(
                     # 1. session_id 不包含冒号（旧格式标志）
                     # 2. session_id 与 unified_msg_origin 不同（确实需要更新）
                     old_records = [
-                        r for r in results
+                        r
+                        for r in results
                         if ":" not in r.get("session_id", "")
                         and r.get("session_id") != unified_msg_origin
                     ]
@@ -148,7 +146,7 @@ async def migrate_session_data_if_needed(
                 continue
 
         if not records_to_migrate:
-            logger.info(f"[迁移] 未找到需要迁移的旧数据")
+            logger.info("[迁移] 未找到需要迁移的旧数据")
             # 标记为已检查
             plugin._migrated_sessions.add(migration_key)
             return
