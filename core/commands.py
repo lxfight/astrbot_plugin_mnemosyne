@@ -153,7 +153,7 @@ async def list_records_cmd_impl(
 
             # 如果有会话ID，则按会话ID过滤（使用安全的表达式构建）
             try:
-                expr = safe_build_milvus_expression("session_id", session_id, "in")
+                expr = safe_build_milvus_expression("session_id", session_id, "==")
             except ValueError as e:
                 yield event.plain_result(f"⚠️ 构建查询表达式失败: {e}")
                 logger.error(f"构建查询表达式时出错: {e}")
