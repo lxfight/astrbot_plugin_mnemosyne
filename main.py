@@ -71,6 +71,9 @@ class Mnemosyne(Star):
         self._initialized_components = []
         self._embedding_provider_ready = False
         self._migrated_sessions: set[str] = set()  # 用于记录已迁移的会话
+        self._warned_missing_provider_ids: set[str] = set()
+        self._post_load_tasks_started = False
+        self._ensure_milvus_connection_task: asyncio.Task | None = None
 
         logger.info("开始初始化 Mnemosyne 插件...")
         # 启动后台异步初始化，但不包括 Embedding Provider 的初始化
@@ -97,7 +100,20 @@ class Mnemosyne(Star):
             # 优先级 1: 从配置指定的 Provider ID 获取
             emb_id = self.config.get("embedding_provider_id")
             if emb_id:
-                provider = self.context.get_provider_by_id(emb_id)
+                # 避免在 AstrBot 尚未完成启动时调用 context.get_provider_by_id 产生多余的 WARN 日志。
+                provider = None
+                try:
+                    provider_manager = getattr(self.context, "provider_manager", None)
+                    inst_map = getattr(provider_manager, "inst_map", None)
+                    if isinstance(inst_map, dict):
+                        provider = inst_map.get(emb_id)
+                except Exception:
+                    provider = None
+
+                # 兼容旧版本：如果无法访问 provider_manager，再回退到官方 API
+                if provider is None and not hasattr(self.context, "provider_manager"):
+                    provider = self.context.get_provider_by_id(emb_id)
+
                 # 安全地检查 provider 是否为 EmbeddingProvider 类型
                 if provider:
                     # 检查 provider 是否具有 EmbeddingProvider 的关键方法
@@ -113,6 +129,16 @@ class Mnemosyne(Star):
                             logger.warning(
                                 f"获取的 Provider {emb_id} 不是有效的 EmbeddingProvider 类型"
                             )
+                else:
+                    if (
+                        not silent
+                        and emb_id not in self._warned_missing_provider_ids
+                        and self._are_providers_initialized()
+                    ):
+                        logger.warning(
+                            f"未找到配置的 Embedding Provider: {emb_id}，请检查 AstrBot 提供商配置是否已加载/启用。"
+                        )
+                        self._warned_missing_provider_ids.add(emb_id)
 
             # 优先级 2: 使用框架默认的第一个 Embedding Provider
             # 使用 context 提供的方法获取所有 embedding providers
@@ -196,6 +222,47 @@ class Mnemosyne(Star):
         )
         return False
 
+    def _are_providers_initialized(self) -> bool:
+        """
+        判断 AstrBot 的 ProviderManager 是否已完成 Provider 加载。
+
+        说明：不要依赖 context.get_provider_by_id 的 WARN 日志来判断是否加载完成。
+        """
+        try:
+            provider_manager = getattr(self.context, "provider_manager", None)
+            inst_map = getattr(provider_manager, "inst_map", None)
+            if isinstance(inst_map, dict) and len(inst_map) > 0:
+                return True
+        except Exception:
+            pass
+
+        # 兜底：部分版本可能不暴露 inst_map（或初始化时机不同）
+        try:
+            if self.context.get_all_providers():
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _start_post_load_tasks(self):
+        """在 AstrBot 启动完成/Providers 可用后启动需要依赖 Providers 的后台任务。"""
+        self._post_load_tasks_started = True
+
+        # 启动 Embedding Provider 后台加载任务（静默模式）
+        if not self._embedding_provider_task or self._embedding_provider_task.done():
+            self._embedding_provider_task = asyncio.create_task(
+                self._initialize_embedding_provider_async(max_wait=10.0)
+            )
+
+        # 启动 Milvus 连接后台任务（在 Embedding Provider 加载后执行）
+        if (
+            not self._ensure_milvus_connection_task
+            or self._ensure_milvus_connection_task.done()
+        ):
+            self._ensure_milvus_connection_task = asyncio.create_task(
+                self._ensure_milvus_connection_async()
+            )
+
     async def _ensure_milvus_connection_async(self):
         """
         在 Embedding Provider 加载完成后，确保 Milvus 连接已建立
@@ -207,10 +274,15 @@ class Mnemosyne(Star):
                 logger.debug("等待 Embedding Provider 加载完成后再连接 Milvus...")
                 await self._embedding_provider_task
 
-            # 检查 Milvus Manager 是否已初始化
+            # 等待 Milvus Manager 初始化完成（插件初始化可能仍在进行）
             if not self.milvus_manager:
-                logger.warning("Milvus Manager 未初始化，跳过自动连接")
-                return
+                wait_start = time.time()
+                while not self.milvus_manager and time.time() - wait_start < 10.0:
+                    await asyncio.sleep(0.5)
+
+                if not self.milvus_manager:
+                    logger.warning("Milvus Manager 未初始化，跳过自动连接")
+                    return
 
             # 检查是否已连接
             if self.milvus_manager.is_connected():
@@ -260,14 +332,11 @@ class Mnemosyne(Star):
             # 1. Embedding Provider 采用延迟初始化策略
             # 在后台静默尝试加载，但不阻塞插件启动
             logger.info("Embedding Provider 采用延迟初始化策略")
-
-            # 启动 Embedding Provider 后台加载任务（静默模式）
-            self._embedding_provider_task = asyncio.create_task(
-                self._initialize_embedding_provider_async(max_wait=10.0)
-            )
-
-            # 启动 Milvus 连接后台任务（在 Embedding Provider 加载后执行）
-            asyncio.create_task(self._ensure_milvus_connection_async())
+            if self._are_providers_initialized():
+                # 兼容：插件被热重载/晚加载时，Providers 可能已经就绪
+                self._start_post_load_tasks()
+            else:
+                logger.info("等待 AstrBot 启动完成后再加载 Embedding Provider")
 
             # 2. 继续初始化其他组件
             try:
@@ -410,6 +479,16 @@ class Mnemosyne(Star):
             raise
 
     # --- 事件处理钩子 (调用 memory_operations.py 中的实现) ---
+    @filter.on_astrbot_loaded()
+    async def on_astrbot_loaded(self):
+        """[事件钩子] AstrBot 初始化完成后再加载依赖 Providers 的组件。"""
+        try:
+            logger.info("AstrBot 初始化完成，开始加载 Embedding Provider...")
+            self._start_post_load_tasks()
+        except Exception as e:
+            logger.error(f"处理 on_astrbot_loaded 钩子时发生捕获异常: {e}", exc_info=True)
+        return
+
     @filter.on_llm_request()
     async def query_memory(self, event: AstrMessageEvent, req: ProviderRequest):
         """[事件钩子] 在 LLM 请求前，查询并注入长期记忆。"""
