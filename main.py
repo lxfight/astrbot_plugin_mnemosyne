@@ -107,7 +107,16 @@ class Mnemosyne(Star):
                     inst_map = getattr(provider_manager, "inst_map", None)
                     if isinstance(inst_map, dict):
                         provider = inst_map.get(emb_id)
-                except Exception:
+                except (AttributeError, TypeError) as exc:
+                    # 仅在访问 provider_manager / inst_map 出现属性或类型问题时处理，避免掩盖真实错误。
+                    if silent:
+                        logger.debug(
+                            f"无法从 context 读取 Embedding Provider '{emb_id}'（provider_manager/inst_map 不可用）: {exc}"
+                        )
+                    else:
+                        logger.warning(
+                            f"无法从 context 读取 Embedding Provider '{emb_id}'（provider_manager/inst_map 不可用）: {exc}"
+                        )
                     provider = None
 
                 # 兼容旧版本：如果无法访问 provider_manager，再回退到官方 API
@@ -228,40 +237,76 @@ class Mnemosyne(Star):
 
         说明：不要依赖 context.get_provider_by_id 的 WARN 日志来判断是否加载完成。
         """
-        try:
-            provider_manager = getattr(self.context, "provider_manager", None)
-            inst_map = getattr(provider_manager, "inst_map", None)
-            if isinstance(inst_map, dict) and len(inst_map) > 0:
-                return True
-        except Exception:
-            pass
+        provider_manager = getattr(self.context, "provider_manager", None)
+        inst_map = getattr(provider_manager, "inst_map", None)
+        if isinstance(inst_map, dict) and len(inst_map) > 0:
+            return True
 
         # 兜底：部分版本可能不暴露 inst_map（或初始化时机不同）
         try:
             if self.context.get_all_providers():
                 return True
-        except Exception:
-            pass
+        except (AttributeError, TypeError) as exc:
+            logger.warning(f"检查 Providers 初始化状态失败（get_all_providers 不可用）: {exc}")
         return False
+
+    def _create_background_task(self, coro: Any, name: str) -> asyncio.Task | None:
+        """
+        安全创建后台任务：确保存在运行中的事件循环，避免在同步/无 loop 场景下直接抛异常。
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError as exc:
+            logger.warning(f"无法启动后台任务 '{name}': 当前没有运行中的事件循环: {exc}")
+            return None
+
+        # 额外提示：如果不是在 Task 上下文中创建，未来改动更容易定位。
+        try:
+            if asyncio.current_task() is None:
+                logger.debug(f"启动后台任务 '{name}'：当前不在 asyncio.Task 上下文中")
+        except RuntimeError:
+            # 极少数情况下 current_task() 也可能因 loop 上下文问题抛错，忽略即可。
+            pass
+
+        try:
+            return loop.create_task(coro, name=name)  # type: ignore[arg-type]
+        except TypeError:
+            # 兼容：部分运行环境可能不支持 name 参数
+            return loop.create_task(coro)  # type: ignore[arg-type]
 
     def _start_post_load_tasks(self):
         """在 AstrBot 启动完成/Providers 可用后启动需要依赖 Providers 的后台任务。"""
+        if (
+            self._post_load_tasks_started
+            and self._embedding_provider_task
+            and not self._embedding_provider_task.done()
+            and self._ensure_milvus_connection_task
+            and not self._ensure_milvus_connection_task.done()
+        ):
+            return
+
         self._post_load_tasks_started = True
 
         # 启动 Embedding Provider 后台加载任务（静默模式）
         if not self._embedding_provider_task or self._embedding_provider_task.done():
-            self._embedding_provider_task = asyncio.create_task(
-                self._initialize_embedding_provider_async(max_wait=10.0)
+            task = self._create_background_task(
+                self._initialize_embedding_provider_async(max_wait=10.0),
+                name="mnemosyne.embedding_provider_init",
             )
+            if task:
+                self._embedding_provider_task = task
 
         # 启动 Milvus 连接后台任务（在 Embedding Provider 加载后执行）
         if (
             not self._ensure_milvus_connection_task
             or self._ensure_milvus_connection_task.done()
         ):
-            self._ensure_milvus_connection_task = asyncio.create_task(
-                self._ensure_milvus_connection_async()
+            task = self._create_background_task(
+                self._ensure_milvus_connection_async(),
+                name="mnemosyne.ensure_milvus_connection",
             )
+            if task:
+                self._ensure_milvus_connection_task = task
 
     async def _ensure_milvus_connection_async(self):
         """
