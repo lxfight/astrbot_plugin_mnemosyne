@@ -1,9 +1,9 @@
-"""
-Mnemosyne 插件工具函数
+"""Mnemosyne 插件工具函数
 """
 
 import functools
 import re
+from typing import Any
 from urllib.parse import urlparse
 
 from astrbot.api.event import AstrMessageEvent
@@ -45,8 +45,8 @@ def content_to_str(func):
 
 
 def remove_mnemosyne_tags(
-    contents: list[dict[str, str]], contexts_memory_len: int = 0
-) -> list[dict[str, str]]:
+    contents: list[dict[str, Any]], contexts_memory_len: int = 0
+) -> list[dict[str, Any]]:
     """
     使用正则表达式去除LLM上下文中的<mnemosyne> </mnemosyne>标签对。
     - contexts_memory_len > 0: 保留最新的N个标签对。
@@ -57,16 +57,19 @@ def remove_mnemosyne_tags(
         return contents
 
     compiled_regex = re.compile(r"<Mnemosyne>.*?</Mnemosyne>", re.DOTALL)
-    cleaned_contents: list[dict[str, str]] = []
+    cleaned_contents: list[dict[str, Any]] = []
 
     if contexts_memory_len == 0:
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
                 original_text = content_item.get("content", "")
-                if not isinstance(original_text, str):
-                    original_text = str(original_text)
-                cleaned_text = compiled_regex.sub("", original_text)
-                cleaned_contents.append({"role": "user", "content": cleaned_text})
+                # 关键修复：多模态内容（list/dict 等）不能强制转换为字符串。
+                # 只有在 content 为 str 时才需要清理标签。
+                if isinstance(original_text, str):
+                    cleaned_text = compiled_regex.sub("", original_text)
+                    cleaned_contents.append({"role": "user", "content": cleaned_text})
+                else:
+                    cleaned_contents.append(content_item)
             else:
                 cleaned_contents.append(content_item)
     else:  # contexts_memory_len > 0
@@ -189,6 +192,76 @@ def format_context_to_string(
     if length <= 0:
         return ""
 
+    def _truncate_text(text: str, max_chars: int = 2000) -> str:
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "…(truncated)"
+
+    def _content_to_safe_text(content: Any) -> str:
+        """将 AstrBot/OpenAI 风格上下文内容安全转为文本。
+
+        精确依据 AstrBot 源码结构：
+        - `content` 可能是 `str`
+        - 或 `list[dict]`，元素为 ContentPart，常见 `type`: text/image_url/audio_url/think
+          其中图片真实数据在 `image_url.url` (data:image/...;base64,...)，绝不能展开。
+        """
+
+        # 1) 纯文本
+        if isinstance(content, str):
+            # 保险：若出现 data-url/base64 直接降级为占位符
+            if content.startswith("base64://") or content.startswith("data:image"):
+                return "[图片]"
+            return _truncate_text(content)
+
+        # 2) OpenAI 多模态 content blocks
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+
+                item_type = item.get("type")
+
+                # AstrBot/OpenAI: {"type": "text", "text": "..."}
+                if item_type == "text":
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(_truncate_text(text))
+                    continue
+
+                # AstrBot/OpenAI: {"type": "image_url", "image_url": {"url": "data:image/...;base64,..."}}
+                # openai_source 的实现也会用 `"image_url" in item` 来判断，因此这里双保险。
+                if item_type == "image_url" or "image_url" in item:
+                    parts.append("[图片]")
+                    continue
+
+                # AstrBot: {"type": "audio_url", "audio_url": {"url": "data:audio/...;base64,..."}}
+                if item_type == "audio_url" or "audio_url" in item:
+                    parts.append("[音频]")
+                    continue
+
+                # assistant content 可能包含 think part；总结/记忆无需包含
+                if item_type == "think":
+                    continue
+
+                # 其他 ContentPart：不展开 payload，给占位
+                if isinstance(item_type, str) and item_type:
+                    parts.append(f"[{item_type}]")
+
+            merged = " ".join(p for p in parts if p)
+            return merged or ""
+
+        # 3) 其他结构：避免展开潜在大对象
+        if isinstance(content, dict):
+            if "image_url" in content or "audio_url" in content:
+                return "[图片]" if "image_url" in content else "[音频]"
+            text = content.get("text")
+            if isinstance(text, str):
+                return _truncate_text(text)
+            return ""
+
+        return ""
+
     selected_contents: list[str] = []
     count = 0
 
@@ -204,11 +277,12 @@ def format_context_to_string(
             content = message.get("content")
 
         if content is not None:
+            safe_text = _content_to_safe_text(content)
             if role == "user":
-                selected_contents.insert(0, str("user:" + str(content) + "\n"))
+                selected_contents.insert(0, "user:" + safe_text + "\n")
                 count += 1
             elif role == "assistant":
-                selected_contents.insert(0, str("assistant:" + str(content) + "\n"))
+                selected_contents.insert(0, "assistant:" + safe_text + "\n")
                 count += 1
 
     return "\n".join(selected_contents)

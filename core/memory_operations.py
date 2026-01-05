@@ -86,15 +86,26 @@ async def handle_query_memory(
             logger.warning("context_manager 或 msg_counter 不可用，跳过记忆查询")
             return
 
+        # 在最早阶段清理 Mnemosyne 标签，避免将带标签/异常结构的 contexts 写入会话历史。
+        clean_contexts(plugin, req)
+
         # 判断是否在历史会话管理器中，如果不在，则进行初始化
         if session_id not in plugin.context_manager.conversations:
             plugin.context_manager.init_conv(session_id, req.contexts, event)
 
-        # 清理记忆标签
-        clean_contexts(plugin, req)
+        # 生成供“插件内部记忆/向量化”使用的安全用户文本：
+        # - AstrBot 可能在纯图片消息时令 prompt=None，此处用占位符避免报错
+        # - 不修改 req.prompt，避免影响实际发给 LLM 的内容
+        raw_prompt = req.prompt if isinstance(req.prompt, str) else ""
+        safe_user_prompt = raw_prompt
+        if not safe_user_prompt.strip() and getattr(req, "image_urls", None):
+            safe_user_prompt = "[图片]"
+        # 防御：极端情况下避免将超长文本写入记忆/embedding
+        if len(safe_user_prompt) > 4000:
+            safe_user_prompt = safe_user_prompt[:4000] + "…(truncated)"
 
-        # 添加用户消息
-        plugin.context_manager.add_message(session_id, "user", req.prompt)
+        # 添加用户消息（写入插件上下文管理器）
+        plugin.context_manager.add_message(session_id, "user", safe_user_prompt)
         # 计数器+1
         plugin.msg_counter.increment_counter(session_id)
 
@@ -114,12 +125,14 @@ async def handle_query_memory(
 
                 # ===== 提取真实用户消息用于 RAG 搜索 =====
                 # 自动检测并提取（如果不是特殊格式则返回原值）
-                actual_query = ChatroomContextParser.extract_actual_message(req.prompt)
+                actual_query = ChatroomContextParser.extract_actual_message(
+                    safe_user_prompt
+                )
 
-                if actual_query != req.prompt:
+                if actual_query != safe_user_prompt:
                     logger.info(
                         f"检测到群聊上下文格式，已提取真实消息用于 RAG 搜索 "
-                        f"(原始: {len(req.prompt)}字符 → 提取: {len(actual_query)}字符)"
+                        f"(原始: {len(safe_user_prompt)}字符 → 提取: {len(actual_query)}字符)"
                     )
 
                 # 使用 AstrBot EmbeddingProvider 的 embed 方法
@@ -350,7 +363,7 @@ async def _perform_milvus_search(
 
     # 检查是否启用了会话过滤
     use_session_filtering = plugin.config.get("use_session_filtering", True)
-    
+
     if use_session_filtering:
         if session_id:
             # 安全检查：验证 session_id 格式
