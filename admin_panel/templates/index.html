@@ -38,6 +38,12 @@
                     <span>系统配置</span>
                 </a>
             </nav>
+            <div class="theme-toggle">
+                <button id="theme-toggle-btn" class="theme-toggle-btn">
+                    <i class="ti ti-moon"></i>
+                    <span>深色模式</span>
+                </button>
+            </div>
         </aside>
 
         <!-- 主内容区 -->
@@ -199,25 +205,25 @@
 
                     <!-- 统计卡片 -->
                     <div class="stats-grid">
-                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                            <h4 style="color: #6366f1;">总记忆数</h4>
-                            <div class="stat-value" id="stat-total-memories" style="color: #1f2937;">-</div>
-                            <div class="stat-label" style="color: #6b7280;">所有记忆总数</div>
+                        <div class="stat-card">
+                            <h4 style="color: var(--primary-color);">总记忆数</h4>
+                            <div class="stat-value" id="stat-total-memories">-</div>
+                            <div class="stat-label">所有记忆总数</div>
                         </div>
-                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                            <h4 style="color: #ec4899;">活跃会话</h4>
-                            <div class="stat-value" id="stat-active-sessions" style="color: #1f2937;">-</div>
-                            <div class="stat-label" style="color: #6b7280;">当前活跃会话数</div>
+                        <div class="stat-card">
+                            <h4 style="color: var(--secondary-color);">活跃会话</h4>
+                            <div class="stat-value" id="stat-active-sessions">-</div>
+                            <div class="stat-label">当前活跃会话数</div>
                         </div>
-                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                            <h4 style="color: #06b6d4;">今日新增</h4>
-                            <div class="stat-value" id="stat-today-added" style="color: #1f2937;">-</div>
-                            <div class="stat-label" style="color: #6b7280;">今天新增的记忆</div>
+                        <div class="stat-card">
+                            <h4 style="color: var(--info-color);">今日新增</h4>
+                            <div class="stat-value" id="stat-today-added">-</div>
+                            <div class="stat-label">今天新增的记忆</div>
                         </div>
-                        <div class="stat-card" style="background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                            <h4 style="color: #10b981;">平均记忆数</h4>
-                            <div class="stat-value" id="stat-avg-per-session" style="color: #1f2937;">-</div>
-                            <div class="stat-label" style="color: #6b7280;">每会话平均记忆数</div>
+                        <div class="stat-card">
+                            <h4 style="color: var(--success-color);">平均记忆数</h4>
+                            <div class="stat-value" id="stat-avg-per-session">-</div>
+                            <div class="stat-label">每会话平均记忆数</div>
                         </div>
                     </div>
 

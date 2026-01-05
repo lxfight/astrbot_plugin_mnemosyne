@@ -98,6 +98,11 @@ function renderStatisticsChart(data) {
     }
     
     // 创建新图表
+    // 获取当前主题颜色
+    const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#2563eb';
+    const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#0f172a';
+    const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border-color').trim() || 'rgba(0, 0, 0, 0.05)';
+
     const ctx = canvas.getContext('2d');
     statisticsChart = new Chart(ctx, {
         type: 'line',
@@ -106,13 +111,13 @@ function renderStatisticsChart(data) {
             datasets: [{
                 label: '每日新增记忆',
                 data: counts,
-                borderColor: 'rgb(79, 70, 229)',
-                backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                borderColor: primaryColor,
+                backgroundColor: 'transparent',
                 tension: 0.4,
-                fill: true,
+                fill: false,
                 pointRadius: 4,
                 pointHoverRadius: 6,
-                pointBackgroundColor: 'rgb(79, 70, 229)',
+                pointBackgroundColor: primaryColor,
                 pointBorderColor: '#fff',
                 pointBorderWidth: 2
             }]
@@ -125,6 +130,7 @@ function renderStatisticsChart(data) {
                     display: true,
                     position: 'top',
                     labels: {
+                        color: textColor,
                         font: {
                             size: 14
                         }
@@ -146,9 +152,13 @@ function renderStatisticsChart(data) {
             scales: {
                 x: {
                     display: true,
+                    ticks: {
+                        color: textColor
+                    },
                     title: {
                         display: true,
                         text: '日期',
+                        color: textColor,
                         font: {
                             size: 14,
                             weight: 'bold'
@@ -160,9 +170,13 @@ function renderStatisticsChart(data) {
                 },
                 y: {
                     display: true,
+                    ticks: {
+                        color: textColor
+                    },
                     title: {
                         display: true,
                         text: '记忆数量',
+                        color: textColor,
                         font: {
                             size: 14,
                             weight: 'bold'
@@ -170,7 +184,7 @@ function renderStatisticsChart(data) {
                     },
                     beginAtZero: true,
                     grid: {
-                        color: 'rgba(0, 0, 0, 0.05)'
+                        color: gridColor
                     }
                 }
             }
@@ -257,6 +271,10 @@ function renderDistributionChart(data) {
         counts = [0];
     }
     
+    // 获取当前主题颜色
+    const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#0f172a';
+    const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border-color').trim() || 'rgba(0, 0, 0, 0.05)';
+
     // 创建新图表
     const ctx = canvas.getContext('2d');
     distributionChart = new Chart(ctx, {
@@ -267,28 +285,28 @@ function renderDistributionChart(data) {
                 label: '记忆数量',
                 data: counts,
                 backgroundColor: [
-                    'rgba(79, 70, 229, 0.8)',
+                    'rgba(37, 99, 235, 0.8)',
                     'rgba(249, 115, 22, 0.8)',
                     'rgba(16, 185, 129, 0.8)',
                     'rgba(239, 68, 68, 0.8)',
                     'rgba(245, 158, 11, 0.8)',
-                    'rgba(99, 102, 241, 0.8)',
+                    'rgba(6, 182, 212, 0.8)',
                     'rgba(236, 72, 153, 0.8)',
                     'rgba(20, 184, 166, 0.8)',
                     'rgba(251, 146, 60, 0.8)',
-                    'rgba(139, 92, 246, 0.8)'
+                    'rgba(59, 130, 246, 0.8)'
                 ],
                 borderColor: [
-                    'rgb(79, 70, 229)',
+                    'rgb(37, 99, 235)',
                     'rgb(249, 115, 22)',
                     'rgb(16, 185, 129)',
                     'rgb(239, 68, 68)',
                     'rgb(245, 158, 11)',
-                    'rgb(99, 102, 241)',
+                    'rgb(6, 182, 212)',
                     'rgb(236, 72, 153)',
                     'rgb(20, 184, 166)',
                     'rgb(251, 146, 60)',
-                    'rgb(139, 92, 246)'
+                    'rgb(59, 130, 246)'
                 ],
                 borderWidth: 2
             }]
@@ -314,9 +332,13 @@ function renderDistributionChart(data) {
             scales: {
                 x: {
                     display: true,
+                    ticks: {
+                        color: textColor
+                    },
                     title: {
                         display: true,
                         text: '会话ID',
+                        color: textColor,
                         font: {
                             size: 14,
                             weight: 'bold'
@@ -328,9 +350,13 @@ function renderDistributionChart(data) {
                 },
                 y: {
                     display: true,
+                    ticks: {
+                        color: textColor
+                    },
                     title: {
                         display: true,
                         text: '记忆数量',
+                        color: textColor,
                         font: {
                             size: 14,
                             weight: 'bold'
@@ -338,7 +364,7 @@ function renderDistributionChart(data) {
                     },
                     beginAtZero: true,
                     grid: {
-                        color: 'rgba(0, 0, 0, 0.05)'
+                        color: gridColor
                     }
                 }
             }

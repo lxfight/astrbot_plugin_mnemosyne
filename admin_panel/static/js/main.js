@@ -157,6 +157,9 @@ function formatTime(timestamp) {
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('Mnemosyne 管理面板初始化...');
     
+    // 初始化主题
+    initTheme();
+    
     // 检查会话
     const sessionValid = await checkSession();
     if (!sessionValid) {
@@ -172,6 +175,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 加载初始页面
     loadPage('dashboard');
 });
+
+// ==================== 主题管理 ====================
+
+/**
+ * 初始化主题
+ */
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    updateThemeToggleUI(savedTheme);
+    
+    const toggleBtn = document.getElementById('theme-toggle-btn');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', toggleTheme);
+    }
+}
+
+/**
+ * 切换主题
+ */
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    updateThemeToggleUI(newTheme);
+}
+
+/**
+ * 更新主题切换按钮 UI
+ */
+function updateThemeToggleUI(theme) {
+    const toggleBtn = document.getElementById('theme-toggle-btn');
+    if (!toggleBtn) return;
+    
+    const icon = toggleBtn.querySelector('i');
+    const text = toggleBtn.querySelector('span');
+    
+    if (theme === 'dark') {
+        icon.className = 'ti ti-sun';
+        text.textContent = '浅色模式';
+    } else {
+        icon.className = 'ti ti-moon';
+        text.textContent = '深色模式';
+    }
+}
 
 // 添加登出按钮
 function addLogoutButton() {
