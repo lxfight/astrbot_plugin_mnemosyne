@@ -168,7 +168,7 @@ function showSessionsError(message) {
         errorDiv.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
         
         const p = document.createElement('p');
-        p.textContent = `❌ ${message}`;
+        p.innerHTML = '<i class="ti ti-alert-circle"></i> ' + message;
         
         const btn = document.createElement('button');
         btn.className = 'btn btn-primary';

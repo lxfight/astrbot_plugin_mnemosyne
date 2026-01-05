@@ -352,7 +352,7 @@ function showStatisticsError(message) {
     if (container) {
         container.innerHTML = `
             <div style="padding: 2rem; text-align: center; color: var(--danger-color);">
-                <p>❌ ${message}</p>
+                <p><i class="ti ti-alert-circle"></i> ${message}</p>
                 <button class="btn btn-primary" onclick="loadStatistics()" style="margin-top: 1rem;">
                     重试
                 </button>

@@ -228,13 +228,13 @@ function createMemoryItem(memory) {
     const viewBtn = document.createElement('button');
     viewBtn.className = 'btn-icon';
     viewBtn.title = '查看详情';
-    viewBtn.textContent = '👁️';
+    viewBtn.innerHTML = '<i class="ti ti-eye"></i>';
     viewBtn.onclick = () => viewMemoryDetail(memory.memory_id);
     
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'btn-icon';
     deleteBtn.title = '删除';
-    deleteBtn.textContent = '🗑️';
+    deleteBtn.innerHTML = '<i class="ti ti-trash"></i>';
     deleteBtn.onclick = () => deleteMemory(memory.memory_id);
     
     actionsDiv.appendChild(viewBtn);
@@ -495,7 +495,7 @@ function viewMemoryDetail(memoryId) {
     title.textContent = '记忆详情';
     const closeBtn = document.createElement('button');
     closeBtn.className = 'btn-close';
-    closeBtn.textContent = '✕';
+    closeBtn.innerHTML = '<i class="ti ti-x"></i>';
     closeBtn.onclick = () => modal.remove();
     modalHeader.appendChild(title);
     modalHeader.appendChild(closeBtn);
@@ -647,7 +647,7 @@ function showMemoriesError(message) {
         errorDiv.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
         
         const p = document.createElement('p');
-        p.textContent = `❌ ${message}`;
+        p.innerHTML = '<i class="ti ti-alert-circle"></i> ' + message;
         
         const btn = document.createElement('button');
         btn.className = 'btn btn-primary';
