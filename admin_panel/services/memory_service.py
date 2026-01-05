@@ -68,7 +68,7 @@ class MemoryService:
                 )
 
             # 优化：query 方法内部会自动处理集合加载，无需手动加载
-            # 构建查询表达式
+            # 构建查询表达式（仅标量过滤；keyword 需要在内存中匹配）
             expr_parts = []
 
             if request.session_id:
@@ -128,86 +128,156 @@ class MemoryService:
                 output_fields.append("persona_id")
 
             try:
-                # 执行查询 - expression 是必需的第一个参数
-                # 如果没有过滤条件，使用一个总是为真的表达式
+                # Milvus 的 query 不保证按 create_time 排序。
+                # 旧实现是：先分页取一页（默认顺序通常是最旧→最新），再在内存里排序/keyword 过滤。
+                # 这会导致：第一页永远是最旧；keyword 只能搜到“这一页”。
+                # 新实现：
+                # - 无额外过滤（expr 为空且无 keyword）时，用“反向 offset”快速取最新页。
+                # - 其它情况（有 keyword/有筛选）则做受控全量拉取 → 全局过滤/排序 → 再分页。
+
                 query_expr = expr if expr else "memory_id >= 0"
-                results = self.plugin.milvus_manager.query(
-                    collection_name=collection_name,
-                    expression=query_expr,
-                    output_fields=output_fields,
-                    limit=request.limit,
-                    offset=request.offset,
-                )
+                page = request.offset // request.limit + 1
 
-                # 检查查询结果
-                if results is None:
-                    self.logger.error("查询返回 None")
-                    return MemorySearchResponse(
-                        records=[],
-                        total_count=0,
-                        page=request.offset // request.limit + 1,
-                        page_size=request.limit,
-                        has_more=False,
-                    )
-
-                # 转换为 MemoryRecord
-                records = []
-                for result in results:
+                def _to_record(result: dict[str, Any]) -> MemoryRecord | None:
                     try:
                         create_time = result.get("create_time")
                         if isinstance(create_time, (int, float)):
-                            create_time = datetime.fromtimestamp(create_time)
+                            create_time_dt = datetime.fromtimestamp(create_time)
                         elif isinstance(create_time, str):
-                            create_time = datetime.fromisoformat(create_time)
+                            create_time_dt = datetime.fromisoformat(create_time)
+                        elif isinstance(create_time, datetime):
+                            create_time_dt = create_time
                         else:
-                            create_time = datetime.now()
+                            create_time_dt = datetime.now()
 
-                        # 使用正确的字段名
                         persona_id_value = result.get("personality_id") or result.get(
                             "persona_id"
                         )
-
-                        # 获取memory_type字段（如果存在）
                         memory_type = result.get("memory_type", "long_term")
 
                         record = MemoryRecord(
                             memory_id=str(result.get("memory_id", "")),
                             session_id=result.get("session_id", ""),
                             content=result.get("content", ""),
-                            create_time=create_time,
+                            create_time=create_time_dt,
                             persona_id=persona_id_value,
                         )
-                        # 将memory_type添加到metadata中，以便前端使用
                         record.metadata["memory_type"] = memory_type
-                        records.append(record)
-                    except Exception as e:
-                        self.logger.error(f"转换记忆记录失败: {e}")
-                        continue
+                        return record
+                    except Exception as exc:
+                        self.logger.error(f"转换记忆记录失败: {exc}")
+                        return None
 
-                # 如果有关键词过滤，在内存中进行过滤
-                if request.keyword:
-                    keyword_lower = request.keyword.lower()
-                    records = [r for r in records if keyword_lower in r.content.lower()]
+                # 快路径：全量列表（不带任何筛选/keyword）默认展示最新
+                if (
+                    not expr
+                    and not request.keyword
+                    and request.sort_by == "create_time"
+                    and request.sort_order == "desc"
+                ):
+                    total_count = int(collection.num_entities)
+                    if request.offset >= total_count:
+                        return MemorySearchResponse(
+                            records=[],
+                            total_count=total_count,
+                            page=page,
+                            page_size=request.limit,
+                            has_more=False,
+                        )
 
-                # 排序
-                if request.sort_by == "create_time":
-                    records.sort(
-                        key=lambda x: x.create_time,
-                        reverse=(request.sort_order == "desc"),
+                    remaining = max(total_count - request.offset, 0)
+                    effective_limit = min(request.limit, remaining)
+                    inverted_offset = max(
+                        total_count - request.offset - effective_limit, 0
                     )
 
-                # 获取总数（近似值）
-                total_count = (
-                    collection.num_entities
-                    if not expr
-                    else len(records) + request.offset
-                )
-                has_more = len(records) == request.limit
+                    results = self.plugin.milvus_manager.query(
+                        collection_name=collection_name,
+                        expression=query_expr,
+                        output_fields=output_fields,
+                        limit=effective_limit,
+                        offset=inverted_offset,
+                    )
+                    if results is None:
+                        self.logger.error("查询返回 None")
+                        return MemorySearchResponse(
+                            records=[],
+                            total_count=0,
+                            page=page,
+                            page_size=request.limit,
+                            has_more=False,
+                        )
+
+                    records: list[MemoryRecord] = []
+                    for result in results:
+                        record = _to_record(result)
+                        if record is not None:
+                            records.append(record)
+
+                    # 仅对本页做排序（已是最新窗口，排序保证时间倒序展示）
+                    records.sort(key=lambda x: x.create_time, reverse=True)
+                    has_more = request.offset + request.limit < total_count
+
+                    return MemorySearchResponse(
+                        records=records,
+                        total_count=total_count,
+                        page=page,
+                        page_size=request.limit,
+                        has_more=has_more,
+                    )
+
+                # 慢路径：有 keyword 或其它筛选时，为保证“全局搜索/全局排序”，做受控全量拉取
+                max_fetch = 10000
+                batch_size = 1000
+                fetched: list[MemoryRecord] = []
+
+                current_offset = 0
+                while len(fetched) < max_fetch:
+                    batch_limit = min(batch_size, max_fetch - len(fetched))
+                    batch = self.plugin.milvus_manager.query(
+                        collection_name=collection_name,
+                        expression=query_expr,
+                        output_fields=output_fields,
+                        limit=batch_limit,
+                        offset=current_offset,
+                    )
+                    if not batch:
+                        break
+
+                    for result in batch:
+                        record = _to_record(result)
+                        if record is not None:
+                            fetched.append(record)
+
+                    current_offset += len(batch)
+                    if len(batch) < batch_limit:
+                        break
+
+                # keyword 过滤（全局）
+                filtered = fetched
+                if request.keyword:
+                    keyword_lower = request.keyword.lower()
+                    filtered = [
+                        r
+                        for r in filtered
+                        if keyword_lower in (r.content or "").lower()
+                    ]
+
+                # 排序（全局）
+                if request.sort_by == "create_time":
+                    reverse = request.sort_order == "desc"
+                    filtered.sort(key=lambda x: x.create_time, reverse=reverse)
+
+                total_count = len(filtered)
+                start = min(request.offset, total_count)
+                end = min(request.offset + request.limit, total_count)
+                page_records = filtered[start:end]
+                has_more = end < total_count
 
                 return MemorySearchResponse(
-                    records=records,
+                    records=page_records,
                     total_count=total_count,
-                    page=request.offset // request.limit + 1,
+                    page=page,
                     page_size=request.limit,
                     has_more=has_more,
                 )
