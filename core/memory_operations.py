@@ -272,13 +272,20 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str |
     persona_id = conversation.persona_id if conversation else None
 
     if not persona_id or persona_id == "[%None]":
-        # 不使用默认人格，避免记忆错乱
-        # 当会话没有配置人格时，使用占位符或None，而不是回退到默认人格
-        logger.warning(
-            f"当前会话 (ID: {event.unified_msg_origin}) 未配置人格，将使用占位符 '{DEFAULT_PERSONA_ON_NONE}' 进行记忆操作（如果启用人格过滤）。"
-        )
+        if plugin.config.get("personality_fallback", False):
+            fallback_id = plugin.context._config["provider_settings"][
+                "default_personality"
+            ]
+            message = f"当前会话 (ID: {event.unified_msg_origin}) 未配置人格，将使用默认人格 '{fallback_id}' 进行记忆操作（如果启用人格过滤）。"
+        else:
+            # 不使用默认人格，避免记忆错乱
+            # 当会话没有配置人格时，使用占位符或None，而不是回退到默认人格
+            fallback_id = DEFAULT_PERSONA_ON_NONE
+            message = f"当前会话 (ID: {event.unified_msg_origin}) 未配置人格，将使用占位符 '{fallback_id}' 进行记忆操作（如果启用人格过滤）。"
+        logger.warning(message)
+
         if plugin.config.get("use_personality_filtering", False):
-            persona_id = DEFAULT_PERSONA_ON_NONE
+            persona_id = fallback_id
         else:
             persona_id = None
     return persona_id
