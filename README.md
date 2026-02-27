@@ -287,9 +287,10 @@ uv pip install -r requirements.txt
 - ✅ 保留所有历史记忆数据
 - ⚠️ 迁移过程可能需要一些时间，取决于记忆数量
 
-详细的部署指南请参阅：**[快速启动指南 (QUICKSTART.md)](./QUICKSTART.md)**
-
-或访问 Wiki：**[如何正确且快速地食用本插件](https://github.com/lxfight/astrbot_plugin_mnemosyne/wiki/%E5%A6%82%E4%BD%95%E6%AD%A3%E7%A1%AE%E4%B8%94%E5%BF%AB%E9%80%9F%E7%9A%84%E9%A3%9F%E7%94%A8%E6%9C%AC%E6%8F%92%E4%BB%B6)**
+详细的部署指南请参阅：
+- **[快速启动指南 (QUICKSTART.md)](./QUICKSTART.md)** - 5分钟快速部署
+- **[Windows 新手完整教程 (WINDOWS_TUTORIAL.md)](./WINDOWS_TUTORIAL.md)** - Windows 用户详细教程（新手友好）
+- **Wiki：[如何正确且快速地食用本插件](https://github.com/lxfight/astrbot_plugin_mnemosyne/wiki/%E5%A6%82%E4%BD%95%E6%AD%A3%E7%A1%AE%E4%B8%94%E5%BF%AB%E9%80%9F%E7%9A%84%E9%A3%9F%E7%94%A8%E6%9C%AC%E6%8F%92%E4%BB%B6)**
 
 ---
 
