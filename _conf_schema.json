@@ -100,6 +100,11 @@
         "type":"bool",
         "default":true
     },
+    "personality_fallback":{
+        "description":"对话未配置人格时是否回退到默认人格",
+        "type":"bool",
+        "default":false
+    },
     "num_pairs":{
         "description":"记忆总结的对话轮数",
         "type":"int",
