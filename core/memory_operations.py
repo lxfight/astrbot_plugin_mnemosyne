@@ -276,7 +276,7 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str |
             # 尝试获取默认人格
             try:
                 fallback_id = (
-                    plugin.context.get_config(event.unified_msg_origin)
+                    (plugin.context.get_config(event.unified_msg_origin) or {})
                     .get("provider_settings", {})
                     .get("default_personality", DEFAULT_PERSONA_ON_NONE)
                 )
