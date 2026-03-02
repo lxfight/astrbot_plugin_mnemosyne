@@ -1,5 +1,6 @@
 import threading
 import time
+from datetime import datetime
 
 from astrbot.api.event import AstrMessageEvent
 
@@ -38,7 +39,13 @@ class ConversationContextManager:
             self.conversations[session_id]["last_summary_time"] = time.time()
             return
 
-    def add_message(self, session_id: str, role: str, content: str) -> str | None:
+    def add_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        metadata: dict | None = None,
+    ) -> str | None:
         """
         添加对话消息
         :param session_id: 会话ID
@@ -54,15 +61,18 @@ class ConversationContextManager:
                 }
 
             conversation = self.conversations[session_id]
-            conversation["history"].append(
-                {
-                    "role": role,
-                    "content": content,
-                    "timestamp": time.strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    ),  # 这个是不会被加入到总结的内容中的，应该
-                }
-            )
+            now_epoch = int(time.time())
+            item = {
+                "role": role,
+                "content": content,
+                # 兼容旧逻辑保留可读时间，同时提供稳定的 epoch 供后续逻辑使用。
+                "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "timestamp_epoch": now_epoch,
+            }
+            if isinstance(metadata, dict) and metadata:
+                item["metadata"] = metadata
+
+            conversation["history"].append(item)
 
     def get_summary_time(self, session_id: str) -> float:
         """

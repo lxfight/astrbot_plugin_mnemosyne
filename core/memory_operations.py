@@ -4,6 +4,7 @@ Mnemosyne 插件核心记忆操作逻辑
 """
 
 import asyncio
+import re
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -27,10 +28,14 @@ from .security_utils import (
     validate_session_id,
 )
 from .tools import (
+    extract_query_keywords,
     format_context_to_string,
+    pack_memory_content,
     remove_mnemosyne_tags,
     remove_system_content,
     remove_system_mnemosyne_tags,
+    split_memory_content_meta,
+    strip_memory_meta,
 )
 
 # 类型提示，避免循环导入
@@ -38,6 +43,214 @@ if TYPE_CHECKING:
     from ..main import Mnemosyne
 
 logger = LogManager.GetLogger(__name__)
+
+
+def _extract_explicit_memory_content(prompt: str) -> str | None:
+    """
+    识别用户显式“记住”指令，提取需要写入长期记忆的正文。
+    """
+    if not isinstance(prompt, str):
+        return None
+    text = prompt.strip()
+    if not text:
+        return None
+
+    patterns = [
+        r"^\s*记住[:：\s]+(.+)$",
+        r"^\s*请记住[:：\s]+(.+)$",
+        r"^\s*帮我记住[:：\s]+(.+)$",
+        r"^\s*remember(?:\s+this)?[:：\s]+(.+)$",
+        r"^\s*please\s+remember[:：\s]+(.+)$",
+    ]
+    for pattern in patterns:
+        matched = re.match(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if matched:
+            content = matched.group(1).strip()
+            if content:
+                return content
+    return None
+
+
+def _collect_participants_from_context(context_history: list[dict] | None) -> list[str]:
+    """
+    从上下文中提取参与者 ID（仅统计 user 角色）。
+    """
+    if not isinstance(context_history, list):
+        return []
+
+    participants: list[str] = []
+    seen: set[str] = set()
+    for item in context_history:
+        if not isinstance(item, dict):
+            continue
+        if item.get("role") != "user":
+            continue
+        metadata = item.get("metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        speaker_id = metadata.get("speaker_id")
+        if isinstance(speaker_id, str) and speaker_id.strip():
+            normalized = speaker_id.strip()
+            if normalized not in seen:
+                participants.append(normalized)
+                seen.add(normalized)
+    return participants
+
+
+def _build_lightweight_graph_metadata(
+    summary_text: str,
+    context_history: list[dict] | None = None,
+) -> dict[str, Any]:
+    """
+    生成轻量图谱元数据：实体、关系、参与者。
+    """
+    entities = extract_query_keywords(summary_text, min_token_len=2)[:20]
+    relations: list[list[str]] = []
+    relation_seen: set[tuple[str, str]] = set()
+
+    # 基于句内共现构建轻量关系边（无额外数据库依赖）。
+    sentences = re.split(r"[。！？!?；;\n]+", summary_text)
+    for sentence in sentences:
+        sentence_entities = extract_query_keywords(sentence, min_token_len=2)[:8]
+        n = len(sentence_entities)
+        for i in range(n):
+            for j in range(i + 1, n):
+                a = sentence_entities[i]
+                b = sentence_entities[j]
+                if a == b:
+                    continue
+                edge = (a, b) if a < b else (b, a)
+                if edge in relation_seen:
+                    continue
+                relation_seen.add(edge)
+                relations.append([edge[0], edge[1]])
+                if len(relations) >= 40:
+                    break
+            if len(relations) >= 40:
+                break
+        if len(relations) >= 40:
+            break
+
+    return {
+        "participants": _collect_participants_from_context(context_history),
+        "entities": entities,
+        "relations": relations,
+        "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+
+def _expand_graph_keywords(
+    base_keywords: list[str], detailed_results: list[dict[str, Any]]
+) -> list[str]:
+    """
+    依据候选记忆携带的 relations 做一次 one-hop 关键词扩展。
+    """
+    if not base_keywords:
+        return []
+
+    expanded: list[str] = []
+    seen = set(base_keywords)
+    for result in detailed_results:
+        meta = result.get("_meta", {})
+        if not isinstance(meta, dict):
+            continue
+        relations = meta.get("relations", [])
+        if not isinstance(relations, list):
+            continue
+        for pair in relations:
+            if (
+                isinstance(pair, list)
+                and len(pair) == 2
+                and isinstance(pair[0], str)
+                and isinstance(pair[1], str)
+            ):
+                a = pair[0].strip().lower()
+                b = pair[1].strip().lower()
+                if not a or not b:
+                    continue
+                if a in seen and b not in seen:
+                    expanded.append(b)
+                    seen.add(b)
+                elif b in seen and a not in seen:
+                    expanded.append(a)
+                    seen.add(a)
+    return expanded
+
+
+def _post_process_search_results(
+    plugin: "Mnemosyne",
+    detailed_results: list[dict[str, Any]],
+    query_text: str,
+    sender_id: str | None,
+) -> list[dict[str, Any]]:
+    """
+    对向量搜索结果进行后处理：
+    1) 参与者过滤（可选）
+    2) 关键词/轻量图谱重排（可选）
+    """
+    if not detailed_results:
+        return detailed_results
+
+    prepared: list[dict[str, Any]] = []
+    for result in detailed_results:
+        if not isinstance(result, dict):
+            continue
+        content = result.get("content", "")
+        pure_content, meta = split_memory_content_meta(content)
+        merged = dict(result)
+        merged["content"] = pure_content
+        merged["_meta"] = meta
+        prepared.append(merged)
+
+    # 参与者过滤
+    if plugin.config.get("use_participant_filtering", False) and sender_id:
+        filtered: list[dict[str, Any]] = []
+        for result in prepared:
+            meta = result.get("_meta", {})
+            participants = (
+                meta.get("participants", []) if isinstance(meta, dict) else []
+            )
+            if not isinstance(participants, list) or not participants:
+                # 无参与者信息时不强行过滤，保持兼容旧记录。
+                filtered.append(result)
+                continue
+            normalized = {str(x).strip() for x in participants if str(x).strip()}
+            if sender_id in normalized:
+                filtered.append(result)
+        if filtered:
+            prepared = filtered
+
+    # 关键词 + 图谱扩展重排
+    keywords = extract_query_keywords(query_text, min_token_len=2)
+    if not keywords:
+        return prepared
+
+    use_graph = plugin.config.get("use_lightweight_memory_graph", True)
+    expanded = _expand_graph_keywords(keywords, prepared) if use_graph else []
+    all_terms = keywords + [term for term in expanded if term not in keywords]
+
+    def _semantic_score(item: dict[str, Any]) -> float:
+        distance = item.get("_distance")
+        if isinstance(distance, (int, float)):
+            # 距离越小越相似，这里转为“分数越大越好”。
+            return -float(distance)
+        return 0.0
+
+    scored = []
+    for item in prepared:
+        content = str(item.get("content", ""))
+        content_l = content.lower()
+        keyword_hits = 0
+        for term in all_terms:
+            term_l = term.lower()
+            if term_l and term_l in content_l:
+                keyword_hits += 1
+        scored.append((keyword_hits, _semantic_score(item), item))
+
+    if any(hit > 0 for hit, _, _ in scored):
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return [item for _, _, item in scored]
+    return prepared
 
 
 async def handle_query_memory(
@@ -101,11 +314,25 @@ async def handle_query_memory(
         if not safe_user_prompt.strip() and getattr(req, "image_urls", None):
             safe_user_prompt = "[图片]"
         # 防御：极端情况下避免将超长文本写入记忆/embedding
-        if len(safe_user_prompt) > 4000:
-            safe_user_prompt = safe_user_prompt[:4000] + "…(truncated)"
+        max_prompt_chars = int(
+            plugin.config.get("max_prompt_chars_for_embedding", 4000)
+        )
+        if max_prompt_chars <= 0:
+            max_prompt_chars = 4000
+        if len(safe_user_prompt) > max_prompt_chars:
+            logger.warning(
+                f"用户输入过长 ({len(safe_user_prompt)} chars)，已截断到 {max_prompt_chars} chars。"
+            )
+            safe_user_prompt = safe_user_prompt[:max_prompt_chars] + "…(truncated)"
 
         # 添加用户消息（写入插件上下文管理器）
-        plugin.context_manager.add_message(session_id, "user", safe_user_prompt)
+        sender_id = str(event.get_sender_id()) if event.get_sender_id() else ""
+        plugin.context_manager.add_message(
+            session_id,
+            "user",
+            safe_user_prompt,
+            metadata={"speaker_id": sender_id},
+        )
         # 计数器+1
         plugin.msg_counter.increment_counter(session_id)
 
@@ -134,6 +361,25 @@ async def handle_query_memory(
                         f"检测到群聊上下文格式，已提取真实消息用于 RAG 搜索 "
                         f"(原始: {len(safe_user_prompt)}字符 → 提取: {len(actual_query)}字符)"
                     )
+
+                # 支持显式记忆触发：仅在强触发语句下执行，默认关闭以避免误触。
+                if plugin.config.get("enable_explicit_memory_capture", False):
+                    explicit_content = _extract_explicit_memory_content(actual_query)
+                    if explicit_content:
+                        stored = await store_manual_memory(
+                            plugin=plugin,
+                            event=event,
+                            memory_content=explicit_content,
+                            source="explicit_trigger",
+                        )
+                        if stored:
+                            logger.info("已根据显式“记住”触发写入长期记忆。")
+
+                if len(actual_query) > max_prompt_chars:
+                    logger.warning(
+                        f"RAG 查询文本过长 ({len(actual_query)} chars)，按配置截断到 {max_prompt_chars} chars。"
+                    )
+                    actual_query = actual_query[:max_prompt_chars]
 
                 # 使用 AstrBot EmbeddingProvider 的 embed 方法
                 if plugin.embedding_provider:
@@ -164,7 +410,12 @@ async def handle_query_memory(
 
             # 2. 执行 Milvus 搜索
             detailed_results = await _perform_milvus_search(
-                plugin, query_vector, session_id, persona_id
+                plugin,
+                query_vector,
+                session_id,
+                persona_id,
+                query_text=actual_query,
+                sender_id=sender_id,
             )
 
             # 3. 格式化结果并注入到提示中
@@ -212,7 +463,10 @@ async def handle_on_llm_resp(
 
         logger.debug(f"返回的内容：{resp.completion_text}")
         plugin.context_manager.add_message(
-            session_id, "assistant", resp.completion_text
+            session_id,
+            "assistant",
+            resp.completion_text,
+            metadata={"speaker_id": "assistant"},
         )
         plugin.msg_counter.increment_counter(session_id)
 
@@ -334,7 +588,13 @@ async def _check_and_trigger_summary(
 
         # M19 修复: 为后台任务添加异常处理回调
         task = asyncio.create_task(
-            handle_summary_long_memory(plugin, persona_id, session_id, history_contents)
+            handle_summary_long_memory(
+                plugin,
+                persona_id,
+                session_id,
+                history_contents,
+                context_history=context,
+            )
         )
 
         def task_done_callback(t: asyncio.Task):
@@ -361,6 +621,8 @@ async def _perform_milvus_search(
     query_vector: list[float],
     session_id: str | None,
     persona_id: str | None,
+    query_text: str = "",
+    sender_id: str | None = None,
 ) -> list[dict] | None:
     """
     执行 Milvus 向量搜索。
@@ -431,8 +693,9 @@ async def _perform_milvus_search(
     top_k = plugin.config.get("top_k", DEFAULT_TOP_K)
     timeout_seconds = plugin.config.get("milvus_search_timeout", DEFAULT_MILVUS_TIMEOUT)
 
+    candidate_limit = min(max(top_k * 4, top_k), 60)
     logger.info(
-        f"开始在集合 '{collection_name}' 中搜索相关记忆 (TopK: {top_k}, Filter: '{search_expression or '无'}')"
+        f"开始在集合 '{collection_name}' 中搜索相关记忆 (TopK: {top_k}, Candidates: {candidate_limit}, Filter: '{search_expression or '无'}')"
     )
 
     # M24 修复: 添加 milvus_manager 的类型检查
@@ -449,7 +712,7 @@ async def _perform_milvus_search(
                     query_vectors=[query_vector],
                     vector_field=VECTOR_FIELD_NAME,
                     search_params=plugin.search_params,
-                    limit=top_k,
+                    limit=candidate_limit,
                     expression=search_expression,
                     output_fields=plugin.output_fields_for_query,
                 ),
@@ -474,7 +737,17 @@ async def _perform_milvus_search(
         hits = search_results[0]
         # 调用新的辅助函数来处理 Hits 对象并提取详细结果
         detailed_results = _process_milvus_hits(hits)
-        return detailed_results
+        if not detailed_results:
+            return detailed_results
+
+        post_processed = _post_process_search_results(
+            plugin=plugin,
+            detailed_results=detailed_results,
+            query_text=query_text,
+            sender_id=sender_id,
+        )
+        # 最终返回 top_k 条
+        return post_processed[:top_k]
 
 
 def _process_milvus_hits(hits) -> list[dict[str, Any]]:
@@ -510,6 +783,12 @@ def _process_milvus_hits(hits) -> list[dict[str, Any]]:
                         entity_data = hit.entity.to_dict().get("entity")
                         # 如果成功提取到数据，则添加到结果列表
                         if entity_data:
+                            # 附带 Milvus 距离信息用于后续关键词/图谱重排
+                            if isinstance(entity_data, dict):
+                                entity_data = dict(entity_data)
+                                distance = getattr(hit, "distance", None)
+                                if isinstance(distance, (int, float)):
+                                    entity_data["_distance"] = float(distance)
                             detailed_results.append(entity_data)
                         else:
                             # 如果 entity 存在但提取的数据为空，可能是数据结构问题
@@ -562,7 +841,7 @@ def _format_and_inject_memory(
     long_memory = f"{long_memory_prefix}\n"
 
     for result in detailed_results:
-        content = result.get("content", "内容缺失")
+        content = strip_memory_meta(str(result.get("content", "内容缺失")))
         ts = result.get("create_time")
         try:
             time_str = (
@@ -584,23 +863,41 @@ def _format_and_inject_memory(
     logger.debug(f"补充内容:\n{long_memory}")
 
     injection_method = plugin.config.get("memory_injection_method", "user_prompt")
+    injection_position = plugin.config.get("memory_injection_position", "prepend")
+    if injection_position not in {"prepend", "append"}:
+        injection_position = "prepend"
 
     # 清理插入的长期记忆内容
     clean_contexts(plugin, req)
     if injection_method == "user_prompt":
-        req.prompt = long_memory + "\n" + req.prompt
+        current_prompt = req.prompt if isinstance(req.prompt, str) else ""
+        if injection_position == "append":
+            req.prompt = current_prompt + "\n" + long_memory
+        else:
+            req.prompt = long_memory + "\n" + current_prompt
 
     elif injection_method == "system_prompt":
-        req.system_prompt += long_memory
+        current_system_prompt = (
+            req.system_prompt if isinstance(req.system_prompt, str) else ""
+        )
+        if injection_position == "append":
+            req.system_prompt = current_system_prompt + long_memory
+        else:
+            req.system_prompt = long_memory + current_system_prompt
 
     elif injection_method == "insert_system_prompt":
-        req.contexts.append({"role": "system", "content": long_memory})
+        payload = {"role": "system", "content": long_memory}
+        if injection_position == "append":
+            req.contexts.append(payload)
+        else:
+            req.contexts.insert(0, payload)
 
     else:
         logger.warning(
             f"未知的记忆注入方法 '{injection_method}'，将默认追加到用户 prompt。"
         )
-        req.prompt = long_memory + "\n" + req.prompt
+        current_prompt = req.prompt if isinstance(req.prompt, str) else ""
+        req.prompt = long_memory + "\n" + current_prompt
 
 
 # 删除补充的长期记忆函数
@@ -684,10 +981,24 @@ async def _get_summary_llm_response(
     )
 
     try:
+        summary_contexts = [{"role": "system", "content": long_memory_prompt}]
+        if plugin.config.get("use_summary_time_anchor", True):
+            now_str = datetime.now().astimezone().isoformat(timespec="seconds")
+            summary_contexts.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"当前绝对时间：{now_str}。"
+                        "如果原始对话未明确给出具体日期/年份，禁止臆造精确日期；"
+                        "请使用“近期/之前/后来”等相对表达。"
+                    ),
+                }
+            )
+
         # M24 修复: 添加 text_chat 方法的类型忽略
         llm_response = await llm_provider.text_chat(  # type: ignore
             prompt=memory_text,
-            contexts=[{"role": "system", "content": long_memory_prompt}],
+            contexts=summary_contexts,
             **summary_llm_config,
         )
         logger.debug(f"LLM 总结响应原始数据: {llm_response}")
@@ -735,7 +1046,7 @@ async def _store_summary_to_milvus(
     session_id: str,
     summary_text: str,
     embedding_vector: list[float],
-):
+) -> bool:
     """
     将总结文本和向量存储到 Milvus 中。
 
@@ -780,7 +1091,7 @@ async def _store_summary_to_milvus(
     # M24 修复: 添加 milvus_manager 的类型检查
     if not plugin.milvus_manager:
         logger.error("Milvus 管理器不可用")
-        return
+        return False
 
     try:
         # M24 修复: 定义插入函数避免类型检查问题
@@ -824,21 +1135,28 @@ async def _store_summary_to_milvus(
                 _flush_collection,
             )
             logger.debug(f"集合 '{collection_name}' 刷新完成。")
+            return True
 
         except Exception as flush_err:
             logger.error(
                 f"刷新集合 '{collection_name}' 时出错: {flush_err}",
                 exc_info=True,
             )
+            return False
     else:
         logger.error(
             f"插入总结记忆到 Milvus 失败。MutationResult: {mutation_result}. LLM 回复: {summary_text[:100]}..."
         )
+    return False
 
 
 async def handle_summary_long_memory(
-    plugin: "Mnemosyne", persona_id: str | None, session_id: str, memory_text: str
-):
+    plugin: "Mnemosyne",
+    persona_id: str | None,
+    session_id: str,
+    memory_text: str,
+    context_history: list[dict] | None = None,
+) -> bool:
     """
     使用 LLM 总结短期对话历史形成长期记忆，并将其向量化后存入 Milvus。
     这是一个后台任务。
@@ -847,25 +1165,25 @@ async def handle_summary_long_memory(
 
     # --- 前置检查 ---
     if not await _check_summary_prerequisites(plugin, memory_text):
-        return
+        return False
 
     try:
         # 1. 请求 LLM 进行总结
         llm_response = await _get_summary_llm_response(plugin, memory_text)
         if not llm_response:
-            return
+            return False
 
         # 2. 提取总结文本
         summary_text = _extract_summary_text(plugin, llm_response)
         if not summary_text:
-            return
+            return False
 
         # 3. 获取总结文本的 Embedding
         # 使用 AstrBot EmbeddingProvider（异步）
         try:
             if not plugin.embedding_provider:
                 logger.error("Embedding Provider 不可用，无法获取总结的 Embedding")
-                return
+                return False
 
             # 使用 AstrBot EmbeddingProvider 的 get_embedding 方法
             embedding_vector = await plugin.embedding_provider.get_embedding(
@@ -874,28 +1192,103 @@ async def handle_summary_long_memory(
 
             if not embedding_vector:
                 logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")
-                return
+                return False
 
         except (ConnectionError, ValueError, RuntimeError) as e:
             logger.error(
                 f"获取总结文本 Embedding 时出错: '{summary_text[:100]}...' - {e}",
                 exc_info=True,
             )
-            return
+            return False
         except Exception as e:
             logger.error(
                 f"获取总结文本 Embedding 时发生未知错误: '{summary_text[:100]}...' - {e}",
                 exc_info=True,
             )
-            return
+            return False
+
+        metadata: dict[str, Any] = {}
+        if plugin.config.get("use_participant_filtering", False) or plugin.config.get(
+            "use_lightweight_memory_graph", True
+        ):
+            metadata = _build_lightweight_graph_metadata(summary_text, context_history)
+        stored_content = pack_memory_content(summary_text, metadata)
 
         # 4. 存储到 Milvus
-        await _store_summary_to_milvus(
-            plugin, persona_id, session_id, summary_text, embedding_vector
+        return await _store_summary_to_milvus(
+            plugin, persona_id, session_id, stored_content, embedding_vector
         )
-        return
     except Exception as e:
         logger.error(f"在总结或存储长期记忆的过程中发生严重错误: {e}", exc_info=True)
+        return False
+
+
+async def store_manual_memory(
+    plugin: "Mnemosyne",
+    event: AstrMessageEvent,
+    memory_content: str,
+    source: str = "manual",
+    session_id: str | None = None,
+    persona_id: str | None = None,
+) -> bool:
+    """
+    直接写入一条长期记忆（不经过 LLM 总结），用于显式“记住”场景和手动命令。
+    """
+    normalized_content = (
+        memory_content.strip() if isinstance(memory_content, str) else ""
+    )
+    if not normalized_content:
+        logger.warning("手动记忆内容为空，已跳过。")
+        return False
+
+    if not await _check_summary_prerequisites(plugin, normalized_content):
+        return False
+
+    target_session_id = session_id or event.unified_msg_origin
+    if not target_session_id or not validate_session_id(target_session_id):
+        logger.error(f"手动记忆写入失败：无效 session_id={target_session_id}")
+        return False
+
+    target_persona = persona_id
+    if not target_persona:
+        target_persona = await _get_persona_id(plugin, event)
+
+    if not plugin.embedding_provider:
+        logger.error("手动记忆写入失败：Embedding Provider 不可用。")
+        return False
+
+    try:
+        embedding_vector = await plugin.embedding_provider.get_embedding(
+            normalized_content
+        )
+    except Exception as e:
+        logger.error(f"手动记忆写入失败：获取 Embedding 异常: {e}", exc_info=True)
+        return False
+
+    if not embedding_vector:
+        logger.error("手动记忆写入失败：Embedding 结果为空。")
+        return False
+
+    metadata = _build_lightweight_graph_metadata(
+        normalized_content,
+        context_history=[
+            {
+                "role": "user",
+                "content": normalized_content,
+                "metadata": {"speaker_id": str(event.get_sender_id())},
+            }
+        ],
+    )
+    metadata["source"] = source
+    stored_content = pack_memory_content(normalized_content, metadata)
+
+    return await _store_summary_to_milvus(
+        plugin=plugin,
+        persona_id=target_persona,
+        session_id=target_session_id,
+        summary_text=stored_content,
+        embedding_vector=embedding_vector,
+    )
 
 
 # 计时器
@@ -967,7 +1360,11 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                         )
                         asyncio.create_task(
                             handle_summary_long_memory(
-                                plugin, persona_id, session_id, history_contents
+                                plugin,
+                                persona_id,
+                                session_id,
+                                history_contents,
+                                context_history=session_context["history"],
                             )
                         )
                         logger.info("总结历史对话任务已提交到后台执行。")
