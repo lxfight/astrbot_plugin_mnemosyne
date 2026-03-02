@@ -31,7 +31,7 @@ from .core.constants import (
     DEFAULT_SUMMARY_CHECK_INTERVAL_SECONDS,
     DEFAULT_SUMMARY_TIME_THRESHOLD_SECONDS,
 )  # 导入使用的常量
-from .core.tools import is_group_chat
+from .core.tools import get_event_platform_id, is_group_chat
 from .memory_manager.context_manager import ConversationContextManager
 from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db.milvus_manager import MilvusManager
@@ -41,7 +41,7 @@ from .memory_manager.vector_db.milvus_manager import MilvusManager
     "Mnemosyne",
     "lxfight",
     "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
-    "2.0.6",
+    "2.1.0",
     "https://github.com/lxfight/astrbot_plugin_mnemosyne",
 )
 class Mnemosyne(Star):
@@ -74,6 +74,12 @@ class Mnemosyne(Star):
         self._warned_missing_provider_ids: set[str] = set()
         self._post_load_tasks_started = False
         self._ensure_milvus_connection_task: asyncio.Task | None = None
+        configured_blacklist = self.config.get("platform_blacklist", [])
+        self.platform_blacklist: set[str] = {
+            str(item).strip() for item in configured_blacklist if str(item).strip()
+        }
+        if self.platform_blacklist:
+            logger.info(f"长期记忆已为以下平台禁用: {sorted(self.platform_blacklist)}")
 
         logger.info("开始初始化 Mnemosyne 插件...")
         # 启动后台异步初始化，但不包括 Embedding Provider 的初始化
@@ -81,6 +87,16 @@ class Mnemosyne(Star):
 
         # 延迟加载 Embedding Provider，只在需要时才加载
         self._embedding_provider_task = None
+
+    def _is_memory_disabled_for_event(self, event: AstrMessageEvent) -> bool:
+        """
+        判断当前事件是否应跳过记忆能力（平台黑名单）。
+        """
+        platform_id = get_event_platform_id(event)
+        if platform_id and platform_id in self.platform_blacklist:
+            logger.debug(f"平台 '{platform_id}' 在记忆黑名单中，跳过记忆流程。")
+            return True
+        return False
 
     def _initialize_embedding_provider(
         self, silent: bool = False
@@ -247,7 +263,9 @@ class Mnemosyne(Star):
             if self.context.get_all_providers():
                 return True
         except (AttributeError, TypeError) as exc:
-            logger.warning(f"检查 Providers 初始化状态失败（get_all_providers 不可用）: {exc}")
+            logger.warning(
+                f"检查 Providers 初始化状态失败（get_all_providers 不可用）: {exc}"
+            )
         return False
 
     def _create_background_task(self, coro: Any, name: str) -> asyncio.Task | None:
@@ -257,7 +275,9 @@ class Mnemosyne(Star):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError as exc:
-            logger.warning(f"无法启动后台任务 '{name}': 当前没有运行中的事件循环: {exc}")
+            logger.warning(
+                f"无法启动后台任务 '{name}': 当前没有运行中的事件循环: {exc}"
+            )
             return None
 
         # 额外提示：如果不是在 Task 上下文中创建，未来改动更容易定位。
@@ -531,7 +551,9 @@ class Mnemosyne(Star):
             logger.info("AstrBot 初始化完成，开始加载 Embedding Provider...")
             self._start_post_load_tasks()
         except Exception as e:
-            logger.error(f"处理 on_astrbot_loaded 钩子时发生捕获异常: {e}", exc_info=True)
+            logger.error(
+                f"处理 on_astrbot_loaded 钩子时发生捕获异常: {e}", exc_info=True
+            )
         return
 
     @filter.on_llm_request()
@@ -539,6 +561,9 @@ class Mnemosyne(Star):
         """[事件钩子] 在 LLM 请求前，查询并注入长期记忆。"""
         # 当会话第一次发生时，插件会从AstrBot中获取上下文历史，之后的会话历史由插件自动管理
         try:
+            if self._is_memory_disabled_for_event(event):
+                return
+
             # 等待 Embedding Provider 加载完成（如果正在加载）
             if (
                 self._embedding_provider_task
@@ -634,6 +659,9 @@ class Mnemosyne(Star):
     async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse):
         """[事件钩子] 在 LLM 响应后"""
         try:
+            if self._is_memory_disabled_for_event(event):
+                return
+
             result = memory_operations.handle_on_llm_resp(self, event, resp)
             # 检查返回值是否是可等待对象，如果不是则直接返回
             if result and hasattr(result, "__await__"):
@@ -705,6 +733,34 @@ class Mnemosyne(Star):
         async for result in commands.delete_session_memory_cmd_impl(
             self, event, session_id, confirm
         ):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @memory_group.command("delete_record")  # type: ignore
+    async def delete_record_cmd(
+        self,
+        event: AstrMessageEvent,
+        memory_id: str,
+        session_id: str | None = None,
+        confirm: str | None = None,
+    ):
+        """[管理员] 删除指定会话中的单条记忆记录
+        使用示例：/memory delete_record [memory_id] [session_id] [--confirm]
+        """
+        async for result in commands.delete_record_cmd_impl(
+            self, event, memory_id, session_id, confirm
+        ):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.MEMBER)
+    @memory_group.command("remember")  # type: ignore
+    async def remember_cmd(self, event: AstrMessageEvent, content: str):
+        """手动写入一条长期记忆
+        使用示例：/memory remember [content]
+        """
+        async for result in commands.remember_memory_cmd_impl(self, event, content):
             yield result
         return
 

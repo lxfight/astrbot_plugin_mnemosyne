@@ -101,7 +101,9 @@
 /memory list                              查看所有记忆集合
 /memory list_records [collection] [limit] 列出指定集合的记忆记录
 /memory get_session_id                    获取当前会话 ID
+/memory remember [content]                手动写入一条长期记忆
 /memory reset [confirm]                   清除当前会话记忆
+/memory delete_record [id] [session] [confirm] 删除指定会话中的单条记忆（管理员）
 /memory delete_session_memory [id] [confirm]  删除指定会话记忆（管理员）
 /memory drop_collection [name] [confirm] 删除整个集合（管理员）
 ```
@@ -135,9 +137,19 @@
 <td>default</td>
 </tr>
 <tr>
+<td><code>db_name</code></td>
+<td>Milvus 数据库名称（多库隔离）</td>
+<td>default</td>
+</tr>
+<tr>
 <td><code>memory_injection_method</code></td>
 <td>记忆注入方式</td>
 <td>user_prompt</td>
+</tr>
+<tr>
+<td><code>memory_injection_position</code></td>
+<td>记忆注入位置（prepend/append）</td>
+<td>prepend</td>
 </tr>
 <tr>
 <td><code>use_personality_filtering</code></td>
@@ -147,6 +159,31 @@
 <tr>
 <td><code>use_session_filtering</code></td>
 <td>是否启用会话过滤。如果禁用，所有会话将共享记忆</td>
+<td>true</td>
+</tr>
+<tr>
+<td><code>platform_blacklist</code></td>
+<td>平台黑名单（命中平台将跳过记忆查询和写入）</td>
+<td>[]</td>
+</tr>
+<tr>
+<td><code>max_prompt_chars_for_embedding</code></td>
+<td>向量化前最大输入字符数（超长自动截断）</td>
+<td>4000</td>
+</tr>
+<tr>
+<td><code>enable_explicit_memory_capture</code></td>
+<td>开启后支持“记住/remember”显式触发即时记忆写入</td>
+<td>false</td>
+</tr>
+<tr>
+<td><code>use_participant_filtering</code></td>
+<td>按发言用户过滤记忆，缓解群聊串线</td>
+<td>false</td>
+</tr>
+<tr>
+<td><code>use_lightweight_memory_graph</code></td>
+<td>启用轻量图谱重排（实体关系 one-hop 扩展）</td>
 <td>true</td>
 </tr>
 </table>
