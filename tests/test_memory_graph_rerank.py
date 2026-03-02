@@ -80,8 +80,10 @@ from core.memory_operations import (  # noqa: E402
 from core.tools import (  # noqa: E402
     extract_query_keywords,
     pack_memory_content,
+    resolve_max_prompt_chars,
     split_memory_content_meta,
     strip_memory_meta,
+    truncate_for_embedding,
 )
 
 
@@ -109,6 +111,25 @@ class TestMemoryMetaHelpers(unittest.TestCase):
         self.assertIn("alpha_1", keywords)
         self.assertIn("项目", keywords)
         self.assertIn("北京", keywords)
+
+    def test_resolve_max_prompt_chars_uses_config_and_fallback(self) -> None:
+        self.assertEqual(
+            resolve_max_prompt_chars({"max_prompt_chars_for_embedding": "512"}), 512
+        )
+        self.assertEqual(
+            resolve_max_prompt_chars({"max_prompt_chars_for_embedding": 0}), 4000
+        )
+        self.assertEqual(resolve_max_prompt_chars(None), 4000)
+
+    def test_truncate_for_embedding_supports_optional_suffix(self) -> None:
+        text = "x" * 20
+        plain, plain_changed = truncate_for_embedding(text, 8, append_suffix=False)
+        suffixed, suffixed_changed = truncate_for_embedding(text, 8, append_suffix=True)
+
+        self.assertTrue(plain_changed)
+        self.assertEqual(plain, "x" * 8)
+        self.assertTrue(suffixed_changed)
+        self.assertEqual(suffixed, "x" * 8 + "…(truncated)")
 
 
 class TestLightweightGraphMetadata(unittest.TestCase):
@@ -172,7 +193,7 @@ class TestPostProcessSearchResults(unittest.TestCase):
             plugin=plugin,
             detailed_results=detailed_results,
             query_text="",
-            sender_id="u1",
+            sender_id=" u1 ",
         )
 
         self.assertEqual(

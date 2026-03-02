@@ -13,6 +13,7 @@ from astrbot.api.event import AstrMessageEvent
 
 from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME
 from .security_utils import safe_build_milvus_expression, validate_session_id
+from .tools import resolve_max_prompt_chars, truncate_for_embedding
 
 if TYPE_CHECKING:
     from ..main import Mnemosyne
@@ -494,8 +495,16 @@ async def remember_memory_cmd_impl(
         yield event.plain_result("⚠️ 请提供要记住的内容。")
         return
 
-    if len(memory_content) > 4000:
-        memory_content = memory_content[:4000]
+    max_chars = resolve_max_prompt_chars(getattr(self, "config", None), default=4000)
+    memory_content, memory_was_truncated = truncate_for_embedding(
+        memory_content,
+        max_chars,
+        append_suffix=False,
+    )
+    if memory_was_truncated:
+        logger.info(
+            f"'memory remember' 输入超长，已按 max_prompt_chars_for_embedding={max_chars} 截断。"
+        )
 
     try:
         from . import memory_operations

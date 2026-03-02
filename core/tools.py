@@ -13,6 +13,49 @@ logger = LogManager.GetLogger(__name__)
 
 MNEMO_META_PREFIX = "<MNEMO_META>"
 MNEMO_META_SUFFIX = "</MNEMO_META>"
+DEFAULT_EMBEDDING_MAX_CHARS = 4000
+TRUNCATED_SUFFIX = "…(truncated)"
+
+
+def resolve_max_prompt_chars(
+    config: Any, default: int = DEFAULT_EMBEDDING_MAX_CHARS
+) -> int:
+    """
+    从配置中解析 max_prompt_chars_for_embedding，并提供安全回退。
+    """
+    raw_value: Any = default
+    try:
+        if isinstance(config, dict):
+            raw_value = config.get("max_prompt_chars_for_embedding", default)
+        elif config is not None:
+            getter = getattr(config, "get", None)
+            if callable(getter):
+                raw_value = getter("max_prompt_chars_for_embedding", default)
+            else:
+                raw_value = getattr(config, "max_prompt_chars_for_embedding", default)
+        max_chars = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+
+    return max_chars if max_chars > 0 else default
+
+
+def truncate_for_embedding(
+    text: str, max_chars: int, append_suffix: bool = False
+) -> tuple[str, bool]:
+    """
+    按长度限制截断文本，返回 (处理后文本, 是否发生截断)。
+    """
+    normalized_text = text if isinstance(text, str) else str(text)
+    if max_chars <= 0:
+        max_chars = DEFAULT_EMBEDDING_MAX_CHARS
+    if len(normalized_text) <= max_chars:
+        return normalized_text, False
+
+    truncated = normalized_text[:max_chars]
+    if append_suffix:
+        truncated += TRUNCATED_SUFFIX
+    return truncated, True
 
 
 def parse_address(address: str):

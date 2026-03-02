@@ -34,8 +34,10 @@ from .tools import (
     remove_mnemosyne_tags,
     remove_system_content,
     remove_system_mnemosyne_tags,
+    resolve_max_prompt_chars,
     split_memory_content_meta,
     strip_memory_meta,
+    truncate_for_embedding,
 )
 
 # 类型提示，避免循环导入
@@ -203,7 +205,8 @@ def _post_process_search_results(
         prepared.append(merged)
 
     # 参与者过滤
-    if plugin.config.get("use_participant_filtering", False) and sender_id:
+    normalized_sender_id = sender_id.strip() if isinstance(sender_id, str) else ""
+    if plugin.config.get("use_participant_filtering", False) and normalized_sender_id:
         filtered: list[dict[str, Any]] = []
         for result in prepared:
             meta = result.get("_meta", {})
@@ -215,7 +218,7 @@ def _post_process_search_results(
                 filtered.append(result)
                 continue
             normalized = {str(x).strip() for x in participants if str(x).strip()}
-            if sender_id in normalized:
+            if normalized_sender_id in normalized:
                 filtered.append(result)
         if filtered:
             prepared = filtered
@@ -314,16 +317,17 @@ async def handle_query_memory(
         if not safe_user_prompt.strip() and getattr(req, "image_urls", None):
             safe_user_prompt = "[图片]"
         # 防御：极端情况下避免将超长文本写入记忆/embedding
-        max_prompt_chars = int(
-            plugin.config.get("max_prompt_chars_for_embedding", 4000)
+        max_prompt_chars = resolve_max_prompt_chars(plugin.config, default=4000)
+        original_prompt_len = len(safe_user_prompt)
+        safe_user_prompt, prompt_was_truncated = truncate_for_embedding(
+            safe_user_prompt,
+            max_prompt_chars,
+            append_suffix=True,
         )
-        if max_prompt_chars <= 0:
-            max_prompt_chars = 4000
-        if len(safe_user_prompt) > max_prompt_chars:
+        if prompt_was_truncated:
             logger.warning(
-                f"用户输入过长 ({len(safe_user_prompt)} chars)，已截断到 {max_prompt_chars} chars。"
+                f"用户输入过长 ({original_prompt_len} chars)，已截断到 {max_prompt_chars} chars。"
             )
-            safe_user_prompt = safe_user_prompt[:max_prompt_chars] + "…(truncated)"
 
         # 添加用户消息（写入插件上下文管理器）
         sender_id = str(event.get_sender_id()) if event.get_sender_id() else ""
