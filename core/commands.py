@@ -1,7 +1,8 @@
-﻿# Mnemosyne 插件的命令处理函数实现
+# Mnemosyne 插件的命令处理函数实现
 # (注意：装饰器已移除，函数接收 self)
 
 import json
+import re
 import time as time_module
 from datetime import datetime
 from pathlib import Path
@@ -12,9 +13,28 @@ from astrbot.api.event import AstrMessageEvent
 
 from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME
 from .security_utils import safe_build_milvus_expression, validate_session_id
+from .tools import resolve_max_prompt_chars, truncate_for_embedding
 
 if TYPE_CHECKING:
     from ..main import Mnemosyne
+
+
+def _build_memory_id_expression(memory_id: str) -> str:
+    """
+    构建 memory_id 查询表达式。
+    """
+    normalized = memory_id.strip().strip('"`')
+    if not normalized:
+        raise ValueError("memory_id 不能为空")
+    if len(normalized) > 128:
+        raise ValueError("memory_id 长度超过限制")
+    if not re.match(r"^[a-zA-Z0-9_-]+$", normalized):
+        raise ValueError("memory_id 格式非法，仅允许字母、数字、下划线和连字符")
+
+    try:
+        return f"memory_id == {int(normalized)}"
+    except ValueError:
+        return f'memory_id == "{normalized}"'
 
 
 async def list_collections_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
@@ -398,6 +418,113 @@ async def delete_session_memory_cmd_impl(
             exc_info=True,
         )
         yield event.plain_result(f"⚠️ 删除会话记忆时发生严重错误: {str(e)}")
+
+
+async def delete_record_cmd_impl(
+    self: "Mnemosyne",
+    event: AstrMessageEvent,
+    memory_id: str,
+    session_id: str | None = None,
+    confirm: str | None = None,
+):
+    """[实现] 删除指定会话中的单条记忆记录"""
+    if not self.milvus_manager or not self.milvus_manager.is_connected():
+        yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
+        return
+
+    target_session_id = session_id or event.unified_msg_origin
+    if not target_session_id or not validate_session_id(target_session_id):
+        yield event.plain_result("⚠️ 会话 ID 无效，无法删除指定记录。")
+        return
+
+    try:
+        memory_expr = _build_memory_id_expression(memory_id)
+    except ValueError as e:
+        yield event.plain_result(f"⚠️ memory_id 无效: {e}")
+        return
+
+    if confirm != "--confirm":
+        yield event.plain_result(
+            f"⚠️ 操作确认 ⚠️\n"
+            f"将删除会话 '{target_session_id}' 中 memory_id={memory_id} 的记忆记录，此操作无法撤销。\n\n"
+            f"请使用以下命令确认：\n"
+            f'`/memory delete_record "{memory_id}" "{target_session_id}" --confirm`'
+        )
+        return
+
+    try:
+        session_expr = safe_build_milvus_expression(
+            "session_id", target_session_id, "=="
+        )
+        expr = f"{memory_expr} and {session_expr}"
+        mutation_result = self.milvus_manager.delete(
+            collection_name=self.collection_name,
+            expression=expr,
+        )
+        if not mutation_result:
+            yield event.plain_result("⚠️ 删除请求失败，请检查 Milvus 日志。")
+            return
+
+        delete_count = (
+            mutation_result.delete_count
+            if hasattr(mutation_result, "delete_count")
+            else "未知"
+        )
+        self.milvus_manager.flush([self.collection_name])
+        yield event.plain_result(
+            f"✅ 删除请求已执行。会话: {target_session_id}\n"
+            f"记录 ID: {memory_id}\n"
+            f"Milvus 返回删除计数: {delete_count}"
+        )
+    except Exception as e:
+        logger.error(
+            f"执行 'memory delete_record' 失败 (memory_id={memory_id}, session={target_session_id}): {e}",
+            exc_info=True,
+        )
+        yield event.plain_result(f"⚠️ 删除指定记录失败: {e}")
+
+
+async def remember_memory_cmd_impl(
+    self: "Mnemosyne",
+    event: AstrMessageEvent,
+    content: str,
+):
+    """[实现] 手动写入一条长期记忆"""
+    memory_content = content.strip() if isinstance(content, str) else ""
+    if not memory_content:
+        yield event.plain_result("⚠️ 请提供要记住的内容。")
+        return
+
+    max_chars = resolve_max_prompt_chars(getattr(self, "config", None), default=4000)
+    memory_content, memory_was_truncated = truncate_for_embedding(
+        memory_content,
+        max_chars,
+        append_suffix=False,
+    )
+    if memory_was_truncated:
+        logger.info(
+            f"'memory remember' 输入超长，已按 max_prompt_chars_for_embedding={max_chars} 截断。"
+        )
+
+    try:
+        from . import memory_operations
+
+        success = await memory_operations.store_manual_memory(
+            plugin=self,
+            event=event,
+            memory_content=memory_content,
+            source="memory_command",
+        )
+        if success:
+            yield event.plain_result(
+                f"✅ 已写入长期记忆：{memory_content[:120]}"
+                f"{'...' if len(memory_content) > 120 else ''}"
+            )
+        else:
+            yield event.plain_result("⚠️ 写入长期记忆失败，请检查日志。")
+    except Exception as e:
+        logger.error(f"执行 'memory remember' 命令失败: {e}", exc_info=True)
+        yield event.plain_result(f"⚠️ 写入长期记忆失败: {e}")
 
 
 async def get_session_id_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):

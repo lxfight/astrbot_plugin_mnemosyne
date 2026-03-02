@@ -1,7 +1,7 @@
-"""Mnemosyne 插件工具函数
-"""
+"""Mnemosyne 插件工具函数"""
 
 import functools
+import json
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -10,6 +10,52 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.core.log import LogManager
 
 logger = LogManager.GetLogger(__name__)
+
+MNEMO_META_PREFIX = "<MNEMO_META>"
+MNEMO_META_SUFFIX = "</MNEMO_META>"
+DEFAULT_EMBEDDING_MAX_CHARS = 4000
+TRUNCATED_SUFFIX = "…(truncated)"
+
+
+def resolve_max_prompt_chars(
+    config: Any, default: int = DEFAULT_EMBEDDING_MAX_CHARS
+) -> int:
+    """
+    从配置中解析 max_prompt_chars_for_embedding，并提供安全回退。
+    """
+    raw_value: Any = default
+    try:
+        if isinstance(config, dict):
+            raw_value = config.get("max_prompt_chars_for_embedding", default)
+        elif config is not None:
+            getter = getattr(config, "get", None)
+            if callable(getter):
+                raw_value = getter("max_prompt_chars_for_embedding", default)
+            else:
+                raw_value = getattr(config, "max_prompt_chars_for_embedding", default)
+        max_chars = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+
+    return max_chars if max_chars > 0 else default
+
+
+def truncate_for_embedding(
+    text: str, max_chars: int, append_suffix: bool = False
+) -> tuple[str, bool]:
+    """
+    按长度限制截断文本，返回 (处理后文本, 是否发生截断)。
+    """
+    normalized_text = text if isinstance(text, str) else str(text)
+    if max_chars <= 0:
+        max_chars = DEFAULT_EMBEDDING_MAX_CHARS
+    if len(normalized_text) <= max_chars:
+        return normalized_text, False
+
+    truncated = normalized_text[:max_chars]
+    if append_suffix:
+        truncated += TRUNCATED_SUFFIX
+    return truncated, True
 
 
 def parse_address(address: str):
@@ -293,3 +339,100 @@ def is_group_chat(event: AstrMessageEvent) -> bool:
     判断消息是否来自群聊。
     """
     return event.get_group_id() != ""
+
+
+def get_event_platform_id(event: AstrMessageEvent) -> str:
+    """
+    获取事件平台 ID，优先使用 platform_meta.id，失败时回退到 unified_msg_origin 前缀。
+    """
+    try:
+        platform_meta = getattr(event, "platform_meta", None)
+        platform_id = getattr(platform_meta, "id", None)
+        if isinstance(platform_id, str) and platform_id.strip():
+            return platform_id.strip()
+    except Exception:
+        pass
+
+    umo = getattr(event, "unified_msg_origin", "")
+    if isinstance(umo, str) and ":" in umo:
+        return umo.split(":", 1)[0]
+    if isinstance(umo, str):
+        return umo
+    return ""
+
+
+def extract_query_keywords(text: str, min_token_len: int = 2) -> list[str]:
+    """
+    从用户查询中提取关键词，用于关键词重排和轻量图谱扩展。
+    """
+    if not isinstance(text, str) or not text.strip():
+        return []
+
+    keywords: list[str] = []
+    seen: set[str] = set()
+
+    # 英文/数字词
+    for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}", text):
+        token_norm = token.lower().strip()
+        if len(token_norm) >= max(min_token_len, 3) and token_norm not in seen:
+            keywords.append(token_norm)
+            seen.add(token_norm)
+
+    # 连续中文片段
+    for token in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+        token_norm = token.strip()
+        if len(token_norm) >= min_token_len and token_norm not in seen:
+            keywords.append(token_norm)
+            seen.add(token_norm)
+
+    return keywords
+
+
+def pack_memory_content(content: str, metadata: dict[str, Any] | None) -> str:
+    """
+    将内部元数据以隐藏标签附加到记忆内容末尾。
+    """
+    if not isinstance(content, str):
+        content = str(content)
+    if not isinstance(metadata, dict) or not metadata:
+        return content
+
+    try:
+        payload = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
+        return f"{content}\n{MNEMO_META_PREFIX}{payload}{MNEMO_META_SUFFIX}"
+    except Exception as e:
+        logger.warning(f"附加记忆元数据失败，已回退为纯文本内容: {e}")
+        return content
+
+
+def split_memory_content_meta(content: str) -> tuple[str, dict[str, Any]]:
+    """
+    从记忆内容中拆分内部元数据。
+    """
+    if not isinstance(content, str):
+        return str(content), {}
+
+    start = content.rfind(MNEMO_META_PREFIX)
+    end = content.rfind(MNEMO_META_SUFFIX)
+    if start < 0 or end < 0 or end <= start:
+        return content, {}
+
+    json_str = content[start + len(MNEMO_META_PREFIX) : end].strip()
+    pure_content = content[:start].rstrip()
+
+    try:
+        parsed = json.loads(json_str) if json_str else {}
+        if isinstance(parsed, dict):
+            return pure_content, parsed
+    except Exception as e:
+        logger.warning(f"解析记忆元数据失败，忽略元数据块: {e}")
+
+    return pure_content, {}
+
+
+def strip_memory_meta(content: str) -> str:
+    """
+    移除记忆内容中的内部元数据标签。
+    """
+    pure_content, _ = split_memory_content_meta(content)
+    return pure_content

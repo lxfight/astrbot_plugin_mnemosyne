@@ -30,6 +30,16 @@
         "pattern":"^(https?://)?[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*:[0-9]{1,5}$",
         "minLength":0
     },
+    "db_name":{
+        "description":"milvus数据库名称",
+        "type":"string",
+        "hint":"Milvus 2.2+ 支持多数据库。默认使用 default，可按需配置为其他数据库名以隔离数据",
+        "obvious_hint":true,
+        "default":"default",
+        "pattern":"^[a-zA-Z][a-zA-Z0-9_\\-]{0,63}$",
+        "minLength":1,
+        "maxLength":64
+    },
     "authentication":{
         "description":"milvus数据库的认证信息",
         "type":"object",
@@ -100,6 +110,21 @@
         "type":"bool",
         "default":true
     },
+    "platform_blacklist":{
+        "description":"平台黑名单（禁用长期记忆）",
+        "type":"list",
+        "hint":"列表中的平台ID将跳过长期记忆查询与写入。可用于按平台差异化开启记忆能力",
+        "default":[],
+        "items":{
+            "type":"string"
+        }
+    },
+    "use_participant_filtering":{
+        "description":"按参与者过滤记忆（群聊防串线）",
+        "type":"bool",
+        "hint":"开启后，优先返回与当前发言用户相关的记忆（基于记录元数据）",
+        "default":false
+    },
     "personality_fallback":{
         "description":"对话未配置人格时是否回退到默认人格",
         "type":"bool",
@@ -135,6 +160,39 @@
         "hint":"user_prompt 会嵌入到用户消息的最前面，system_prompt会嵌入到系统消息中，insert_system_prompt会向上下文列表中添加一条新的系统消息",
         "options": ["user_prompt", "system_prompt", "insert_system_prompt"],
         "default": "user_prompt"
+    },
+    "memory_injection_position":{
+        "description":"记忆插入位置",
+        "type":"string",
+        "hint":"prepend 表示前置注入，append 表示后置注入",
+        "options":["prepend", "append"],
+        "default":"prepend"
+    },
+    "max_prompt_chars_for_embedding":{
+        "description":"向量化前最大输入字符数",
+        "type":"int",
+        "hint":"当用户输入异常长时，先截断再做Embedding，避免413或上下文超限错误",
+        "default":4000,
+        "minimum":256,
+        "maximum":50000
+    },
+    "enable_explicit_memory_capture":{
+        "description":"启用显式“记住”自动写入",
+        "type":"bool",
+        "hint":"当用户消息以“记住/请记住/remember”开头时，自动写入长期记忆",
+        "default":false
+    },
+    "use_lightweight_memory_graph":{
+        "description":"启用轻量图谱重排",
+        "type":"bool",
+        "hint":"基于实体共现关系做 one-hop 关键词扩展，提升多跳相关记忆召回",
+        "default":true
+    },
+    "use_summary_time_anchor":{
+        "description":"总结时注入绝对时间锚点",
+        "type":"bool",
+        "hint":"减少模型在总结文本中臆造随机年份/日期",
+        "default":true
     },
     "long_memory_prompt":{
         "description":"对话总结提示词",
