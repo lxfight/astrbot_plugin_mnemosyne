@@ -172,6 +172,11 @@
 <td>4000</td>
 </tr>
 <tr>
+<td><code>flush_after_insert</code></td>
+<td>写入后是否立即 flush（提升实时可见性，降低写入吞吐）</td>
+<td>false</td>
+</tr>
+<tr>
 <td><code>enable_explicit_memory_capture</code></td>
 <td>开启后支持“记住/remember”显式触发即时记忆写入</td>
 <td>false</td>

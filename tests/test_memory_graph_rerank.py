@@ -77,9 +77,15 @@ from core.memory_operations import (  # noqa: E402
     _build_lightweight_graph_metadata,
     _post_process_search_results,
 )
+from core.security_utils import (  # noqa: E402
+    normalize_session_id,
+    safe_build_milvus_expression,
+)
 from core.tools import (  # noqa: E402
     extract_query_keywords,
+    fit_memory_content_length,
     pack_memory_content,
+    pack_memory_content_with_limit,
     resolve_max_prompt_chars,
     split_memory_content_meta,
     strip_memory_meta,
@@ -130,6 +136,24 @@ class TestMemoryMetaHelpers(unittest.TestCase):
         self.assertEqual(plain, "x" * 8)
         self.assertTrue(suffixed_changed)
         self.assertEqual(suffixed, "x" * 8 + "…(truncated)")
+
+    def test_pack_memory_content_with_limit_keeps_length_under_limit(self) -> None:
+        content = "alpha " * 200
+        metadata = {
+            "participants": ["u1", "u2"],
+            "entities": ["alpha", "bravo", "charlie"],
+            "relations": [["alpha", "bravo"], ["bravo", "charlie"]],
+            "source": "test",
+        }
+        packed = pack_memory_content_with_limit(content, metadata, max_length=256)
+        self.assertLessEqual(len(packed), 256)
+
+    def test_fit_memory_content_length_trims_existing_meta_payload(self) -> None:
+        content = "beta " * 300
+        metadata = {"relations": [["beta", "delta"]], "participants": ["u1"]}
+        packed = pack_memory_content(content, metadata)
+        fitted = fit_memory_content_length(packed, max_length=300)
+        self.assertLessEqual(len(fitted), 300)
 
 
 class TestLightweightGraphMetadata(unittest.TestCase):
@@ -235,6 +259,20 @@ class TestPostProcessSearchResults(unittest.TestCase):
 
         self.assertEqual(ranked_without_graph[0]["content"], "neutral record")
         self.assertEqual(ranked_with_graph[0]["content"], "memory about bravo")
+
+
+class TestSecurityHelpers(unittest.TestCase):
+    def test_normalize_session_id_is_stable_for_long_ids(self) -> None:
+        raw = "platform:type:" + "x" * 200
+        normalized_a = normalize_session_id(raw)
+        normalized_b = normalize_session_id(raw)
+        self.assertEqual(normalized_a, normalized_b)
+        self.assertLessEqual(len(normalized_a), 72)
+        self.assertTrue(normalized_a.startswith("sid_"))
+
+    def test_safe_build_milvus_expression_escapes_quotes(self) -> None:
+        expr = safe_build_milvus_expression("session_id", 'a"b\\c', "==")
+        self.assertEqual(expr, 'session_id == "a\\"b\\\\c"')
 
 
 if __name__ == "__main__":

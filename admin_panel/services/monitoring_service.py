@@ -250,29 +250,29 @@ class MonitoringService:
             )
 
     async def _check_embedding_health(self) -> ComponentHealth:
-       """检查 Embedding API 健康状态"""
-       try:
-           if not self.plugin.embedding_provider:
-               return ComponentHealth(
-                   name="embedding_api",
-                   status=ComponentStatus.UNHEALTHY,
-                   message="Embedding 服务未初始化",
-               )
+        """检查 Embedding API 健康状态"""
+        try:
+            if not self.plugin.embedding_provider:
+                return ComponentHealth(
+                    name="embedding_api",
+                    status=ComponentStatus.UNHEALTHY,
+                    message="Embedding 服务未初始化",
+                )
 
-           # 简单的连接测试
-           # 注意：这里不进行实际的API调用以避免产生费用
-           return ComponentHealth(
-               name="embedding_api",
-               status=ComponentStatus.HEALTHY,
-               message="Embedding API 已配置",
-           )
-       except Exception as e:
-           self.logger.error(f"检查 Embedding API 健康状态失败: {e}")
-           return ComponentHealth(
-               name="embedding_api",
-               status=ComponentStatus.UNHEALTHY,
-               message=f"检查失败: {str(e)}",
-           )
+            # 简单的连接测试
+            # 注意：这里不进行实际的API调用以避免产生费用
+            return ComponentHealth(
+                name="embedding_api",
+                status=ComponentStatus.HEALTHY,
+                message="Embedding API 已配置",
+            )
+        except Exception as e:
+            self.logger.error(f"检查 Embedding API 健康状态失败: {e}")
+            return ComponentHealth(
+                name="embedding_api",
+                status=ComponentStatus.UNHEALTHY,
+                message=f"检查失败: {str(e)}",
+            )
 
     async def _check_message_counter_health(self) -> ComponentHealth:
         """检查 MessageCounter 健康状态"""

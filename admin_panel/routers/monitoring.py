@@ -32,48 +32,30 @@ def setup_monitoring_routes(app, plugin_instance):
             status = await monitoring_service.get_system_status(
                 force_refresh=force_refresh
             )
-            return {
-                "success": True,
-                "data": status.to_dict()
-            }
+            return {"success": True, "data": status.to_dict()}
         except Exception as e:
             logger.error(f"获取系统状态失败: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # API: 获取性能指标
     @router.get("/api/monitoring/metrics")
     async def get_performance_metrics(request: Request):
         try:
             metrics = monitoring_service.get_performance_metrics()
-            return {
-                "success": True,
-                "data": metrics.to_dict()
-            }
+            return {"success": True, "data": metrics.to_dict()}
         except Exception as e:
             logger.error(f"获取性能指标失败: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # API: 获取资源使用情况
     @router.get("/api/monitoring/resources")
     async def get_resource_usage(request: Request):
         try:
             usage = await monitoring_service.get_resource_usage()
-            return {
-                "success": True,
-                "data": usage.to_dict()
-            }
+            return {"success": True, "data": usage.to_dict()}
         except Exception as e:
             logger.error(f"获取资源使用情况失败: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # API: 获取完整仪表板数据
     @router.get("/api/monitoring/dashboard")
@@ -89,14 +71,11 @@ def setup_monitoring_routes(app, plugin_instance):
                     "status": status.to_dict(),
                     "metrics": metrics.to_dict(),
                     "resources": resources.to_dict(),
-                }
+                },
             }
         except Exception as e:
             logger.error(f"获取仪表板数据失败: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # 将路由器包含到主应用中
     app.include_router(router)

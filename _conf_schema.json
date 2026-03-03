@@ -176,6 +176,12 @@
         "minimum":256,
         "maximum":50000
     },
+    "flush_after_insert":{
+        "description":"写入后立即刷新集合",
+        "type":"bool",
+        "hint":"开启后每次写入长期记忆都会立即 flush，检索可见性更及时，但会降低写入吞吐",
+        "default":false
+    },
     "enable_explicit_memory_capture":{
         "description":"启用显式“记住”自动写入",
         "type":"bool",
