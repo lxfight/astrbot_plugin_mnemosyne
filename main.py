@@ -431,7 +431,9 @@ class Mnemosyne(Star):
                     f"配置的 SUMMARY_TIME_THRESHOLD_SECONDS ({self.summary_time_threshold}) 无效，将禁用基于时间的自动总结。"
                 )
                 self.summary_time_threshold = -1  # 使用-1表示禁用，而不是float("inf")
-            self.flush_after_insert = False
+            self.flush_after_insert = bool(self.config.get("flush_after_insert", False))
+            if self.flush_after_insert:
+                logger.info("已启用 flush_after_insert：每次写入后将立即 flush 集合。")
             self._summary_check_task: asyncio.Task | None = None
 
             # 初始化其他核心组件（消息计数器、上下文管理器）

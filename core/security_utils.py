@@ -3,12 +3,17 @@ Mnemosyne 插件安全工具模块
 提供输入验证、SQL注入防护、路径遍历防护等安全功能
 """
 
+import hashlib
 import re
 from pathlib import Path
 
 from astrbot.core.log import LogManager
 
 logger = LogManager.GetLogger(log_name="MnemosyneSecurity")
+
+# Keep consistent with Milvus schema definitions in initialization.py.
+SESSION_ID_MAX_LENGTH = 72
+PERSONALITY_ID_MAX_LENGTH = 256
 
 
 # ==================== SQL注入防护 ====================
@@ -33,12 +38,39 @@ def validate_session_id(session_id: str) -> bool:
         logger.warning("session_id 格式验证失败: 空字符串")
         return False
 
-    # 保留长度限制以防止异常长的输入
-    if len(session_id) > 500:
-        logger.warning(f"session_id 格式验证失败: 长度超过500 (当前: {len(session_id)})")
+    # Keep aligned with Milvus schema max_length to avoid insert/query mismatch.
+    if len(session_id) > SESSION_ID_MAX_LENGTH:
+        logger.warning(
+            f"session_id 格式验证失败: 长度超过{SESSION_ID_MAX_LENGTH} (当前: {len(session_id)})"
+        )
         return False
 
     return True
+
+
+def normalize_session_id(
+    session_id: str, max_length: int = SESSION_ID_MAX_LENGTH
+) -> str:
+    """
+    将 session_id 规范化到可安全写入 Milvus 的长度范围内。
+    - 长度不超限时返回原值（strip 后）
+    - 超限时返回稳定哈希别名，保证同一个原始 ID 映射一致
+    """
+    if not isinstance(session_id, str):
+        return ""
+
+    normalized = session_id.strip()
+    if not normalized:
+        return ""
+    if len(normalized) <= max_length:
+        return normalized
+
+    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:32]
+    alias = f"sid_{digest}"
+    # Safety guard for custom max_length override.
+    if len(alias) > max_length:
+        return alias[:max_length]
+    return alias
 
 
 def validate_personality_id(personality_id: str) -> bool:
@@ -62,11 +94,22 @@ def validate_personality_id(personality_id: str) -> bool:
         logger.warning("personality_id 格式验证失败: 包含非法字符")
         return False
 
-    if len(personality_id) > 256:
-        logger.warning("personality_id 格式验证失败: 长度超过256")
+    if len(personality_id) > PERSONALITY_ID_MAX_LENGTH:
+        logger.warning(
+            f"personality_id 格式验证失败: 长度超过{PERSONALITY_ID_MAX_LENGTH}"
+        )
         return False
 
     return True
+
+
+def escape_milvus_string_value(value: str) -> str:
+    """
+    对 Milvus 表达式中的字符串值做最小必要转义。
+    """
+    if not isinstance(value, str):
+        value = str(value)
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def safe_build_milvus_expression(field: str, value: str, operator: str = "==") -> str:
@@ -101,14 +144,16 @@ def safe_build_milvus_expression(field: str, value: str, operator: str = "==") -
         f"[safe_build_milvus_expression] 字段: {field}, 操作符: {operator}, 原始值: {value}"
     )
 
-    # 构建表达式 - 不进行转义，直接使用原始值
+    escaped_value = escape_milvus_string_value(value)
+
+    # 构建表达式
     if operator == "==":
-        expr = f'{field} == "{value}"'
+        expr = f'{field} == "{escaped_value}"'
     elif operator == "in":
-        expr = f'{field} in ["{value}"]'
+        expr = f'{field} in ["{escaped_value}"]'
     else:
         # 对于比较操作符，直接使用（数值类型）
-        expr = f"{field} {operator} {value}"
+        expr = f"{field} {operator} {escaped_value}"
 
     # 【诊断日志】记录生成的表达式
     logger.debug(f"[safe_build_milvus_expression] 生成的表达式: {expr}")

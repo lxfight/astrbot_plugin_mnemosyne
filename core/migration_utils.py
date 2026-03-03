@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from astrbot.core.log import LogManager
 
+from .security_utils import safe_build_milvus_expression
+
 if TYPE_CHECKING:
     from ..main import Mnemosyne
 
@@ -113,8 +115,8 @@ async def migrate_session_data_if_needed(
                 # 【诊断日志】记录候选值
                 logger.debug(f"[迁移] 检查候选值: {candidate}")
 
-                # 构建查询表达式：session_id 等于候选值（不转义）
-                expression = f'session_id == "{candidate}"'
+                # 构建查询表达式：session_id 等于候选值（安全转义）
+                expression = safe_build_milvus_expression("session_id", candidate, "==")
                 logger.debug(f"[迁移] 查询表达式: {expression}")
 
                 # 查询记录

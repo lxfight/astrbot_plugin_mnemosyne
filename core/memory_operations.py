@@ -23,14 +23,16 @@ from .constants import (
     VECTOR_FIELD_NAME,
 )
 from .security_utils import (
+    normalize_session_id,
     safe_build_milvus_expression,
     validate_personality_id,
     validate_session_id,
 )
 from .tools import (
     extract_query_keywords,
+    fit_memory_content_length,
     format_context_to_string,
-    pack_memory_content,
+    pack_memory_content_with_limit,
     remove_mnemosyne_tags,
     remove_system_content,
     remove_system_mnemosyne_tags,
@@ -256,6 +258,27 @@ def _post_process_search_results(
     return prepared
 
 
+def _resolve_content_max_length(plugin: "Mnemosyne", default: int = 4096) -> int:
+    """
+    从当前集合 schema 中解析 content 字段最大长度，失败时回退默认值。
+    """
+    try:
+        schema = getattr(plugin, "collection_schema", None)
+        fields = getattr(schema, "fields", None)
+        if not fields:
+            return default
+        for field in fields:
+            if getattr(field, "name", None) != "content":
+                continue
+            params = getattr(field, "params", {}) or {}
+            max_len = params.get("max_length")
+            if isinstance(max_len, int) and max_len > 0:
+                return max_len
+    except Exception:
+        pass
+    return default
+
+
 async def handle_query_memory(
     plugin: "Mnemosyne", event: AstrMessageEvent, req: ProviderRequest
 ):
@@ -272,17 +295,26 @@ async def handle_query_memory(
     try:
         # --- 获取会话和人格信息 ---
         persona_id = await _get_persona_id(plugin, event)
-        # 直接使用 unified_msg_origin 作为 session_id，确保多Bot场景下的记忆隔离
-        session_id = event.unified_msg_origin
+        raw_session_id = event.unified_msg_origin
+        # 统一将 session_id 规范化到 schema 长度范围内，避免写入/查询失败。
+        session_id = normalize_session_id(raw_session_id)
+        if (
+            isinstance(raw_session_id, str)
+            and raw_session_id
+            and raw_session_id != session_id
+        ):
+            logger.info(
+                f"session_id 过长，已规范化为稳定别名: {raw_session_id[:24]}... -> {session_id}"
+            )
 
         # 【新增】触发运行时自动迁移
-        if session_id and ":" in session_id:
+        if raw_session_id and ":" in raw_session_id:
             # 异步触发迁移，不阻塞查询
             from .migration_utils import migrate_session_data_if_needed
 
             asyncio.create_task(
                 migrate_session_data_if_needed(
-                    plugin, session_id, plugin.collection_name
+                    plugin, raw_session_id, plugin.collection_name
                 )
             )
 
@@ -450,20 +482,19 @@ async def handle_on_llm_resp(
         return
 
     try:
-        # 直接使用 unified_msg_origin 作为 session_id
-        session_id = event.unified_msg_origin
+        raw_session_id = event.unified_msg_origin
+        session_id = normalize_session_id(raw_session_id)
         if not session_id:
             logger.error("无法获取当前 session_id,无法记录 LLM 响应到Mnemosyne。")
             return
-        persona_id = await _get_persona_id(plugin, event)
+        if (
+            isinstance(raw_session_id, str)
+            and raw_session_id
+            and raw_session_id != session_id
+        ):
+            logger.debug(f"on_llm_resp 使用规范化 session_id: {session_id}")
 
-        # 判断是否需要总结
-        await _check_and_trigger_summary(
-            plugin,
-            session_id,
-            plugin.context_manager.get_history(session_id),
-            persona_id,
-        )
+        persona_id = await _get_persona_id(plugin, event)
 
         logger.debug(f"返回的内容：{resp.completion_text}")
         plugin.context_manager.add_message(
@@ -473,6 +504,14 @@ async def handle_on_llm_resp(
             metadata={"speaker_id": "assistant"},
         )
         plugin.msg_counter.increment_counter(session_id)
+
+        # 在写入 assistant 消息后再判断总结，避免遗漏当前轮回复。
+        await _check_and_trigger_summary(
+            plugin,
+            session_id,
+            plugin.context_manager.get_history(session_id),
+            persona_id,
+        )
 
     except Exception as e:
         logger.error(f"处理 LLM 响应后的记忆记录失败: {e}", exc_info=True)
@@ -1064,6 +1103,7 @@ async def _store_summary_to_milvus(
     # logger = plugin.logger
     collection_name = plugin.collection_name
     current_timestamp = int(time.time())
+    content_max_length = _resolve_content_max_length(plugin, default=4096)
 
     effective_persona_id = (
         persona_id
@@ -1071,11 +1111,17 @@ async def _store_summary_to_milvus(
         else plugin.config.get("default_persona_id_on_none", DEFAULT_PERSONA_ON_NONE)
     )
 
+    safe_summary_text = fit_memory_content_length(summary_text, content_max_length)
+    if safe_summary_text != summary_text:
+        logger.warning(
+            f"记忆内容超出字段上限({content_max_length})，已自动压缩后写入。"
+        )
+
     data_to_insert = [
         {
             "personality_id": effective_persona_id,
             "session_id": session_id,
-            "content": summary_text,
+            "content": safe_summary_text,
             VECTOR_FIELD_NAME: embedding_vector,
             "create_time": current_timestamp,
         }
@@ -1115,7 +1161,7 @@ async def _store_summary_to_milvus(
         # 确保资源清理和错误日志记录
         if mutation_result is None:
             logger.error(
-                f"Milvus 插入操作失败，未返回结果。集合: {collection_name}, 数据: {summary_text[:100]}..."
+                f"Milvus 插入操作失败，未返回结果。集合: {collection_name}, 数据: {safe_summary_text[:100]}..."
             )
         else:
             logger.debug("Milvus 插入操作完成，正在进行资源清理。")
@@ -1125,20 +1171,25 @@ async def _store_summary_to_milvus(
         logger.info(f"成功插入总结记忆到 Milvus。插入 ID: {inserted_ids}")
 
         try:
-            logger.debug(
-                f"正在刷新 (Flush) 集合 '{collection_name}' 以确保记忆立即可用..."
-            )
+            if getattr(plugin, "flush_after_insert", False):
+                logger.debug(
+                    f"正在刷新 (Flush) 集合 '{collection_name}' 以确保记忆立即可用..."
+                )
 
-            # plugin.milvus_manager.flush([collection_name])
-            # M24 修复: 定义刷新函数避免类型检查问题
-            def _flush_collection():
-                return plugin.milvus_manager.flush([collection_name])  # type: ignore
+                # plugin.milvus_manager.flush([collection_name])
+                # M24 修复: 定义刷新函数避免类型检查问题
+                def _flush_collection():
+                    return plugin.milvus_manager.flush([collection_name])  # type: ignore
 
-            await loop.run_in_executor(
-                None,  # 使用默认线程池
-                _flush_collection,
-            )
-            logger.debug(f"集合 '{collection_name}' 刷新完成。")
+                await loop.run_in_executor(
+                    None,  # 使用默认线程池
+                    _flush_collection,
+                )
+                logger.debug(f"集合 '{collection_name}' 刷新完成。")
+            else:
+                logger.debug(
+                    f"已跳过立即 flush（flush_after_insert=False），集合: '{collection_name}'"
+                )
             return True
 
         except Exception as flush_err:
@@ -1149,7 +1200,7 @@ async def _store_summary_to_milvus(
             return False
     else:
         logger.error(
-            f"插入总结记忆到 Milvus 失败。MutationResult: {mutation_result}. LLM 回复: {summary_text[:100]}..."
+            f"插入总结记忆到 Milvus 失败。MutationResult: {mutation_result}. LLM 回复: {safe_summary_text[:100]}..."
         )
     return False
 
@@ -1216,7 +1267,11 @@ async def handle_summary_long_memory(
             "use_lightweight_memory_graph", True
         ):
             metadata = _build_lightweight_graph_metadata(summary_text, context_history)
-        stored_content = pack_memory_content(summary_text, metadata)
+        stored_content = pack_memory_content_with_limit(
+            summary_text,
+            metadata,
+            max_length=_resolve_content_max_length(plugin, default=4096),
+        )
 
         # 4. 存储到 Milvus
         return await _store_summary_to_milvus(
@@ -1248,10 +1303,17 @@ async def store_manual_memory(
     if not await _check_summary_prerequisites(plugin, normalized_content):
         return False
 
-    target_session_id = session_id or event.unified_msg_origin
+    raw_session_id = session_id or event.unified_msg_origin
+    target_session_id = normalize_session_id(raw_session_id)
     if not target_session_id or not validate_session_id(target_session_id):
         logger.error(f"手动记忆写入失败：无效 session_id={target_session_id}")
         return False
+    if (
+        isinstance(raw_session_id, str)
+        and raw_session_id
+        and raw_session_id != target_session_id
+    ):
+        logger.info(f"手动记忆使用规范化 session_id: {target_session_id}")
 
     target_persona = persona_id
     if not target_persona:
@@ -1284,7 +1346,11 @@ async def store_manual_memory(
         ],
     )
     metadata["source"] = source
-    stored_content = pack_memory_content(normalized_content, metadata)
+    stored_content = pack_memory_content_with_limit(
+        normalized_content,
+        metadata,
+        max_length=_resolve_content_max_length(plugin, default=4096),
+    )
 
     return await _store_summary_to_milvus(
         plugin=plugin,

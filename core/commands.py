@@ -12,7 +12,11 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME
-from .security_utils import safe_build_milvus_expression, validate_session_id
+from .security_utils import (
+    normalize_session_id,
+    safe_build_milvus_expression,
+    validate_session_id,
+)
 from .tools import resolve_max_prompt_chars, truncate_for_embedding
 
 if TYPE_CHECKING:
@@ -136,7 +140,14 @@ async def list_records_cmd_impl(
 
     # 获取当前会话的 session_id (如果需要按会话过滤)
     # 直接使用 unified_msg_origin 作为 session_id，与存储时保持一致
-    session_id = event.unified_msg_origin
+    raw_session_id = event.unified_msg_origin
+    session_id = normalize_session_id(raw_session_id)
+    if (
+        isinstance(raw_session_id, str)
+        and raw_session_id
+        and raw_session_id != session_id
+    ):
+        logger.info(f"list_records 使用规范化 session_id: {session_id}")
     # session_id = "session_1" # 如果要测试特定会话或无会话过滤，可以在这里硬编码或设为 None
 
     target_collection = collection_name or self.collection_name
@@ -342,7 +353,7 @@ async def delete_session_memory_cmd_impl(
         yield event.plain_result("⚠️ 请提供要删除记忆的会话 ID (session_id)。")
         return
 
-    session_id_to_delete = session_id.strip().strip('"`')
+    session_id_to_delete = normalize_session_id(session_id.strip().strip('"`'))
 
     # 安全检查：验证 session_id 格式，防止SQL注入
     if not validate_session_id(session_id_to_delete):
@@ -432,7 +443,8 @@ async def delete_record_cmd_impl(
         yield event.plain_result("⚠️ Milvus 服务未初始化或未连接。")
         return
 
-    target_session_id = session_id or event.unified_msg_origin
+    raw_target_session_id = session_id or event.unified_msg_origin
+    target_session_id = normalize_session_id(raw_target_session_id)
     if not target_session_id or not validate_session_id(target_session_id):
         yield event.plain_result("⚠️ 会话 ID 无效，无法删除指定记录。")
         return
@@ -530,10 +542,16 @@ async def remember_memory_cmd_impl(
 async def get_session_id_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
     """[实现] 获取当前与您对话的会话 ID"""
     try:
-        # 直接使用 unified_msg_origin 作为 session_id，与存储时保持一致
-        session_id = event.unified_msg_origin
-        if session_id:
-            yield event.plain_result(f"当前会话 ID: {session_id}")
+        # 对外展示原始会话 ID，同时补充内部用于记忆存储的规范化 ID。
+        raw_session_id = event.unified_msg_origin
+        session_id = normalize_session_id(raw_session_id)
+        if raw_session_id:
+            if raw_session_id != session_id:
+                yield event.plain_result(
+                    f"当前会话 ID: {raw_session_id}\n记忆系统内部会话 ID: {session_id}"
+                )
+            else:
+                yield event.plain_result(f"当前会话 ID: {raw_session_id}")
         else:
             yield event.plain_result(
                 "🤔 无法获取当前会话 ID。可能还没有开始对话，或者会话已结束/失效。"

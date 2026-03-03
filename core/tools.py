@@ -405,6 +405,40 @@ def pack_memory_content(content: str, metadata: dict[str, Any] | None) -> str:
         return content
 
 
+def pack_memory_content_with_limit(
+    content: str,
+    metadata: dict[str, Any] | None,
+    max_length: int,
+) -> str:
+    """
+    在给定最大长度限制下打包记忆内容。
+    优先保留元数据；若仍超长，则降级为纯文本截断。
+    """
+    if not isinstance(max_length, int) or max_length <= 0:
+        return pack_memory_content(content, metadata)
+
+    normalized_content = content if isinstance(content, str) else str(content)
+    packed = pack_memory_content(normalized_content, metadata)
+    if len(packed) <= max_length:
+        return packed
+
+    # First fallback: keep only compact metadata keys.
+    compact_meta: dict[str, Any] = {}
+    if isinstance(metadata, dict):
+        for key in ("source", "participants", "entities", "relations"):
+            value = metadata.get(key)
+            if value:
+                compact_meta[key] = value
+    packed_compact = pack_memory_content(normalized_content, compact_meta or None)
+    if len(packed_compact) <= max_length:
+        return packed_compact
+
+    # Final fallback: plain text only.
+    if len(normalized_content) <= max_length:
+        return normalized_content
+    return normalized_content[:max_length]
+
+
 def split_memory_content_meta(content: str) -> tuple[str, dict[str, Any]]:
     """
     从记忆内容中拆分内部元数据。
@@ -436,3 +470,25 @@ def strip_memory_meta(content: str) -> str:
     """
     pure_content, _ = split_memory_content_meta(content)
     return pure_content
+
+
+def fit_memory_content_length(content: str, max_length: int) -> str:
+    """
+    将现有记忆内容适配到最大长度内。
+    如果内容包含元数据，优先尝试保留元数据再降级。
+    """
+    if not isinstance(content, str):
+        content = str(content)
+    if not isinstance(max_length, int) or max_length <= 0:
+        return content
+    if len(content) <= max_length:
+        return content
+
+    pure_content, metadata = split_memory_content_meta(content)
+    if metadata:
+        return pack_memory_content_with_limit(
+            pure_content,
+            metadata,
+            max_length=max_length,
+        )
+    return content[:max_length]
