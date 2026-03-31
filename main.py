@@ -74,6 +74,8 @@ class Mnemosyne(Star):
         self._warned_missing_provider_ids: set[str] = set()
         self._post_load_tasks_started = False
         self._ensure_milvus_connection_task: asyncio.Task | None = None
+        self._milvus_manager_ready = asyncio.Event()
+
         configured_blacklist = self.config.get("platform_blacklist", [])
         self.platform_blacklist: set[str] = {
             str(item).strip() for item in configured_blacklist if str(item).strip()
@@ -341,9 +343,11 @@ class Mnemosyne(Star):
 
             # 等待 Milvus Manager 初始化完成（插件初始化可能仍在进行）
             if not self.milvus_manager:
-                wait_start = time.time()
-                while not self.milvus_manager and time.time() - wait_start < 10.0:
-                    await asyncio.sleep(0.5)
+                try:
+                    await asyncio.wait_for(self._milvus_manager_ready.wait(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Milvus Manager 未初始化，跳过自动连接")
+                    return
 
                 if not self.milvus_manager:
                     logger.warning("Milvus Manager 未初始化，跳过自动连接")
@@ -450,11 +454,14 @@ class Mnemosyne(Star):
                 plugin_data_dir_str = str(plugin_data_dir) if plugin_data_dir else None
                 initialization.initialize_milvus(self, plugin_data_dir_str)
                 self._initialized_components.append("milvus")
+                if self.milvus_manager is not None:
+                    self._milvus_manager_ready.set()    # 标记 Milvus Manager 已就绪
             except Exception as e:
                 logger.warning(
                     f"Milvus 初始化失败，插件将以降级模式运行，搜索功能不可用: {e}"
                 )
                 self.milvus_manager = None
+                self._milvus_manager_ready.clear()
 
             # 3. 启动后台总结检查任务
             if self.context_manager and self.summary_time_threshold != -1:
@@ -854,6 +861,43 @@ class Mnemosyne(Star):
         """
         logger.info("Mnemosyne 插件正在停止...")
 
+        # 标记 Milvus 不再可用；先 clear，避免新的逻辑误判为 ready
+        self._milvus_manager_ready.clear()
+
+        # 如果有协程可能正在等待 Milvus 初始化完成，优先取消相关后台任务
+        if (
+            self._ensure_milvus_connection_task
+            and not self._ensure_milvus_connection_task.done()
+        ):
+            logger.info("正在取消 Milvus 自动连接任务...")
+            self._ensure_milvus_connection_task.cancel()
+            try:
+                await asyncio.wait_for(self._ensure_milvus_connection_task, timeout=5.0)
+            except asyncio.CancelledError:
+                logger.info("Milvus 自动连接任务已成功取消。")
+            except asyncio.TimeoutError:
+                logger.warning("等待 Milvus 自动连接任务取消超时。")
+            except Exception as e:
+                logger.error(f"等待 Milvus 自动连接任务取消时发生错误: {e}", exc_info=True)
+        self._ensure_milvus_connection_task = None
+
+        # 如果 Embedding Provider 后台初始化任务仍在运行，也一并取消
+        if self._embedding_provider_task and not self._embedding_provider_task.done():
+            logger.info("正在取消 Embedding Provider 初始化任务...")
+            self._embedding_provider_task.cancel()
+            try:
+                await asyncio.wait_for(self._embedding_provider_task, timeout=5.0)
+            except asyncio.CancelledError:
+                logger.info("Embedding Provider 初始化任务已成功取消。")
+            except asyncio.TimeoutError:
+                logger.warning("等待 Embedding Provider 初始化任务取消超时。")
+            except Exception as e:
+                logger.error(
+                    f"等待 Embedding Provider 初始化任务取消时发生错误: {e}",
+                    exc_info=True,
+                )
+        self._embedding_provider_task = None
+
         # --- 停止后台总结检查任务 ---
         if self._summary_check_task and not self._summary_check_task.done():
             logger.info("正在取消后台总结检查任务...")
@@ -889,23 +933,17 @@ class Mnemosyne(Star):
         # 清理 Milvus 连接
         if self.milvus_manager and self.milvus_manager.is_connected():
             try:
-                # 不再释放集合，避免下次启动时重新加载导致启动过慢
-                # Milvus Lite 不需要手动管理内存，独立部署的 Milvus 由其自己负责
-                # if (
-                #     not self.milvus_manager._is_lite
-                #     and self.milvus_manager.has_collection(self.collection_name)
-                # ):
-                #     logger.info(f"正在从内存中释放集合 '{self.collection_name}'...")
-                #     self.milvus_manager.release_collection(self.collection_name)
-
                 logger.info("正在断开与 Milvus 的连接...")
                 self.milvus_manager.disconnect()
                 logger.info("Milvus 连接已成功断开。")
-
             except Exception as e:
                 logger.error(f"停止插件时与 Milvus 交互出错: {e}", exc_info=True)
         else:
             logger.info("Milvus 管理器未初始化或已断开连接，无需断开。")
+
+        # 断开后显式置空，保持状态一致
+        self.milvus_manager = None
+        self._milvus_manager_ready.clear()
 
         logger.info("Mnemosyne 插件已完全停止，所有资源已释放。")
         return
