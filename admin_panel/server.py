@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from astrbot.core.log import LogManager
+from astrbot.api import logger
 
 from .routers import setup_all_routes
 from .services.monitoring_service import MonitoringService
@@ -25,6 +25,22 @@ class AdminPanelServer:
     """
     Admin Panel Web 服务器
     """
+
+    @staticmethod
+    def _render_template(templates, template_name: str, request: Request):
+        """兼容新旧版本starlette的模板渲染函数
+
+        新版本(0.29.0+): TemplateResponse(request=request, name=..., context=...)
+        旧版本(<0.29.0): TemplateResponse(name, context)
+        """
+        try:
+            # 先尝试新版本写法
+            return templates.TemplateResponse(
+                request=request, name=template_name, context={"request": request}
+            )
+        except TypeError:
+            # 如果失败，回退到旧版本写法
+            return templates.TemplateResponse(template_name, {"request": request})
 
     def __init__(
         self,
@@ -54,9 +70,6 @@ class AdminPanelServer:
             description="Mnemosyne 插件的 Web 管理面板",
             version="1.0.0",
         )
-
-        # 配置日志
-        self.logger = LogManager.GetLogger(log_name="AdminPanelServer")
 
         # 会话管理：存储已认证的会话令牌及其过期时间
         # 格式: {token: expiry_timestamp}
@@ -218,7 +231,7 @@ class AdminPanelServer:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             templates_dir = os.path.join(current_dir, "templates")
             templates = Jinja2Templates(directory=templates_dir)
-            return templates.TemplateResponse("login.html", {"request": request})
+            return self._render_template(templates, "login.html", request)
 
         # 管理面板主页（直接显示，由前端 JS 检查认证）
         @self.app.get("/dashboard", response_class=HTMLResponse)
@@ -227,7 +240,7 @@ class AdminPanelServer:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             templates_dir = os.path.join(current_dir, "templates")
             templates = Jinja2Templates(directory=templates_dir)
-            return templates.TemplateResponse("index.html", {"request": request})
+            return self._render_template(templates, "index.html", request)
 
         # 健康检查
         @self.app.get("/health")
@@ -273,7 +286,7 @@ class AdminPanelServer:
                     time.time() + self.session_timeout
                 )
 
-                self.logger.info(f"新会话已创建，过期时间: {self.session_timeout}秒")
+                logger.info(f"新会话已创建，过期时间: {self.session_timeout}秒")
 
                 return JSONResponse(
                     content={
@@ -284,7 +297,7 @@ class AdminPanelServer:
                     }
                 )
             except Exception as e:
-                self.logger.error(f"登录失败: {e}")
+                logger.error(f"登录失败: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
         # 登出接口（撤销会话令牌）
@@ -296,7 +309,7 @@ class AdminPanelServer:
 
             if session_token and session_token in self.authenticated_sessions:
                 del self.authenticated_sessions[session_token]
-                self.logger.info("会话已注销")
+                logger.info("会话已注销")
                 return JSONResponse(
                     content={"success": True, "message": "Logged out successfully"}
                 )
@@ -312,7 +325,7 @@ class AdminPanelServer:
                 status = await self.monitoring_service.get_system_status()
                 return JSONResponse(content=status.to_dict())
             except Exception as e:
-                self.logger.error(f"获取系统状态失败: {e}")
+                logger.error(f"获取系统状态失败: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
         # 获取性能指标
@@ -322,7 +335,7 @@ class AdminPanelServer:
                 metrics = self.monitoring_service.get_performance_metrics()
                 return JSONResponse(content=metrics.to_dict())
             except Exception as e:
-                self.logger.error(f"获取性能指标失败: {e}")
+                logger.error(f"获取性能指标失败: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
         # 获取资源使用情况
@@ -332,7 +345,7 @@ class AdminPanelServer:
                 usage = await self.monitoring_service.get_resource_usage()
                 return JSONResponse(content=usage.to_dict())
             except Exception as e:
-                self.logger.error(f"获取资源使用情况失败: {e}")
+                logger.error(f"获取资源使用情况失败: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
         # 配置相关API
@@ -348,7 +361,7 @@ class AdminPanelServer:
                     config["authentication"] = auth_config
                 return JSONResponse(content=config)
             except Exception as e:
-                self.logger.error(f"获取配置失败: {e}")
+                logger.error(f"获取配置失败: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
         @self.app.post("/api/config")
@@ -362,7 +375,7 @@ class AdminPanelServer:
                 self.plugin.save_config()
                 return JSONResponse(content={"success": True})
             except Exception as e:
-                self.logger.error(f"更新配置失败: {e}")
+                logger.error(f"更新配置失败: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
         # 设置所有路由
@@ -371,10 +384,10 @@ class AdminPanelServer:
     async def start(self):
         """启动服务器"""
         if self.is_running:
-            self.logger.warning("服务器已在运行中")
+            logger.warning("服务器已在运行中")
             return
 
-        self.logger.info(f"正在启动 Admin Panel 服务器在 {self.host}:{self.port}")
+        logger.info(f"正在启动 Admin Panel 服务器在 {self.host}:{self.port}")
 
         # 创建配置
         config = uvicorn.Config(
@@ -387,7 +400,7 @@ class AdminPanelServer:
         try:
             await self.server_instance.serve()
         except Exception as e:
-            self.logger.error(f"服务器启动失败: {e}")
+            logger.error(f"服务器启动失败: {e}")
             raise
         finally:
             self.is_running = False
@@ -395,7 +408,7 @@ class AdminPanelServer:
     async def stop(self):
         """停止服务器"""
         if self.server_instance:
-            self.logger.info("正在停止 Admin Panel 服务器")
+            logger.info("正在停止 Admin Panel 服务器")
             self.server_instance.should_exit = True
             self.is_running = False
 
