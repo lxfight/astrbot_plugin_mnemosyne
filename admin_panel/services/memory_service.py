@@ -630,9 +630,9 @@ class MemoryService:
             # 转换为列表并排序
             sessions = list(session_data.values())
             sessions.sort(
-                key=lambda x: x["last_memory_time"]
-                if x["last_memory_time"]
-                else datetime.min,
+                key=lambda x: (
+                    x["last_memory_time"] if x["last_memory_time"] else datetime.min
+                ),
                 reverse=True,
             )
 

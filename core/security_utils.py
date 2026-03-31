@@ -35,7 +35,9 @@ def validate_session_id(session_id: str) -> bool:
 
     # 保留长度限制以防止异常长的输入
     if len(session_id) > 500:
-        logger.warning(f"session_id 格式验证失败: 长度超过500 (当前: {len(session_id)})")
+        logger.warning(
+            f"session_id 格式验证失败: 长度超过500 (当前: {len(session_id)})"
+        )
         return False
 
     return True

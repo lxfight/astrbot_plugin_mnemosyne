@@ -111,7 +111,11 @@ class MemorySearchResponse:
 
     def to_dict(self) -> dict:
         """转换为字典"""
-        total_pages = (self.total_count + self.page_size - 1) // self.page_size if self.page_size > 0 else 1
+        total_pages = (
+            (self.total_count + self.page_size - 1) // self.page_size
+            if self.page_size > 0
+            else 1
+        )
         return {
             "records": [record.to_dict() for record in self.records],
             "total_count": self.total_count,
