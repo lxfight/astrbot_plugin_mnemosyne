@@ -265,31 +265,31 @@ class TestSenderIdentityResolution(unittest.TestCase):
         event = _EventForIdentity()
         sender_name, sender_id = _resolve_sender_identity(
             event,
-            "default:FriendMessage:674537331",
+            "default:FriendMessage:user_1001",
         )
 
         self.assertEqual(sender_name, "用户")
-        self.assertEqual(sender_id, "674537331")
+        self.assertEqual(sender_id, "user_1001")
 
     def test_resolve_sender_identity_prefers_message_sender(self) -> None:
         event = _EventForIdentity(
             sender_id=None,
-            message_obj=_MessageObj(_Sender(nickname="小菲")),
+            message_obj=_MessageObj(_Sender(nickname="test_user")),
         )
         sender_name, sender_id = _resolve_sender_identity(
             event,
-            "default:FriendMessage:2422136796",
+            "default:FriendMessage:user_2002",
         )
 
-        self.assertEqual(sender_name, "小菲")
-        self.assertEqual(sender_id, "2422136796")
+        self.assertEqual(sender_name, "test_user")
+        self.assertEqual(sender_id, "user_2002")
 
     def test_build_identity_prefixed_user_text(self) -> None:
-        with_id = _build_identity_prefixed_user_text("你好", "小菲", "2422136796")
-        without_id = _build_identity_prefixed_user_text("你好", "小菲", "")
+        with_id = _build_identity_prefixed_user_text("hello", "test_user", "user_2002")
+        without_id = _build_identity_prefixed_user_text("hello", "test_user", "")
 
-        self.assertEqual(with_id, "[小菲(2422136796)]: 你好")
-        self.assertEqual(without_id, "[小菲]: 你好")
+        self.assertEqual(with_id, "[test_user(user_2002)]: hello")
+        self.assertEqual(without_id, "[test_user]: hello")
 
 
 if __name__ == "__main__":
