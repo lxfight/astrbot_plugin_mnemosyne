@@ -99,6 +99,110 @@ def _collect_participants_from_context(context_history: list[dict] | None) -> li
     return participants
 
 
+def _extract_sender_name(sender_obj: Any) -> str:
+    if sender_obj is None:
+        return ""
+
+    if isinstance(sender_obj, dict):
+        for key in ("nickname", "nick", "name", "card", "remark"):
+            value = sender_obj.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    for attr in ("nickname", "nick", "name", "card", "remark"):
+        value = getattr(sender_obj, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _extract_sender_id(sender_obj: Any) -> str:
+    if sender_obj is None:
+        return ""
+
+    if isinstance(sender_obj, dict):
+        for key in ("user_id", "id", "qq", "uin"):
+            value = sender_obj.get(key)
+            if value is not None:
+                text = str(value).strip()
+                if text:
+                    return text
+        return ""
+
+    for attr in ("user_id", "id", "qq", "uin"):
+        value = getattr(sender_obj, attr, None)
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
+
+
+def _fallback_private_sender_id_from_session_id(session_id: str | None) -> str:
+    if not isinstance(session_id, str) or not session_id.strip():
+        return ""
+
+    parts = session_id.split(":", 2)
+    if len(parts) != 3:
+        return ""
+
+    message_type = parts[1].strip().lower()
+    if "friend" not in message_type and "private" not in message_type:
+        return ""
+
+    return parts[2].strip()
+
+
+def _resolve_sender_identity(
+    event: AstrMessageEvent,
+    session_id: str | None,
+) -> tuple[str, str]:
+    sender_id = ""
+    try:
+        if hasattr(event, "get_sender_id"):
+            raw_sender_id = event.get_sender_id()
+            if raw_sender_id is not None:
+                sender_id = str(raw_sender_id).strip()
+    except Exception:
+        sender_id = ""
+
+    message_obj = getattr(event, "message_obj", None)
+    message_sender = getattr(message_obj, "sender", None)
+    event_sender = getattr(event, "sender", None)
+
+    if not sender_id:
+        sender_id = _extract_sender_id(message_sender)
+    if not sender_id:
+        sender_id = _extract_sender_id(event_sender)
+    if not sender_id:
+        sender_id = _fallback_private_sender_id_from_session_id(session_id)
+
+    sender_name = _extract_sender_name(message_sender)
+    if not sender_name:
+        sender_name = _extract_sender_name(event_sender)
+    if not sender_name:
+        sender_name = "用户"
+
+    return sender_name, sender_id
+
+
+def _build_identity_prefixed_user_text(
+    message_text: str,
+    sender_name: str,
+    sender_id: str,
+) -> str:
+    text = message_text if isinstance(message_text, str) else str(message_text)
+    normalized_name = sender_name.strip() if isinstance(sender_name, str) else ""
+    if not normalized_name:
+        normalized_name = "用户"
+
+    normalized_sender_id = sender_id.strip() if isinstance(sender_id, str) else ""
+    if normalized_sender_id:
+        return f"[{normalized_name}({normalized_sender_id})]: {text}"
+    return f"[{normalized_name}]: {text}"
+
+
 def _build_lightweight_graph_metadata(
     summary_text: str,
     context_history: list[dict] | None = None,
@@ -316,26 +420,42 @@ async def handle_query_memory(
         safe_user_prompt = raw_prompt
         if not safe_user_prompt.strip() and getattr(req, "image_urls", None):
             safe_user_prompt = "[图片]"
+
+        # 在写入会话历史前先剥离群聊包装，避免把整段 chatroom 模板污染进记忆上下文
+        actual_query_raw = ChatroomContextParser.extract_actual_message(safe_user_prompt)
+        if not actual_query_raw.strip() and getattr(req, "image_urls", None):
+            actual_query_raw = "[图片]"
+        if actual_query_raw != safe_user_prompt:
+            logger.info(
+                f"检测到群聊上下文格式，已提取真实消息用于记忆存储与 RAG 搜索 "
+                f"(原始: {len(safe_user_prompt)}字符 → 提取: {len(actual_query_raw)}字符)"
+            )
+
         # 防御：极端情况下避免将超长文本写入记忆/embedding
         max_prompt_chars = resolve_max_prompt_chars(plugin.config, default=4000)
-        original_prompt_len = len(safe_user_prompt)
-        safe_user_prompt, prompt_was_truncated = truncate_for_embedding(
-            safe_user_prompt,
+        original_query_len = len(actual_query_raw)
+        actual_query, query_was_truncated = truncate_for_embedding(
+            actual_query_raw,
             max_prompt_chars,
             append_suffix=True,
         )
-        if prompt_was_truncated:
+        if query_was_truncated:
             logger.warning(
-                f"用户输入过长 ({original_prompt_len} chars)，已截断到 {max_prompt_chars} chars。"
+                f"用户输入过长 ({original_query_len} chars)，已截断到 {max_prompt_chars} chars。"
             )
 
         # 添加用户消息（写入插件上下文管理器）
-        sender_id = str(event.get_sender_id()) if event.get_sender_id() else ""
+        sender_name, sender_id = _resolve_sender_identity(event, session_id)
+        memory_store_text = _build_identity_prefixed_user_text(
+            actual_query,
+            sender_name=sender_name,
+            sender_id=sender_id,
+        )
         plugin.context_manager.add_message(
             session_id,
             "user",
-            safe_user_prompt,
-            metadata={"speaker_id": sender_id},
+            memory_store_text,
+            metadata={"speaker_id": sender_id} if sender_id else None,
         )
         # 计数器+1
         plugin.msg_counter.increment_counter(session_id)
@@ -354,21 +474,9 @@ async def handle_query_memory(
                     logger.warning("Embedding Provider 不可用，无法执行 RAG 搜索")
                     return
 
-                # ===== 提取真实用户消息用于 RAG 搜索 =====
-                # 自动检测并提取（如果不是特殊格式则返回原值）
-                actual_query = ChatroomContextParser.extract_actual_message(
-                    safe_user_prompt
-                )
-
-                if actual_query != safe_user_prompt:
-                    logger.info(
-                        f"检测到群聊上下文格式，已提取真实消息用于 RAG 搜索 "
-                        f"(原始: {len(safe_user_prompt)}字符 → 提取: {len(actual_query)}字符)"
-                    )
-
                 # 支持显式记忆触发：仅在强触发语句下执行，默认关闭以避免误触。
                 if plugin.config.get("enable_explicit_memory_capture", False):
-                    explicit_content = _extract_explicit_memory_content(actual_query)
+                    explicit_content = _extract_explicit_memory_content(actual_query_raw)
                     if explicit_content:
                         stored = await store_manual_memory(
                             plugin=plugin,
@@ -378,12 +486,6 @@ async def handle_query_memory(
                         )
                         if stored:
                             logger.info("已根据显式“记住”触发写入长期记忆。")
-
-                if len(actual_query) > max_prompt_chars:
-                    logger.warning(
-                        f"RAG 查询文本过长 ({len(actual_query)} chars)，按配置截断到 {max_prompt_chars} chars。"
-                    )
-                    actual_query = actual_query[:max_prompt_chars]
 
                 # 使用 AstrBot EmbeddingProvider 的 embed 方法
                 if plugin.embedding_provider:
@@ -1279,7 +1381,11 @@ async def store_manual_memory(
             {
                 "role": "user",
                 "content": normalized_content,
-                "metadata": {"speaker_id": str(event.get_sender_id())},
+                "metadata": {
+                    "speaker_id": _resolve_sender_identity(
+                        event, target_session_id
+                    )[1]
+                },
             }
         ],
     )

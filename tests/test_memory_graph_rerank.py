@@ -74,8 +74,10 @@ def _ensure_dependency_stubs() -> None:
 _ensure_dependency_stubs()
 
 from core.memory_operations import (  # noqa: E402
+    _build_identity_prefixed_user_text,
     _build_lightweight_graph_metadata,
     _post_process_search_results,
+    _resolve_sender_identity,
 )
 from core.tools import (  # noqa: E402
     extract_query_keywords,
@@ -235,6 +237,59 @@ class TestPostProcessSearchResults(unittest.TestCase):
 
         self.assertEqual(ranked_without_graph[0]["content"], "neutral record")
         self.assertEqual(ranked_with_graph[0]["content"], "memory about bravo")
+
+
+class _Sender:
+    def __init__(self, nickname=None, user_id=None):
+        self.nickname = nickname
+        self.user_id = user_id
+
+
+class _MessageObj:
+    def __init__(self, sender):
+        self.sender = sender
+
+
+class _EventForIdentity:
+    def __init__(self, sender_id=None, sender=None, message_obj=None):
+        self._sender_id = sender_id
+        self.sender = sender
+        self.message_obj = message_obj
+
+    def get_sender_id(self):
+        return self._sender_id
+
+
+class TestSenderIdentityResolution(unittest.TestCase):
+    def test_resolve_sender_identity_fallbacks_private_session_id(self) -> None:
+        event = _EventForIdentity()
+        sender_name, sender_id = _resolve_sender_identity(
+            event,
+            "default:FriendMessage:674537331",
+        )
+
+        self.assertEqual(sender_name, "用户")
+        self.assertEqual(sender_id, "674537331")
+
+    def test_resolve_sender_identity_prefers_message_sender(self) -> None:
+        event = _EventForIdentity(
+            sender_id=None,
+            message_obj=_MessageObj(_Sender(nickname="小菲")),
+        )
+        sender_name, sender_id = _resolve_sender_identity(
+            event,
+            "default:FriendMessage:2422136796",
+        )
+
+        self.assertEqual(sender_name, "小菲")
+        self.assertEqual(sender_id, "2422136796")
+
+    def test_build_identity_prefixed_user_text(self) -> None:
+        with_id = _build_identity_prefixed_user_text("你好", "小菲", "2422136796")
+        without_id = _build_identity_prefixed_user_text("你好", "小菲", "")
+
+        self.assertEqual(with_id, "[小菲(2422136796)]: 你好")
+        self.assertEqual(without_id, "[小菲]: 你好")
 
 
 if __name__ == "__main__":
