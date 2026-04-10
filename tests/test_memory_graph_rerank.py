@@ -284,6 +284,32 @@ class TestSenderIdentityResolution(unittest.TestCase):
         self.assertEqual(sender_name, "test_user")
         self.assertEqual(sender_id, "user_2002")
 
+    def test_resolve_sender_identity_prefers_get_sender_id(self) -> None:
+        event = _EventForIdentity(
+            sender_id="preferred_id",
+            sender={"nickname": "sender_user", "user_id": "sender_fallback_id"},
+            message_obj=_MessageObj(
+                _Sender(nickname="message_user", user_id="message_fallback_id")
+            ),
+        )
+        sender_name, sender_id = _resolve_sender_identity(
+            event,
+            "default:FriendMessage:session_fallback_id",
+        )
+
+        self.assertEqual(sender_name, "message_user")
+        self.assertEqual(sender_id, "preferred_id")
+
+    def test_resolve_sender_identity_ignores_non_private_session_fallback(self) -> None:
+        event = _EventForIdentity()
+        sender_name, sender_id = _resolve_sender_identity(
+            event,
+            "default:NotFriendMessage:user_3003",
+        )
+
+        self.assertEqual(sender_name, "用户")
+        self.assertEqual(sender_id, "")
+
     def test_build_identity_prefixed_user_text(self) -> None:
         with_id = _build_identity_prefixed_user_text("hello", "test_user", "user_2002")
         without_id = _build_identity_prefixed_user_text("hello", "test_user", "")

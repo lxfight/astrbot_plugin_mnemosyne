@@ -99,44 +99,55 @@ def _collect_participants_from_context(context_history: list[dict] | None) -> li
     return participants
 
 
-def _extract_sender_name(sender_obj: Any) -> str:
+def _extract_sender_field(
+    sender_obj: Any,
+    keys: tuple[str, ...],
+    *,
+    allow_non_str: bool,
+) -> str:
     if sender_obj is None:
         return ""
 
     if isinstance(sender_obj, dict):
-        for key in ("nickname", "nick", "name", "card", "remark"):
+        for key in keys:
             value = sender_obj.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        return ""
-
-    for attr in ("nickname", "nick", "name", "card", "remark"):
-        value = getattr(sender_obj, attr, None)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
-
-
-def _extract_sender_id(sender_obj: Any) -> str:
-    if sender_obj is None:
-        return ""
-
-    if isinstance(sender_obj, dict):
-        for key in ("user_id", "id", "qq", "uin"):
-            value = sender_obj.get(key)
-            if value is not None:
+            if isinstance(value, str):
+                text = value.strip()
+                if text:
+                    return text
+            elif allow_non_str and value is not None:
                 text = str(value).strip()
                 if text:
                     return text
         return ""
 
-    for attr in ("user_id", "id", "qq", "uin"):
+    for attr in keys:
         value = getattr(sender_obj, attr, None)
-        if value is not None:
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+        elif allow_non_str and value is not None:
             text = str(value).strip()
             if text:
                 return text
     return ""
+
+
+def _extract_sender_name(sender_obj: Any) -> str:
+    return _extract_sender_field(
+        sender_obj,
+        ("nickname", "nick", "name", "card", "remark"),
+        allow_non_str=False,
+    )
+
+
+def _extract_sender_id(sender_obj: Any) -> str:
+    return _extract_sender_field(
+        sender_obj,
+        ("user_id", "id", "qq", "uin"),
+        allow_non_str=True,
+    )
 
 
 def _fallback_private_sender_id_from_session_id(session_id: str | None) -> str:
@@ -147,8 +158,17 @@ def _fallback_private_sender_id_from_session_id(session_id: str | None) -> str:
     if len(parts) != 3:
         return ""
 
-    message_type = parts[1].strip().lower()
-    if "friend" not in message_type and "private" not in message_type:
+    message_type_raw = parts[1].strip()
+    if not message_type_raw:
+        return ""
+
+    # 仅接受明确的私聊类型，避免 "NotFriendMessage" 这类误匹配。
+    message_type = re.sub(r"[^a-z0-9]", "", message_type_raw.lower())
+    if not (
+        message_type in {"friend", "friendmessage", "private", "privatemessage"}
+        or message_type.startswith("friend")
+        or message_type.startswith("private")
+    ):
         return ""
 
     return parts[2].strip()
@@ -164,7 +184,11 @@ def _resolve_sender_identity(
             raw_sender_id = event.get_sender_id()
             if raw_sender_id is not None:
                 sender_id = str(raw_sender_id).strip()
-    except Exception:
+    except (AttributeError, TypeError, ValueError) as e:
+        logger.debug(f"读取 get_sender_id 失败，将继续尝试其他来源: {e}")
+        sender_id = ""
+    except Exception as e:
+        logger.warning(f"读取 get_sender_id 时出现未预期异常，将回退其他来源: {e}")
         sender_id = ""
 
     message_obj = getattr(event, "message_obj", None)
@@ -426,7 +450,7 @@ async def handle_query_memory(
         if not actual_query_raw.strip() and getattr(req, "image_urls", None):
             actual_query_raw = "[图片]"
         if actual_query_raw != safe_user_prompt:
-            logger.info(
+            logger.debug(
                 f"检测到群聊上下文格式，已提取真实消息用于记忆存储与 RAG 搜索 "
                 f"(原始: {len(safe_user_prompt)}字符 → 提取: {len(actual_query_raw)}字符)"
             )
@@ -455,7 +479,7 @@ async def handle_query_memory(
             session_id,
             "user",
             memory_store_text,
-            metadata={"speaker_id": sender_id} if sender_id else None,
+            metadata={"speaker_id": sender_id} if sender_id else {},
         )
         # 计数器+1
         plugin.msg_counter.increment_counter(session_id)
