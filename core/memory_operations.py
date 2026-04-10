@@ -212,16 +212,16 @@ def _resolve_sender_identity(
 
 
 def _build_identity_prefixed_user_text(
-    message_text: str,
-    sender_name: str,
-    sender_id: str,
+    message_text: Any,
+    sender_name: Any,
+    sender_id: Any,
 ) -> str:
     text = message_text if isinstance(message_text, str) else str(message_text)
     normalized_name = sender_name.strip() if isinstance(sender_name, str) else ""
     if not normalized_name:
         normalized_name = "用户"
 
-    normalized_sender_id = sender_id.strip() if isinstance(sender_id, str) else ""
+    normalized_sender_id = str(sender_id).strip() if sender_id is not None else ""
     if normalized_sender_id:
         return f"[{normalized_name}({normalized_sender_id})]: {text}"
     return f"[{normalized_name}]: {text}"

@@ -314,8 +314,24 @@ class TestSenderIdentityResolution(unittest.TestCase):
         with_id = _build_identity_prefixed_user_text("hello", "test_user", "user_2002")
         without_id = _build_identity_prefixed_user_text("hello", "test_user", "")
 
+        # basic formatting
         self.assertEqual(with_id, "[test_user(user_2002)]: hello")
         self.assertEqual(without_id, "[test_user]: hello")
+
+        # default-name behavior for None / whitespace sender_name
+        default_name = _build_identity_prefixed_user_text("hello", None, "user_2003")
+        whitespace_name = _build_identity_prefixed_user_text("hello", "   ", "user_2004")
+
+        self.assertEqual(default_name, "[用户(user_2003)]: hello")
+        self.assertEqual(whitespace_name, "[用户(user_2004)]: hello")
+
+        # non-string sender_id should be stringified
+        numeric_id = _build_identity_prefixed_user_text("hello", "test_user", 123)
+        self.assertEqual(numeric_id, "[test_user(123)]: hello")
+
+        # non-string message_text should be converted via str()
+        numeric_message = _build_identity_prefixed_user_text(42, "test_user", "user_2005")
+        self.assertEqual(numeric_message, "[test_user(user_2005)]: 42")
 
 
 if __name__ == "__main__":
