@@ -227,6 +227,11 @@ def _build_identity_prefixed_user_text(
     return f"[{normalized_name}]: {text}"
 
 
+def _build_speaker_metadata(sender_id: Any) -> dict[str, str]:
+    normalized_sender_id = str(sender_id).strip() if sender_id is not None else ""
+    return {"speaker_id": normalized_sender_id} if normalized_sender_id else {}
+
+
 def _build_lightweight_graph_metadata(
     summary_text: str,
     context_history: list[dict] | None = None,
@@ -479,7 +484,7 @@ async def handle_query_memory(
             session_id,
             "user",
             memory_store_text,
-            metadata={"speaker_id": sender_id} if sender_id else {},
+            metadata=_build_speaker_metadata(sender_id),
         )
         # 计数器+1
         plugin.msg_counter.increment_counter(session_id)
@@ -500,7 +505,7 @@ async def handle_query_memory(
 
                 # 支持显式记忆触发：仅在强触发语句下执行，默认关闭以避免误触。
                 if plugin.config.get("enable_explicit_memory_capture", False):
-                    explicit_content = _extract_explicit_memory_content(actual_query_raw)
+                    explicit_content = _extract_explicit_memory_content(actual_query)
                     if explicit_content:
                         stored = await store_manual_memory(
                             plugin=plugin,
@@ -1405,11 +1410,9 @@ async def store_manual_memory(
             {
                 "role": "user",
                 "content": normalized_content,
-                "metadata": {
-                    "speaker_id": _resolve_sender_identity(
-                        event, target_session_id
-                    )[1]
-                },
+                "metadata": _build_speaker_metadata(
+                    _resolve_sender_identity(event, target_session_id)[1]
+                ),
             }
         ],
     )
