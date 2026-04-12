@@ -74,8 +74,10 @@ def _ensure_dependency_stubs() -> None:
 _ensure_dependency_stubs()
 
 from core.memory_operations import (  # noqa: E402
+    _build_identity_prefixed_user_text,
     _build_lightweight_graph_metadata,
     _post_process_search_results,
+    _resolve_sender_identity,
 )
 from core.tools import (  # noqa: E402
     extract_query_keywords,
@@ -235,6 +237,101 @@ class TestPostProcessSearchResults(unittest.TestCase):
 
         self.assertEqual(ranked_without_graph[0]["content"], "neutral record")
         self.assertEqual(ranked_with_graph[0]["content"], "memory about bravo")
+
+
+class _Sender:
+    def __init__(self, nickname=None, user_id=None):
+        self.nickname = nickname
+        self.user_id = user_id
+
+
+class _MessageObj:
+    def __init__(self, sender):
+        self.sender = sender
+
+
+class _EventForIdentity:
+    def __init__(self, sender_id=None, sender=None, message_obj=None):
+        self._sender_id = sender_id
+        self.sender = sender
+        self.message_obj = message_obj
+
+    def get_sender_id(self):
+        return self._sender_id
+
+
+class TestSenderIdentityResolution(unittest.TestCase):
+    def test_resolve_sender_identity_fallbacks_private_session_id(self) -> None:
+        event = _EventForIdentity()
+        sender_name, sender_id = _resolve_sender_identity(
+            event,
+            "default:FriendMessage:user_1001",
+        )
+
+        self.assertEqual(sender_name, "用户")
+        self.assertEqual(sender_id, "user_1001")
+
+    def test_resolve_sender_identity_prefers_message_sender(self) -> None:
+        event = _EventForIdentity(
+            sender_id=None,
+            message_obj=_MessageObj(_Sender(nickname="test_user")),
+        )
+        sender_name, sender_id = _resolve_sender_identity(
+            event,
+            "default:FriendMessage:user_2002",
+        )
+
+        self.assertEqual(sender_name, "test_user")
+        self.assertEqual(sender_id, "user_2002")
+
+    def test_resolve_sender_identity_prefers_get_sender_id(self) -> None:
+        event = _EventForIdentity(
+            sender_id="preferred_id",
+            sender={"nickname": "sender_user", "user_id": "sender_fallback_id"},
+            message_obj=_MessageObj(
+                _Sender(nickname="message_user", user_id="message_fallback_id")
+            ),
+        )
+        sender_name, sender_id = _resolve_sender_identity(
+            event,
+            "default:FriendMessage:session_fallback_id",
+        )
+
+        self.assertEqual(sender_name, "message_user")
+        self.assertEqual(sender_id, "preferred_id")
+
+    def test_resolve_sender_identity_ignores_non_private_session_fallback(self) -> None:
+        event = _EventForIdentity()
+        sender_name, sender_id = _resolve_sender_identity(
+            event,
+            "default:NotFriendMessage:user_3003",
+        )
+
+        self.assertEqual(sender_name, "用户")
+        self.assertEqual(sender_id, "")
+
+    def test_build_identity_prefixed_user_text(self) -> None:
+        with_id = _build_identity_prefixed_user_text("hello", "test_user", "user_2002")
+        without_id = _build_identity_prefixed_user_text("hello", "test_user", "")
+
+        # basic formatting
+        self.assertEqual(with_id, "[test_user(user_2002)]: hello")
+        self.assertEqual(without_id, "[test_user]: hello")
+
+        # default-name behavior for None / whitespace sender_name
+        default_name = _build_identity_prefixed_user_text("hello", None, "user_2003")
+        whitespace_name = _build_identity_prefixed_user_text("hello", "   ", "user_2004")
+
+        self.assertEqual(default_name, "[用户(user_2003)]: hello")
+        self.assertEqual(whitespace_name, "[用户(user_2004)]: hello")
+
+        # non-string sender_id should be stringified
+        numeric_id = _build_identity_prefixed_user_text("hello", "test_user", 123)
+        self.assertEqual(numeric_id, "[test_user(123)]: hello")
+
+        # non-string message_text should be converted via str()
+        numeric_message = _build_identity_prefixed_user_text(42, "test_user", "user_2005")
+        self.assertEqual(numeric_message, "[test_user(user_2005)]: 42")
 
 
 if __name__ == "__main__":
