@@ -105,6 +105,13 @@ def remove_mnemosyne_tags(
     compiled_regex = re.compile(r"<Mnemosyne>.*?</Mnemosyne>", re.DOTALL)
     cleaned_contents: list[dict[str, Any]] = []
 
+    def copy_with_cleaned_content(
+        content_item: dict[str, Any], cleaned_content: Any
+    ) -> dict[str, Any]:
+        cleaned_item = content_item.copy()
+        cleaned_item["content"] = cleaned_content
+        return cleaned_item
+
     if contexts_memory_len == 0:
         for content_item in contents:
             if isinstance(content_item, dict) and content_item.get("role") == "user":
@@ -113,7 +120,9 @@ def remove_mnemosyne_tags(
                 # 只有在 content 为 str 时才需要清理标签。
                 if isinstance(original_text, str):
                     cleaned_text = compiled_regex.sub("", original_text)
-                    cleaned_contents.append({"role": "user", "content": cleaned_text})
+                    cleaned_contents.append(
+                        copy_with_cleaned_content(content_item, cleaned_text)
+                    )
                 else:
                     cleaned_contents.append(content_item)
             else:
@@ -141,14 +150,14 @@ def remove_mnemosyne_tags(
                 # 使用 elif 形成互斥逻辑，避免重复处理
                 if isinstance(original_text, list):
                     # 1. 如果内容是列表（多模态消息），直接保留原样
-                    cleaned_contents.append({"role": "user", "content": original_text})
+                    cleaned_contents.append(content_item)
                 elif isinstance(original_text, str):
                     # 2. 如果内容是字符串，检查是否需要清理标签
                     if compiled_regex.search(original_text):
                         # 内容包含标签，进行清理
                         cleaned_text = compiled_regex.sub(replace_logic, original_text)
                         cleaned_contents.append(
-                            {"role": "user", "content": cleaned_text}
+                            copy_with_cleaned_content(content_item, cleaned_text)
                         )
                     else:
                         # 内容不包含标签，直接保留
