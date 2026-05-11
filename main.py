@@ -18,7 +18,7 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.provider.provider import EmbeddingProvider
 
-from .admin_panel.server import AdminPanelServer
+from .web_api import MnemosyneWebApi, PLUGIN_NAME
 
 # --- 插件内部模块导入 ---
 from .core import (
@@ -62,8 +62,7 @@ class Mnemosyne(Star):
         self.context_manager: ConversationContextManager | None = None
         self.embedding_provider: EmbeddingProvider | None = None
         self.provider = None
-        self.admin_panel_server: AdminPanelServer | None = None  # 管理面板服务器
-        self.admin_panel_thread = None  # 管理面板服务器线程
+        self.web_api: MnemosyneWebApi | None = None  # Pages Web API
         self.plugin_data_dir: str | None = None  # 插件数据目录
 
         # --- 初始化状态标记 ---
@@ -475,64 +474,14 @@ class Mnemosyne(Star):
             else:
                 logger.warning("Context manager 未初始化，无法启动后台总结检查任务。")
 
-            # 4. 启动 Admin Panel 服务器
-            try:
-                admin_panel_config = self.config.get("admin_panel", {})
-                port = admin_panel_config.get(
-                    "port", 8000
-                )  # 从配置中获取端口，默认8000
-                host = admin_panel_config.get(
-                    "host", "127.0.0.1"
-                )  # 从配置中获取监听地址，默认127.0.0.1
-
-                # 检查并生成 Admin Panel API 密钥
-                api_key = admin_panel_config.get("api_key", "").strip()
-                if not api_key:
-                    # 生成临时强随机密码（每次重启都会重新生成）
-                    import secrets
-                    import string
-
-                    # 生成包含大小写字母、数字和特殊字符的48字符强密码
-                    alphabet = (
-                        string.ascii_letters
-                        + string.digits
-                        + "!@#$%^&*()-_=+[]{}|;:,.<>?"
-                    )
-                    api_key = "".join(secrets.choice(alphabet) for _ in range(48))
-
-                    # 注意：不保存到配置文件中，这样每次重启都会生成新密钥
-                    logger.warning("Admin Panel API 密钥未配置，已自动生成临时强密码。")
-                    logger.critical(
-                        f"临时 Admin Panel API 密钥（请妥善保管）: {api_key}"
-                    )
-                    logger.info(
-                        "此密钥仅在本次运行中有效，重启后将生成新密钥，旧密钥将失效。\n"
-                        "   如需固定密钥，请在配置文件中手动设置 admin_panel.api_key\n"
-                        "   重要提示：每次重启后必须使用新的密钥重新认证"
-                    )
-                else:
-                    logger.info("Admin Panel API 密钥已配置（固定密钥）")
-
-                # 将 plugin_data_dir 转换为字符串（如果是 Path 对象）
-                plugin_data_dir_str = str(plugin_data_dir) if plugin_data_dir else None
-                self.admin_panel_server = AdminPanelServer(
-                    self,
-                    port=port,
-                    host=host,
-                    api_key=api_key,
-                    data_dir=plugin_data_dir_str,
-                )
-                # 在独立线程中启动服务器
-                import threading
-
-                if self.admin_panel_server:  # 确保服务器实例已创建
-                    self.admin_panel_thread = threading.Thread(
-                        target=self.admin_panel_server.run_in_thread, daemon=True
-                    )
-                    self.admin_panel_thread.start()
-                    logger.info(f" Admin Panel 服务器已启动在 {host}:{port}")
-            except Exception as e:
-                logger.warning(f"⚠️ 启动 Admin Panel 服务器失败: {e}")
+            # 4. 注册 AstrBot Pages Web API（官方插件 UI 接口）
+            if hasattr(self.context, "register_web_api"):
+                try:
+                    self.web_api = MnemosyneWebApi(self)
+                    self.web_api.register_routes()
+                    logger.info("Mnemosyne Pages Web API 已注册至 AstrBot 仪表盘")
+                except Exception as e:
+                    logger.warning(f"注册 Pages Web API 失败: {e}")
 
             # 5. 标记初始化成功
             self._initialization_successful = True
@@ -913,15 +862,8 @@ class Mnemosyne(Star):
                 logger.error(f"等待后台任务取消时发生错误: {e}", exc_info=True)
         self._summary_check_task = None
 
-        # --- 停止 Admin Panel 服务器 ---
-        if self.admin_panel_server:
-            try:
-                await self.admin_panel_server.stop()
-                logger.info("Admin Panel 服务器已停止。")
-            except Exception as e:
-                logger.error(f"停止 Admin Panel 服务器时出错: {e}", exc_info=True)
 
-        # S0 优化: 清理消息计数器数据库连接
+        # --- 清理消息计数器数据库连接 ---
         if self.msg_counter:
             try:
                 if hasattr(self.msg_counter, "close"):
