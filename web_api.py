@@ -256,14 +256,14 @@ class MnemosyneWebApi:
 
     # ==================== 配置 API ====================
 
+    _SENSITIVE_KEYS = {"authentication"}
+
     async def get_config(self) -> Any:
         try:
             config = self.plugin.config.copy()
-            if "authentication" in config:
-                auth_config = config["authentication"].copy()
-                if "password" in auth_config:
-                    auth_config["password"] = "***"
-                config["authentication"] = auth_config
+            # 排除敏感配置项，避免密码等泄露到前端
+            for key in self._SENSITIVE_KEYS:
+                config.pop(key, None)
             return jsonify(config)
         except Exception as e:
             logger.error(f"获取配置失败: {e}", exc_info=True)
@@ -273,6 +273,9 @@ class MnemosyneWebApi:
         try:
             data = await request.get_json(silent=True) or {}
             for key, value in data.items():
+                # 禁止通过全量保存覆盖敏感配置项
+                if key in self._SENSITIVE_KEYS:
+                    continue
                 self.plugin.config[key] = value
             self.plugin.save_config()
             return jsonify({"saved": True})
