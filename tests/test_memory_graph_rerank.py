@@ -82,6 +82,7 @@ from core.memory_operations import (  # noqa: E402
 from core.tools import (  # noqa: E402
     extract_query_keywords,
     pack_memory_content,
+    remove_mnemosyne_tags,
     resolve_max_prompt_chars,
     split_memory_content_meta,
     strip_memory_meta,
@@ -132,6 +133,79 @@ class TestMemoryMetaHelpers(unittest.TestCase):
         self.assertEqual(plain, "x" * 8)
         self.assertTrue(suffixed_changed)
         self.assertEqual(suffixed, "x" * 8 + "…(truncated)")
+
+
+class TestRemoveMnemosyneTags(unittest.TestCase):
+    def test_remove_all_tags_preserves_user_message_metadata(self) -> None:
+        message = {
+            "role": "user",
+            "content": "Hello <Mnemosyne>memory</Mnemosyne> world",
+            "_no_save": True,
+            "message_id": "preset-1",
+        }
+
+        cleaned = remove_mnemosyne_tags([message], contexts_memory_len=0)
+
+        self.assertEqual(cleaned[0]["content"], "Hello  world")
+        self.assertTrue(cleaned[0]["_no_save"])
+        self.assertEqual(cleaned[0]["message_id"], "preset-1")
+        self.assertEqual(
+            message["content"], "Hello <Mnemosyne>memory</Mnemosyne> world"
+        )
+
+    def test_remove_all_tags_preserves_metadata_without_tags(self) -> None:
+        message = {
+            "role": "user",
+            "content": "Plain preset message",
+            "_no_save": True,
+            "custom": {"source": "begin_dialogs"},
+        }
+
+        cleaned = remove_mnemosyne_tags([message], contexts_memory_len=0)
+
+        self.assertEqual(cleaned[0]["content"], "Plain preset message")
+        self.assertTrue(cleaned[0]["_no_save"])
+        self.assertEqual(cleaned[0]["custom"], {"source": "begin_dialogs"})
+
+    def test_tag_retention_preserves_metadata_for_cleaned_and_kept_tags(self) -> None:
+        contents = [
+            {
+                "role": "user",
+                "content": "old <Mnemosyne>first</Mnemosyne>",
+                "_no_save": True,
+                "message_id": "old",
+            },
+            {
+                "role": "user",
+                "content": "new <Mnemosyne>second</Mnemosyne>",
+                "_no_save": True,
+                "message_id": "new",
+            },
+        ]
+
+        cleaned = remove_mnemosyne_tags(contents, contexts_memory_len=1)
+
+        self.assertEqual(cleaned[0]["content"], "old ")
+        self.assertTrue(cleaned[0]["_no_save"])
+        self.assertEqual(cleaned[0]["message_id"], "old")
+        self.assertEqual(cleaned[1]["content"], "new <Mnemosyne>second</Mnemosyne>")
+        self.assertTrue(cleaned[1]["_no_save"])
+        self.assertEqual(cleaned[1]["message_id"], "new")
+
+    def test_multimodal_user_message_preserves_metadata(self) -> None:
+        content_parts = [{"type": "text", "text": "hello"}]
+        message = {
+            "role": "user",
+            "content": content_parts,
+            "_no_save": True,
+            "custom": "preserved",
+        }
+
+        cleaned = remove_mnemosyne_tags([message], contexts_memory_len=1)
+
+        self.assertIs(cleaned[0]["content"], content_parts)
+        self.assertTrue(cleaned[0]["_no_save"])
+        self.assertEqual(cleaned[0]["custom"], "preserved")
 
 
 class TestLightweightGraphMetadata(unittest.TestCase):
