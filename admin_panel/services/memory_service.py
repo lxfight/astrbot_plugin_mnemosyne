@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from astrbot.core.log import LogManager
+from astrbot.api import logger
 
 from ..models.memory import (
     MemoryRecord,
@@ -30,7 +30,7 @@ class MemoryService:
             plugin_instance: Mnemosyne 插件实例
         """
         self.plugin = plugin_instance
-        self.logger = LogManager.GetLogger(log_name="MemoryService")
+        self.logger = logger
 
     async def search_memories(
         self, request: MemorySearchRequest

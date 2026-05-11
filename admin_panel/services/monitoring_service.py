@@ -9,7 +9,7 @@ from datetime import datetime
 
 import psutil
 
-from astrbot.core.log import LogManager
+from astrbot.api import logger
 
 from ..models.monitoring import (
     ComponentHealth,
@@ -148,7 +148,7 @@ class MonitoringService:
             plugin_instance: Mnemosyne 插件实例
         """
         self.plugin = plugin_instance
-        self.logger = LogManager.GetLogger(log_name="MonitoringService")
+        self.logger = logger
         self.metrics_collector = MetricsCollector()
         self._last_health_check = None
         self._health_check_cache_duration = 30  # 健康检查缓存30秒
