@@ -619,7 +619,10 @@ function showMemoriesError(message) {
     if (!container) return;
     const errorDiv = document.createElement('div');
     errorDiv.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
-    const p = document.createElement('p'); p.innerHTML = '<i class="ti ti-alert-circle"></i> ' + message;
+    const p = document.createElement('p');
+    const icon = document.createElement('i'); icon.className = 'ti ti-alert-circle';
+    p.appendChild(icon);
+    p.appendChild(document.createTextNode(' ' + message));
     const btn = document.createElement('button'); btn.className = 'btn btn-primary'; btn.style.marginTop = '1rem';
     btn.textContent = '重试'; btn.onclick = () => loadMemories();
     errorDiv.appendChild(p); errorDiv.appendChild(btn);
@@ -762,7 +765,10 @@ function showSessionsError(message) {
     if (!container) return;
     const errorDiv = document.createElement('div');
     errorDiv.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
-    const p = document.createElement('p'); p.innerHTML = '<i class="ti ti-alert-circle"></i> ' + message;
+    const p = document.createElement('p');
+    const icon = document.createElement('i'); icon.className = 'ti ti-alert-circle';
+    p.appendChild(icon);
+    p.appendChild(document.createTextNode(' ' + message));
     const btn = document.createElement('button'); btn.className = 'btn btn-primary'; btn.style.marginTop = '1rem';
     btn.textContent = '重试'; btn.onclick = loadSessions;
     errorDiv.appendChild(p); errorDiv.appendChild(btn);
@@ -906,12 +912,21 @@ function renderDistributionChart(data) {
 function showStatisticsError(message) {
     const container = document.getElementById('statistics-content');
     if (!container) return;
-    container.innerHTML = `
-        <div style="padding: 2rem; text-align: center; color: var(--danger-color);">
-            <p><i class="ti ti-alert-circle"></i> ${message}</p>
-            <button class="btn btn-primary" onclick="loadStatistics()" style="margin-top: 1rem;">重试</button>
-        </div>
-    `;
+
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
+
+    const p = document.createElement('p');
+    const icon = document.createElement('i'); icon.className = 'ti ti-alert-circle';
+    p.appendChild(icon);
+    p.appendChild(document.createTextNode(' ' + message));
+
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-primary'; btn.style.marginTop = '1rem';
+    btn.textContent = '重试'; btn.onclick = () => loadStatistics();
+
+    wrapper.appendChild(p); wrapper.appendChild(btn);
+    container.innerHTML = ''; container.appendChild(wrapper);
 }
 
 // ==================== 系统配置页面 ====================
@@ -1019,12 +1034,21 @@ async function saveConfig() {
 function showConfigError(message) {
     const container = document.getElementById('config-content');
     if (!container) return;
-    container.innerHTML = `
-        <div style="padding: 2rem; text-align: center; color: var(--danger-color);">
-            <p><i class="ti ti-alert-circle"></i> ${message}</p>
-            <button class="btn btn-primary" onclick="loadConfig()" style="margin-top: 1rem;">重试</button>
-        </div>
-    `;
+
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'padding: 2rem; text-align: center; color: var(--danger-color);';
+
+    const p = document.createElement('p');
+    const icon = document.createElement('i'); icon.className = 'ti ti-alert-circle';
+    p.appendChild(icon);
+    p.appendChild(document.createTextNode(' ' + message));
+
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-primary'; btn.style.marginTop = '1rem';
+    btn.textContent = '重试'; btn.onclick = () => loadConfig();
+
+    wrapper.appendChild(p); wrapper.appendChild(btn);
+    container.innerHTML = ''; container.appendChild(wrapper);
 }
 
 // ==================== 全局导出 ====================
