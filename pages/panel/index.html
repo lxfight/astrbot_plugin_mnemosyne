@@ -222,14 +222,15 @@
                 <!-- 系统配置页面 -->
                 <div id="config-page" class="page">
                     <div class="page-header">
-                        <h2>系统配置</h2>
-                        <button class="btn btn-primary" onclick="saveConfig()">
-                            <i class="ti ti-device-floppy"></i> 保存配置
+                        <div>
+                            <h2>系统配置</h2>
+                            <p class="page-subtitle">当前插件运行配置（只读）</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="loadConfig()">
+                            <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
-                    <div id="config-content">
-                        <p class="placeholder">配置管理功能正在开发中...</p>
-                    </div>
+                    <div id="config-content"></div>
                 </div>
             </div>
         </main>

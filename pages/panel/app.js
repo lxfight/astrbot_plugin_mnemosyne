@@ -951,7 +951,6 @@ function renderConfigForm(config) {
     if (!container) return;
     container.innerHTML = '';
 
-    // 过滤掉内部字段
     const skipKeys = ['admin_panel', '_internal', 'plugin_data_dir'];
     const entries = Object.entries(config).filter(([k]) => !skipKeys.includes(k));
 
@@ -961,73 +960,52 @@ function renderConfigForm(config) {
     }
 
     for (const [key, value] of entries) {
-        const formGroup = document.createElement('div');
-        formGroup.className = 'filter-group';
-        formGroup.style.marginBottom = '1rem';
+        const card = document.createElement('div');
+        card.className = 'config-item';
 
-        const label = document.createElement('label');
-        label.textContent = key;
-        label.style.cssText = 'font-weight: 600; display: block; margin-bottom: 0.5rem;';
+        // 配置项名称
+        const nameEl = document.createElement('div');
+        nameEl.className = 'config-item-name';
+        nameEl.textContent = key;
 
-        let input;
+        // 配置项值
+        const valueEl = document.createElement('div');
+        valueEl.className = 'config-item-value';
+
         if (typeof value === 'boolean') {
-            input = document.createElement('input');
-            input.type = 'checkbox';
-            input.checked = value;
-            input.className = 'input';
-            input.dataset.type = 'boolean';
+            const badge = document.createElement('span');
+            badge.className = 'config-badge ' + (value ? 'config-badge-true' : 'config-badge-false');
+            badge.textContent = value ? '✓ 开启' : '✗ 关闭';
+            valueEl.appendChild(badge);
         } else if (typeof value === 'number') {
-            input = document.createElement('input');
-            input.type = 'number';
-            input.value = value;
-            input.className = 'input';
-            input.dataset.type = 'number';
+            valueEl.className += ' config-value-number';
+            valueEl.textContent = value.toLocaleString();
         } else if (typeof value === 'object' && value !== null) {
-            input = document.createElement('textarea');
-            input.value = JSON.stringify(value, null, 2);
-            input.className = 'input';
-            input.rows = 5;
-            input.dataset.type = 'json';
+            const pre = document.createElement('pre');
+            pre.className = 'config-json';
+            pre.textContent = JSON.stringify(value, null, 2);
+            valueEl.appendChild(pre);
+        } else if (typeof value === 'string' && value.length > 60) {
+            const pre = document.createElement('pre');
+            pre.className = 'config-textarea';
+            pre.textContent = value;
+            valueEl.appendChild(pre);
         } else {
-            input = document.createElement('input');
-            input.type = 'text';
-            input.value = String(value);
-            input.className = 'input';
-            input.dataset.type = 'string';
+            const span = document.createElement('span');
+            span.className = 'config-value-string';
+            span.textContent = String(value);
+            valueEl.appendChild(span);
         }
-        input.dataset.key = key;
 
-        formGroup.appendChild(label);
-        formGroup.appendChild(input);
-        container.appendChild(formGroup);
-    }
-}
+        // 类型标签
+        const typeEl = document.createElement('span');
+        typeEl.className = 'config-type-tag';
+        typeEl.textContent = Array.isArray(value) ? 'list' : typeof value;
 
-async function saveConfig() {
-    const inputs = document.querySelectorAll('#config-content [data-key]');
-    const newConfig = {};
-
-    for (const input of inputs) {
-        const key = input.dataset.key;
-        const type = input.dataset.type;
-        let value;
-        if (type === 'boolean') value = input.checked;
-        else if (type === 'number') value = Number(input.value);
-        else if (type === 'json') {
-            try { value = JSON.parse(input.value); } catch { showToast(`配置项 "${key}" JSON 格式无效`, 'error'); return; }
-        }
-        else value = input.value;
-        newConfig[key] = value;
-    }
-
-    showLoading(true);
-    try {
-        await apiPost('config', newConfig);
-        showToast('配置保存成功', 'success');
-    } catch (error) {
-        showToast('配置保存失败：' + error.message, 'error');
-    } finally {
-        showLoading(false);
+        card.appendChild(nameEl);
+        card.appendChild(typeEl);
+        card.appendChild(valueEl);
+        container.appendChild(card);
     }
 }
 
@@ -1090,4 +1068,3 @@ window.loadStatistics = loadStatistics;
 
 // 配置管理
 window.loadConfig = loadConfig;
-window.saveConfig = saveConfig;
