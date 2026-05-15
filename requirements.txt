@@ -1,7 +1,6 @@
 # 核心依赖
 pymilvus[milvus_lite]>=2.5.4,<3.0.0
 pypinyin>=0.53.0,<1.0.0
-google-genai>=1.11.0,<2.0.0
 
 # Web 框架（管理面板）
 fastapi>=0.104.0,<1.0.0
