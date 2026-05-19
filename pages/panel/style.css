@@ -1083,6 +1083,112 @@ body {
     margin-top: 0.25rem;
 }
 
+
+/* ==================== 系统配置页面 ==================== */
+
+.page-subtitle {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+#config-content {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 1rem;
+}
+
+.config-item {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    transition: var(--transition);
+    position: relative;
+}
+
+.config-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow);
+}
+
+.config-item-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    word-break: break-all;
+    padding-right: 3.5rem;
+}
+
+.config-item-value {
+    flex: 1;
+}
+
+.config-value-string {
+    font-size: 0.9375rem;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    color: var(--primary-color);
+    word-break: break-all;
+}
+
+.config-value-number {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    color: var(--primary-color);
+}
+
+.config-badge {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.config-badge-true {
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--success-color);
+}
+
+.config-badge-false {
+    background: rgba(239, 68, 68, 0.08);
+    color: var(--text-secondary);
+}
+
+.config-json, .config-textarea {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 0;
+}
+
+.config-type-tag {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-light);
+    background: var(--bg-secondary);
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.25rem;
+    border: 1px solid var(--border-color);
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
     .sidebar {
@@ -1112,5 +1218,9 @@ body {
     .memory-actions {
         flex-direction: row;
         justify-content: flex-end;
+    }
+
+    #config-content {
+        grid-template-columns: 1fr;
     }
 }

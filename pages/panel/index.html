@@ -4,36 +4,34 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mnemosyne 管理面板</title>
-    <link rel="stylesheet" href="/static/css/main.css">
-    <!-- Tabler Icons -->
+    <link rel="stylesheet" href="./style.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 </head>
 <body>
     <div class="container">
-        <!-- 侧边栏 -->
         <aside class="sidebar">
             <div class="logo">
                 <h1><i class="ti ti-brain"></i> Mnemosyne</h1>
                 <p class="subtitle">记忆管理系统</p>
             </div>
             <nav class="nav-menu">
-                <a href="#dashboard" class="nav-item active" data-page="dashboard">
+                <a href="#" class="nav-item active" data-page="dashboard">
                     <i class="ti ti-dashboard icon"></i>
                     <span>系统监控</span>
                 </a>
-                <a href="#memories" class="nav-item" data-page="memories">
+                <a href="#" class="nav-item" data-page="memories">
                     <i class="ti ti-bulb icon"></i>
                     <span>记忆管理</span>
                 </a>
-                <a href="#sessions" class="nav-item" data-page="sessions">
+                <a href="#" class="nav-item" data-page="sessions">
                     <i class="ti ti-users icon"></i>
                     <span>会话列表</span>
                 </a>
-                <a href="#statistics" class="nav-item" data-page="statistics">
+                <a href="#" class="nav-item" data-page="statistics">
                     <i class="ti ti-chart-bar icon"></i>
                     <span>统计分析</span>
                 </a>
-                <a href="#config" class="nav-item" data-page="config">
+                <a href="#" class="nav-item" data-page="config">
                     <i class="ti ti-settings icon"></i>
                     <span>系统配置</span>
                 </a>
@@ -46,9 +44,7 @@
             </div>
         </aside>
 
-        <!-- 主内容区 -->
         <main class="main-content">
-            <!-- 页面容器 -->
             <div id="page-container">
                 <!-- 系统监控页面 -->
                 <div id="dashboard-page" class="page active">
@@ -58,8 +54,6 @@
                             <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
-
-                    <!-- 系统状态卡片 -->
                     <div class="status-cards">
                         <div class="status-card" id="overall-status">
                             <div class="card-icon"><i class="ti ti-circle-check"></i></div>
@@ -90,21 +84,13 @@
                             </div>
                         </div>
                     </div>
-
-                    <!-- 组件健康状态 -->
                     <div class="section">
                         <h3>组件健康状态</h3>
-                        <div id="components-health" class="components-grid">
-                            <!-- 动态加载 -->
-                        </div>
+                        <div id="components-health" class="components-grid"></div>
                     </div>
-
-                    <!-- 性能指标 -->
                     <div class="section">
                         <h3>性能指标</h3>
-                        <div id="performance-metrics" class="metrics-grid">
-                            <!-- 动态加载 -->
-                        </div>
+                        <div id="performance-metrics" class="metrics-grid"></div>
                     </div>
                 </div>
 
@@ -121,8 +107,6 @@
                             </button>
                         </div>
                     </div>
-
-                    <!-- 搜索和过滤器 -->
                     <div class="filters-container">
                         <div class="filters-grid">
                             <div class="filter-group">
@@ -159,25 +143,17 @@
                             </button>
                         </div>
                     </div>
-
-                    <!-- 记忆统计信息 -->
                     <div class="info-bar">
                         <span id="memories-count-info">共 0 条记忆</span>
                         <span id="memories-filter-info"></span>
                     </div>
-
-                    <!-- 记忆列表 -->
                     <div id="memories-list" class="list-container">
                         <div class="loading-placeholder">
                             <i class="ti ti-loader"></i>
                             <p>正在加载记忆...</p>
                         </div>
                     </div>
-
-                    <!-- 分页控件 -->
-                    <div id="memories-pagination" class="pagination">
-                        <!-- 动态加载 -->
-                    </div>
+                    <div id="memories-pagination" class="pagination"></div>
                 </div>
 
                 <!-- 会话列表页面 -->
@@ -188,7 +164,6 @@
                             <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
-
                     <div id="sessions-list" class="list-container">
                         <p class="placeholder">加载中...</p>
                     </div>
@@ -202,8 +177,6 @@
                             <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
-
-                    <!-- 统计卡片 -->
                     <div class="stats-grid">
                         <div class="stat-card">
                             <h4 style="color: var(--primary-color);">总记忆数</h4>
@@ -226,24 +199,18 @@
                             <div class="stat-label">每会话平均记忆数</div>
                         </div>
                     </div>
-
-                    <!-- 每日趋势图表 -->
                     <div class="chart-container">
                         <h3>每日记忆趋势</h3>
                         <div class="chart-wrapper">
                             <canvas id="statistics-chart"></canvas>
                         </div>
                     </div>
-
-                    <!-- 最活跃会话 -->
                     <div class="section">
                         <h3>最活跃的会话 (Top 10)</h3>
                         <div id="top-sessions-list" class="list-container">
                             <p class="placeholder">加载中...</p>
                         </div>
                     </div>
-
-                    <!-- 记忆类型分布 -->
                     <div class="chart-container">
                         <h3>记忆分布统计</h3>
                         <div class="chart-wrapper">
@@ -255,35 +222,28 @@
                 <!-- 系统配置页面 -->
                 <div id="config-page" class="page">
                     <div class="page-header">
-                        <h2>系统配置</h2>
-                        <button class="btn btn-primary" onclick="saveConfig()">
-                            <i class="ti ti-device-floppy"></i> 保存配置
+                        <div>
+                            <h2>系统配置</h2>
+                            <p class="page-subtitle">当前插件运行配置（只读）</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="loadConfig()">
+                            <i class="ti ti-refresh"></i> 刷新
                         </button>
                     </div>
-
-                    <div id="config-content">
-                        <p class="placeholder">配置管理功能正在开发中...</p>
-                    </div>
+                    <div id="config-content"></div>
                 </div>
             </div>
         </main>
     </div>
 
-    <!-- 加载提示 -->
     <div id="loading-overlay" class="loading-overlay" style="display: none;">
         <div class="loading-spinner"></div>
         <p><i class="ti ti-loader"></i> 加载中...</p>
     </div>
 
-    <!-- Toast 通知 -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="/static/js/main.js"></script>
-    <script src="/static/js/dashboard.js"></script>
-    <script src="/static/js/memories.js"></script>
-    <script src="/static/js/sessions.js"></script>
-    <script src="/static/js/statistics.js"></script>
-    <!-- Chart.js for statistics charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script type="module" src="./app.js"></script>
 </body>
 </html>
