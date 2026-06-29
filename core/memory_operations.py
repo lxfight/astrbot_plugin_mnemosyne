@@ -841,7 +841,7 @@ async def _perform_vector_db_search(
     top_k = plugin.config.get("top_k", DEFAULT_TOP_K)
     timeout_seconds = plugin.config.get("milvus_search_timeout", DEFAULT_MILVUS_TIMEOUT)
 
-    candidate_limit = min(max(top_k * 4, top_k), 60)
+    candidate_limit = min(top_k * 4, 60)
     logger.info(
         f"开始在集合 '{collection_name}' 中搜索相关记忆 (TopK: {top_k}, Candidates: {candidate_limit}, Filter: '{search_expression or '无'}')"
     )
@@ -853,16 +853,14 @@ async def _perform_vector_db_search(
 
     try:
         detailed_results = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: vector_db.search(
-                    collection_name=collection_name,
-                    query_vector=query_vector,
-                    top_k=candidate_limit,
-                    filters=search_expression,
-                    search_params=plugin.search_params,
-                    output_fields=plugin.output_fields_for_query,
-                ),
+            asyncio.to_thread(
+                vector_db.search,
+                collection_name=collection_name,
+                query_vector=query_vector,
+                top_k=candidate_limit,
+                filters=search_expression,
+                search_params=plugin.search_params,
+                output_fields=plugin.output_fields_for_query,
             ),
             timeout=timeout_seconds,
         )
@@ -1239,7 +1237,6 @@ async def _store_summary_to_vector_db(
     logger.info(
         f"准备向集合 '{collection_name}' 插入 1 条总结记忆 (Persona: {effective_persona_id}, Session: {session_id[:8]}...)"
     )
-    loop = asyncio.get_event_loop()
     mutation_result = None
 
     vector_db = _get_vector_db(plugin)
@@ -1254,10 +1251,7 @@ async def _store_summary_to_vector_db(
                 data=data_to_insert,
             )
 
-        mutation_result = await loop.run_in_executor(
-            None,  # 使用默认线程池
-            _insert_data,
-        )
+        mutation_result = await asyncio.to_thread(_insert_data)
     except (MilvusException, ConnectionError, ValueError) as e:
         logger.error(f"向向量数据库插入总结记忆时出错: {e}", exc_info=True)
     finally:
@@ -1281,10 +1275,7 @@ async def _store_summary_to_vector_db(
             def _flush_collection():
                 return vector_db.flush([collection_name])
 
-            await loop.run_in_executor(
-                None,  # 使用默认线程池
-                _flush_collection,
-            )
+            await asyncio.to_thread(_flush_collection)
             logger.debug(f"集合 '{collection_name}' 刷新完成。")
             return True
 
@@ -1480,10 +1471,8 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
         try:
             await asyncio.sleep(plugin.summary_check_interval)  # <--- 等待指定间隔
 
-            if not plugin.context_manager or plugin.summary_time_threshold == float(
-                "inf"
-            ):
-                # 如果上下文管理器未初始化或阈值无效，则跳过本次检查
+            if not plugin.context_manager:
+                # 如果上下文管理器未初始化，则跳过本次检查
                 continue
 
             current_time = time.time()

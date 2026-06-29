@@ -18,6 +18,15 @@ from ..models.memory import (
     MemoryStatistics,
 )
 
+# 兼容两种加载场景：
+# - 运行时：admin_panel 作为插件子包，`...core` 可达插件根的 core 模块。
+# - 测试时：admin_panel 作为顶层包，`...core` 会超出顶层包，回退到绝对导入
+#   （测试已将插件根加入 sys.path，core 作为顶层包可用）。
+try:
+    from ...core.security_utils import safe_build_milvus_expression
+except ImportError:
+    from core.security_utils import safe_build_milvus_expression
+
 
 class MemoryService:
     """记忆管理服务"""
@@ -92,11 +101,19 @@ class MemoryService:
             expr_parts = []
 
             if request.session_id:
-                expr_parts.append(f'session_id == "{request.session_id}"')
+                expr_parts.append(
+                    safe_build_milvus_expression(
+                        "session_id", request.session_id, "=="
+                    )
+                )
 
             # 注意：persona_id 字段可能不存在，需要先检查
             if request.persona_id:
-                expr_parts.append(f'personality_id == "{request.persona_id}"')
+                expr_parts.append(
+                    safe_build_milvus_expression(
+                        "personality_id", request.persona_id, "=="
+                    )
+                )
 
             if request.start_date:
                 start_timestamp = request.start_date.timestamp()
@@ -420,18 +437,24 @@ class MemoryService:
             if not vector_db.has_collection(collection_name):
                 return 0
 
-            # 先查询记忆数量 - session_id 是字符串类型，需要引号
+            # 使用安全的表达式构建方法，避免注入
+            try:
+                expr = safe_build_milvus_expression("session_id", session_id, "==")
+            except ValueError:
+                self.logger.warning(f"删除会话记忆失败：session_id 格式无效: {session_id}")
+                return 0
+
+            # 先查询记忆数量
             results = vector_db.query(
                 collection_name=collection_name,
-                filters=f'session_id == "{session_id}"',
+                filters=expr,
                 output_fields=["memory_id"],
                 limit=10000,
             )
             count = len(results) if results else 0
 
-            # 删除记忆 - session_id 是字符串类型，需要引号
+            # 删除记忆
             if count > 0:
-                expr = f'session_id == "{session_id}"'
                 vector_db.delete(collection_name, expr)
                 vector_db.flush([collection_name])
 

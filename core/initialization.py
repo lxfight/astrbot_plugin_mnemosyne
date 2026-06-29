@@ -319,6 +319,17 @@ def initialize_vector_db(plugin: "Mnemosyne", plugin_data_dir: str | None = None
     db_type = plugin.config.get("vector_db_type", "chroma").lower()
     init_logger.info(f"配置的向量数据库类型: {db_type}")
 
+    # Windows 下 Milvus Lite 不支持，给出明确提示而非在连接时才报错。
+    if db_type == "milvus" and platform.system() == "Windows":
+        lite_path = plugin.config.get("milvus_lite_path", "")
+        address = plugin.config.get("address", "")
+        if lite_path and not address:
+            init_logger.warning(
+                "检测到 Windows 系统且仅配置了 milvus_lite_path。"
+                "Milvus Lite 不支持 Windows，请在配置中改用 address 连接标准 Milvus 服务，"
+                "或将 vector_db_type 切换为 chroma 以使用本地模式。"
+            )
+
     try:
         # 使用工厂模式创建数据库实例
         from ..memory_manager.vector_db.factory import VectorDatabaseFactory

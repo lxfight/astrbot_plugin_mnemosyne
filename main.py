@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     "Mnemosyne",
     "lxfight",
     "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
-    "2.1.0",
+    "2.1.6",
     "https://github.com/lxfight/astrbot_plugin_mnemosyne",
 )
 class Mnemosyne(Star):
@@ -74,6 +74,7 @@ class Mnemosyne(Star):
         self._migrated_sessions: set[str] = set()  # 用于记录已迁移的会话
         self._warned_missing_provider_ids: set[str] = set()
         self._post_load_tasks_started = False
+        self._summary_check_task: asyncio.Task | None = None
         self._ensure_vector_db_connection_task: asyncio.Task | None = None
         self._vector_db_ready = asyncio.Event()
         # 旧属性名保留给外部代码/旧逻辑兼容。

@@ -21,6 +21,7 @@ from quart import Response, jsonify, request
 from .admin_panel.models.memory import MemorySearchRequest
 from .admin_panel.services.memory_service import MemoryService
 from .admin_panel.services.monitoring_service import MonitoringService
+from .core.security_utils import validate_session_id
 
 PLUGIN_NAME = "astrbot_plugin_mnemosyne"
 
@@ -109,6 +110,12 @@ class MnemosyneWebApi:
             persona_id = request.args.get("persona_id") or None
             start_date = request.args.get("start_date") or None
             end_date = request.args.get("end_date") or None
+
+            # 校验 session_id/persona_id 格式，避免注入到向量库过滤表达式
+            if session_id and not validate_session_id(session_id):
+                return jsonify(self._error("session_id 格式无效"))
+            if persona_id and not validate_session_id(persona_id):
+                return jsonify(self._error("persona_id 格式无效"))
 
             try:
                 limit = int(request.args.get("limit", "10"))
@@ -203,7 +210,10 @@ class MnemosyneWebApi:
         try:
             if not session_id:
                 return jsonify(self._error("缺少 session_id 参数"))
-            count = await self.memory_service.delete_session_memories(str(session_id).strip())
+            normalized_sid = str(session_id).strip()
+            if not validate_session_id(normalized_sid):
+                return jsonify(self._error("session_id 格式无效"))
+            count = await self.memory_service.delete_session_memories(normalized_sid)
             return jsonify({"deleted_count": count})
         except Exception as e:
             logger.error(f"删除会话记忆失败: {e}", exc_info=True)

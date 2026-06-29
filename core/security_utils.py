@@ -71,14 +71,27 @@ def validate_personality_id(personality_id: str) -> bool:
     return True
 
 
-def safe_build_milvus_expression(field: str, value: str, operator: str = "==") -> str:
+def _escape_milvus_string(value: str) -> str:
+    """
+    转义 Milvus 表达式中字符串字面量的特殊字符。
+
+    Milvus 使用反斜杠作为转义字符，字符串以双引号包裹。
+    这里对反斜杠和双引号做转义，避免注入或表达式语法错误。
+    """
+    if not isinstance(value, str):
+        value = str(value)
+    # 先转义反斜杠，再转义双引号，顺序很重要
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def safe_build_milvus_expression(field: str, value, operator: str = "==") -> str:
     """
     安全构建 Milvus 查询表达式，防止注入攻击
 
     Args:
         field: 字段名（必须在白名单中）
-        value: 字段值（将被转义）
-        operator: 操作符（==、in等）
+        value: 字段值（将被转义）。operator 为 "in" 时应传入列表/元组。
+        operator: 操作符（==、in、>、>=、<、<=、!=）
 
     Returns:
         str: 安全的查询表达式
@@ -103,11 +116,15 @@ def safe_build_milvus_expression(field: str, value: str, operator: str = "==") -
         f"[safe_build_milvus_expression] 字段: {field}, 操作符: {operator}, 原始值: {value}"
     )
 
-    # 构建表达式 - 不进行转义，直接使用原始值
+    # 构建表达式
     if operator == "==":
-        expr = f'{field} == "{value}"'
+        expr = f'{field} == "{_escape_milvus_string(value)}"'
     elif operator == "in":
-        expr = f'{field} in ["{value}"]'
+        # in 操作符期望一个列表/元组，逐项转义后拼成 ["a", "b"]
+        if not isinstance(value, (list, tuple, set)):
+            value = [value]
+        items = ", ".join(f'"{_escape_milvus_string(str(v))}"' for v in value)
+        expr = f"{field} in [{items}]"
     else:
         # 对于比较操作符，直接使用（数值类型）
         expr = f"{field} {operator} {value}"

@@ -1,16 +1,8 @@
 # 核心依赖
 chromadb>=0.4.0,<1.0.0
-pypinyin>=0.53.0,<1.0.0
+psutil>=5.9.0,<7.0.0
 
 # 可选向量数据库（按需安装）
 # pymilvus[milvus_lite]>=2.5.4,<3.0.0 # 启用 Milvus / Milvus Lite 支持
 # qdrant-client>=1.7.0,<2.0.0   # 取消注释以启用 Qdrant 支持
 # weaviate-client>=3.25.0,<4.0.0 # 取消注释以启用 Weaviate 支持
-
-# Web 框架（管理面板）
-fastapi>=0.104.0,<1.0.0
-uvicorn>=0.24.0,<1.0.0
-jinja2>=3.1.0,<4.0.0
-
-# HTTP 客户端
-httpx>=0.25.0,<1.0.0
