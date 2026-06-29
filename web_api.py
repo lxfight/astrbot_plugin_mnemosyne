@@ -21,7 +21,10 @@ from quart import Response, jsonify, request
 from .admin_panel.models.memory import MemorySearchRequest
 from .admin_panel.services.memory_service import MemoryService
 from .admin_panel.services.monitoring_service import MonitoringService
-from .core.security_utils import validate_session_id
+from .core.security_utils import (
+    validate_personality_id,
+    validate_session_id,
+)
 
 PLUGIN_NAME = "astrbot_plugin_mnemosyne"
 
@@ -111,10 +114,11 @@ class MnemosyneWebApi:
             start_date = request.args.get("start_date") or None
             end_date = request.args.get("end_date") or None
 
-            # 校验 session_id/persona_id 格式，避免注入到向量库过滤表达式
+            # 校验 session_id/persona_id 格式，避免注入到向量库过滤表达式。
+            # persona_id 与 session_id 格式可能不同，分别用各自的校验器。
             if session_id and not validate_session_id(session_id):
                 return jsonify(self._error("session_id 格式无效"))
-            if persona_id and not validate_session_id(persona_id):
+            if persona_id and not validate_personality_id(persona_id):
                 return jsonify(self._error("persona_id 格式无效"))
 
             try:

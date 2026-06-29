@@ -90,14 +90,16 @@ def safe_build_milvus_expression(field: str, value, operator: str = "==") -> str
 
     Args:
         field: 字段名（必须在白名单中）
-        value: 字段值（将被转义）。operator 为 "in" 时应传入列表/元组。
-        operator: 操作符（==、in、>、>=、<、<=、!=）
+        value: 字段值。``==`` / ``!=`` / ``in`` 对字符串值会做转义；
+            ``>`` / ``>=`` / ``<`` / ``<=`` 仅接受数值（用于 create_time 等
+            数值字段的范围比较），避免把任意字符串直接拼进表达式。
 
     Returns:
         str: 安全的查询表达式
 
     Raises:
-        ValueError: 如果字段名不在白名单或操作符不支持
+        ValueError: 如果字段名不在白名单、操作符不支持，或比较操作符
+            收到了非数值。
     """
     # 字段名白名单
     allowed_fields = ["session_id", "personality_id", "user_id", "memory_id"]
@@ -117,8 +119,8 @@ def safe_build_milvus_expression(field: str, value, operator: str = "==") -> str
     )
 
     # 构建表达式
-    if operator == "==":
-        expr = f'{field} == "{_escape_milvus_string(value)}"'
+    if operator in ("==", "!="):
+        expr = f'{field} {operator} "{_escape_milvus_string(value)}"'
     elif operator == "in":
         # in 操作符期望一个列表/元组，逐项转义后拼成 ["a", "b"]
         if not isinstance(value, (list, tuple, set)):
@@ -126,7 +128,11 @@ def safe_build_milvus_expression(field: str, value, operator: str = "==") -> str
         items = ", ".join(f'"{_escape_milvus_string(str(v))}"' for v in value)
         expr = f"{field} in [{items}]"
     else:
-        # 对于比较操作符，直接使用（数值类型）
+        # > >= < <= 仅用于数值字段（如 create_time），强制数值化以避免注入
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ValueError(
+                f"操作符 {operator} 仅支持数值，收到类型: {type(value).__name__}"
+            )
         expr = f"{field} {operator} {value}"
 
     # 【诊断日志】记录生成的表达式
