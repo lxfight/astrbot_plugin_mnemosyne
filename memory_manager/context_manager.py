@@ -1,3 +1,4 @@
+import copy
 import threading
 import time
 from datetime import datetime
@@ -31,7 +32,10 @@ class ConversationContextManager:
             if session_id in self.conversations:
                 return
             self.conversations[session_id] = {}
-            self.conversations[session_id]["history"] = contexts
+            # AstrBot passes req.contexts here. Keep an isolated snapshot so
+            # add_message() cannot append plugin-only entries to the live LLM
+            # request through a shared mutable list reference.
+            self.conversations[session_id]["history"] = copy.deepcopy(contexts)
             self.conversations[session_id]["event"] = event
             # 初始化最后一次总结的时间，这里在重启的时候会丢失，但是先不管了
             # 重启了计时器就重启，用户再一次对话再重启计时器，emmmm，之后再改了，加个TODO
