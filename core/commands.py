@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import math
 import re
 import time as time_module
 from datetime import datetime
@@ -64,7 +65,10 @@ def _parse_command_timestamp(value: str, label: str) -> float:
         raise ValueError(f"{label}不能为空")
     try:
         if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", normalized):
-            return float(normalized)
+            timestamp = float(normalized)
+            if not math.isfinite(timestamp):
+                raise ValueError("timestamp must be finite")
+            return timestamp
         if normalized.endswith("Z"):
             normalized = normalized[:-1] + "+00:00"
         return datetime.fromisoformat(normalized).timestamp()
@@ -137,6 +141,46 @@ def _query_memory_records(
             continue
         matched_records.append(record)
     return matched_records, reached_limit
+
+
+def _delete_memory_records(self: "Mnemosyne", records: list[dict]) -> int:
+    """Delete records using IDs that match the active vector database backend.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        records: Records selected for deletion.
+
+    Returns:
+        The known number of deleted records reported by the vector database.
+
+    Raises:
+        RuntimeError: If the vector database is unavailable before deletion.
+        ValueError: If a selected record has no usable native ID.
+    """
+    vector_db = _get_vector_db(self)
+    if not vector_db or not vector_db.is_connected():
+        raise RuntimeError("向量数据库未初始化或未连接")
+
+    db_type = self.config.get("vector_db_type", "chroma").lower()
+    deleted_count = 0
+    for record in records:
+        record_id = (
+            record.get(PRIMARY_FIELD_NAME)
+            if db_type == "milvus"
+            else record.get("id")
+        )
+        if record_id is None:
+            raise ValueError("查询结果缺少可删除的 memory_id/id")
+        expression = (
+            _build_memory_id_expression(str(record_id))
+            if db_type == "milvus"
+            else safe_build_milvus_expression("id", str(record_id), "==")
+        )
+        result = vector_db.delete(self.collection_name, expression)
+        if isinstance(getattr(result, "delete_count", None), int):
+            deleted_count += result.delete_count
+    vector_db.flush([self.collection_name])
+    return deleted_count
 
 
 def _resolve_memory_export_path(
@@ -801,26 +845,7 @@ async def delete_between_memory_cmd_impl(
                 f"/memory delete_between {start} {end} {target_session_id} --confirm"
             )
             return
-        vector_db = _get_vector_db(self)
-        db_type = self.config.get("vector_db_type", "chroma").lower()
-        deleted_count = 0
-        for record in records:
-            record_id = (
-                record.get(PRIMARY_FIELD_NAME)
-                if db_type == "milvus"
-                else record.get("id")
-            )
-            if record_id is None:
-                raise ValueError("查询结果缺少可删除的 memory_id/id")
-            expression = (
-                _build_memory_id_expression(str(record_id))
-                if db_type == "milvus"
-                else safe_build_milvus_expression("id", str(record_id), "==")
-            )
-            result = vector_db.delete(self.collection_name, expression)
-            if isinstance(getattr(result, "delete_count", None), int):
-                deleted_count += result.delete_count
-        vector_db.flush([self.collection_name])
+        deleted_count = _delete_memory_records(self, records)
         yield event.plain_result(
             f"✅ 时间范围删除已执行。匹配记录：{len(records)}\n"
             f"向量数据库返回删除数：{deleted_count}"
@@ -877,26 +902,7 @@ async def delete_before_memory_cmd_impl(
                 f"/memory delete_before {cutoff} {target_session_id} --confirm"
             )
             return
-        vector_db = _get_vector_db(self)
-        db_type = self.config.get("vector_db_type", "chroma").lower()
-        deleted_count = 0
-        for record in records:
-            record_id = (
-                record.get(PRIMARY_FIELD_NAME)
-                if db_type == "milvus"
-                else record.get("id")
-            )
-            if record_id is None:
-                raise ValueError("查询结果缺少可删除的 memory_id/id")
-            expression = (
-                _build_memory_id_expression(str(record_id))
-                if db_type == "milvus"
-                else safe_build_milvus_expression("id", str(record_id), "==")
-            )
-            result = vector_db.delete(self.collection_name, expression)
-            if isinstance(getattr(result, "delete_count", None), int):
-                deleted_count += result.delete_count
-        vector_db.flush([self.collection_name])
+        deleted_count = _delete_memory_records(self, records)
         yield event.plain_result(
             f"✅ 删除请求已执行。会话: {target_session_id}\n"
             f"截止时间: {cutoff_display}\n匹配记录: {len(records)}\n"

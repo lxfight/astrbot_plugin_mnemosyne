@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 
@@ -21,6 +22,8 @@ class _SyntheticEvent:
 
 class _SyntheticVectorDB:
     def __init__(self):
+        self.connected = True
+        self.disconnect_after_query = False
         self.records = [
             {
                 "id": "record-old",
@@ -52,10 +55,13 @@ class _SyntheticVectorDB:
         self.flushed = False
 
     def is_connected(self):
-        return True
+        return self.connected
 
     def query(self, collection_name, filters, output_fields, limit=None, offset=None):
-        return list(self.records)
+        records = list(self.records)
+        if self.disconnect_after_query:
+            self.connected = False
+        return records
 
     def delete(self, collection_name, expr):
         self.deleted.append((collection_name, expr))
@@ -96,6 +102,28 @@ def test_time_and_native_id_filters_are_safe():
     assert safe_build_milvus_expression("id", "record-old", "==") == (
         'id == "record-old"'
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1700000000", 1_700_000_000.0),
+        ("1700000000.5", 1_700_000_000.5),
+        ("2024-01-02", datetime(2024, 1, 2).timestamp()),
+        (
+            "2024-01-02T03:04:05Z",
+            datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp(),
+        ),
+    ],
+)
+def test_parse_command_timestamp_accepts_supported_formats(value, expected):
+    assert commands._parse_command_timestamp(value, "时间") == expected
+
+
+@pytest.mark.parametrize("value", ["", "not-a-date", "9" * 1000])
+def test_parse_command_timestamp_rejects_invalid_or_non_finite_values(value):
+    with pytest.raises(ValueError):
+        commands._parse_command_timestamp(value, "时间")
 
 
 @pytest.mark.asyncio
@@ -139,6 +167,25 @@ async def test_delete_between_uses_a_half_open_range(tmp_path):
 
     assert plugin.vector_db.deleted == [("default", 'id == "record-old"')]
     assert "时间范围删除已执行" in results[0]
+
+
+@pytest.mark.asyncio
+async def test_delete_rechecks_vector_db_connection_after_the_preview_query(tmp_path):
+    plugin = _SyntheticPlugin(tmp_path)
+    plugin.vector_db.disconnect_after_query = True
+    event = _SyntheticEvent()
+
+    results = await _collect_results(
+        commands.delete_before_memory_cmd_impl(
+            plugin,
+            event,
+            "2026-07-15",
+            confirm="--confirm",
+        )
+    )
+
+    assert plugin.vector_db.deleted == []
+    assert "向量数据库未初始化或未连接" in results[0]
 
 
 @pytest.mark.asyncio
