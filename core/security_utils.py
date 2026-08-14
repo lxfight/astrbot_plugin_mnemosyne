@@ -102,7 +102,14 @@ def safe_build_milvus_expression(field: str, value, operator: str = "==") -> str
             收到了非数值。
     """
     # 字段名白名单
-    allowed_fields = ["session_id", "personality_id", "user_id", "memory_id"]
+    allowed_fields = [
+        "session_id",
+        "personality_id",
+        "user_id",
+        "memory_id",
+        "create_time",
+        "id",
+    ]
     if field not in allowed_fields:
         raise ValueError(
             f"不允许的字段名: {field}. 只允许: {', '.join(allowed_fields)}"

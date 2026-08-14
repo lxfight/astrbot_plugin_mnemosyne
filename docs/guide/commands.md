@@ -14,6 +14,12 @@ Mnemosyne 提供 `/memory` 命令用于初始化、查询、写入和清理长�
 | `/memory reset [confirm]` | 清除当前会话记忆。 |
 | `/memory delete_record [id] [session] [confirm]` | 删除指定会话中的单条记忆。 |
 | `/memory delete_session_memory [id] [confirm]` | 删除指定会话的全部记忆。 |
+| `/memory delete_before [time] [session] [--confirm]` | 预览或删除指定时间以前的记忆。 |
+| `/memory delete_between [start] [end] [session] [--confirm]` | 预览或删除一个时间范围内的记忆。 |
+| `/memory export [filename] [session\|--all] [start] [end]` | 导出记忆为 JSON 文件。 |
+| `/memory import [filename] [--confirm]` | 预览或导入 Mnemosyne JSON 导出文件。 |
+| `/memory stats [session\|--all]` | 查看记忆数量和时间范围统计。 |
+| `/memory search [keyword] [session\|--all] [limit]` | 按关键词搜索记忆内容。 |
 | `/memory drop_collection [name] [confirm]` | 删除整个集合。 |
 
 ## 初始化
@@ -50,6 +56,27 @@ Mnemosyne 提供 `/memory` 命令用于初始化、查询、写入和清理长�
 
 ```text
 /memory reset confirm
+```
+
+## 时间清理与导入导出
+
+`delete_before` 和 `delete_between` 会先输出预览，只有追加 `--confirm` 才会删除。所有这类命令，以及导出、导入、统计和搜索命令，均只允许 AstrBot 管理员执行。
+
+```text
+/memory delete_before 2026-07-01
+/memory delete_before 2026-07-01 --confirm
+/memory delete_between 2026-06-01 2026-07-01 --confirm
+```
+
+未指定会话 ID 时，命令只处理当前会话；使用 `--all` 才会导出、统计或搜索全部会话。导出文件始终保存在插件数据目录的 `exports` 子目录，导入会重新生成 Embedding，且先预览再确认。
+
+```text
+/memory export july-memory.json
+/memory export full-memory.json --all
+/memory import july-memory.json
+/memory import july-memory.json --confirm
+/memory stats
+/memory search 偏好
 ```
 
 ## Web 管理面板

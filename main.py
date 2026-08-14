@@ -705,6 +705,144 @@ class Mnemosyne(Star):
         return
 
     @filter.permission_type(filter.PermissionType.ADMIN)
+    @memory_group.command("delete_before")  # type: ignore
+    async def delete_before_memory_cmd(
+        self,
+        event: AstrMessageEvent,
+        cutoff: str,
+        session_id: str | None = None,
+        confirm: str | None = None,
+    ):
+        """Preview or delete memories created before a cutoff timestamp.
+
+        Args:
+            self: Mnemosyne plugin instance.
+            event: Event supplying the default session ID.
+            cutoff: ISO 8601 cutoff date or datetime.
+            session_id: Optional session ID; defaults to the current session.
+            confirm: Must be ``--confirm`` to perform deletion.
+        """
+        async for result in commands.delete_before_memory_cmd_impl(
+            self, event, cutoff, session_id, confirm
+        ):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @memory_group.command("delete_between")  # type: ignore
+    async def delete_between_memory_cmd(
+        self,
+        event: AstrMessageEvent,
+        start: str,
+        end: str,
+        session_id: str | None = None,
+        confirm: str | None = None,
+    ):
+        """Preview or delete memories in a time range.
+
+        Args:
+            self: Mnemosyne plugin instance.
+            event: Event supplying the default session ID.
+            start: Inclusive start timestamp.
+            end: Exclusive end timestamp.
+            session_id: Optional session ID; defaults to the current session.
+            confirm: Must be ``--confirm`` to perform deletion.
+        """
+        async for result in commands.delete_between_memory_cmd_impl(
+            self, event, start, end, session_id, confirm
+        ):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @memory_group.command("export")  # type: ignore
+    async def export_memory_cmd(
+        self,
+        event: AstrMessageEvent,
+        filename: str,
+        session_id: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+    ):
+        """Export memory records to a JSON file.
+
+        Args:
+            self: Mnemosyne plugin instance.
+            event: Event supplying the default session ID.
+            filename: JSON filename relative to the exports directory.
+            session_id: Session ID or ``--all`` for all sessions.
+            start: Inclusive start timestamp.
+            end: Exclusive end timestamp.
+        """
+        async for result in commands.export_memory_cmd_impl(
+            self, event, filename, session_id, start, end
+        ):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @memory_group.command("import")  # type: ignore
+    async def import_memory_cmd(
+        self,
+        event: AstrMessageEvent,
+        filename: str,
+        confirm: str | None = None,
+    ):
+        """Preview or import records from a Mnemosyne JSON export.
+
+        Args:
+            self: Mnemosyne plugin instance.
+            event: Event used for the response.
+            filename: Export filename relative to the exports directory.
+            confirm: Must be ``--confirm`` to insert records.
+        """
+        async for result in commands.import_memory_cmd_impl(
+            self, event, filename, confirm
+        ):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @memory_group.command("stats")  # type: ignore
+    async def stats_memory_cmd(
+        self, event: AstrMessageEvent, session_id: str | None = None
+    ):
+        """Show memory statistics for the current session or all sessions.
+
+        Args:
+            self: Mnemosyne plugin instance.
+            event: Event supplying the default session ID.
+            session_id: Session ID or ``--all`` for all sessions.
+        """
+        async for result in commands.stats_memory_cmd_impl(self, event, session_id):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @memory_group.command("search")  # type: ignore
+    async def search_memory_cmd(
+        self,
+        event: AstrMessageEvent,
+        keyword: str,
+        session_id: str | None = None,
+        limit: int = 10,
+    ):
+        """Search memory content for the current session or all sessions.
+
+        Args:
+            self: Mnemosyne plugin instance.
+            event: Event supplying the default session ID.
+            keyword: Text to find in memory content.
+            session_id: Session ID or ``--all`` for all sessions.
+            limit: Maximum number of results to return.
+        """
+        async for result in commands.search_memory_cmd_impl(
+            self, event, keyword, session_id, limit
+        ):
+            yield result
+        return
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @memory_group.command("delete_record")  # type: ignore
     async def delete_record_cmd(
         self,
