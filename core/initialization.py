@@ -131,9 +131,21 @@ def initialize_config_check(plugin: "Mnemosyne"):
     num_pairs = plugin.config["num_pairs"]
     # num_pairs 表示对话轮数（一问一答算1轮）
     # 需要转换为消息数量（num_pairs * 2）与 AstrBot 的 max_context_length 比较
-    astrbot_max_context_length = astrbot_config["provider_settings"][
-        "max_context_length"
-    ]
+    # 兼容性修复：AstrBot 4.28 起 provider_settings.max_context_length 已迁移到
+    # agent_runner.config.compression.max_turns（见 core/utils/migra_helper.py），
+    # 旧键在新版配置中不存在，硬索引会抛 KeyError 中断整个插件初始化。
+    # 这里先读旧键，读不到再读新键；均缺失时按 -1（不限制）处理。
+    astrbot_max_context_length = (astrbot_config or {}).get(
+        "provider_settings", {}
+    ).get("max_context_length")
+    if astrbot_max_context_length is None:
+        astrbot_max_context_length = (
+            (astrbot_config or {})
+            .get("agent_runner", {})
+            .get("config", {})
+            .get("compression", {})
+            .get("max_turns", -1)
+        )
     # 修复：放宽限制，允许 num_pairs 最大等于 astrbot_max_context_length
     # 一轮对话包含用户和助手两条消息，但总结时不必强制要求小于 max_context_length 的一半
     if astrbot_max_context_length > 0 and num_pairs > astrbot_max_context_length:
