@@ -131,8 +131,11 @@
                 ...componentEntries.map(([id, component], index) => ({
                     id,
                     label: this.componentName(id),
-                    value: component.status === 'healthy' ? '正常' : component.status === 'degraded' ? '注意' : '异常',
-                    type: component.status === 'healthy' ? 'live' : 'warn',
+                    value: component.status === 'healthy' ? '正常'
+                        : component.status === 'degraded' ? '注意'
+                        : component.status === 'unknown' ? '未知'
+                        : '异常',
+                    type: component.status === 'healthy' || component.status === 'unknown' ? 'live' : 'warn',
                     nx: [0.2, 0.34, 0.69, 0.82][index % 4],
                     ny: [0.72, 0.82, 0.78, 0.64][index % 4],
                     radius: 31,
