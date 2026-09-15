@@ -442,8 +442,11 @@ class Mnemosyne(Star):
                 initialization.initialize_config_check(self)
                 self._initialized_components.append("config_check")
             except Exception as e:
-                logger.error(f"配置检查失败: {e}", exc_info=True)
-                raise
+                # 配置校验是非关键步骤：只交叉验证 num_pairs 等参数与 AstrBot
+                # 主配置的关系，不产出后续步骤依赖的状态。校验失败时记录错误
+                # 并继续初始化，避免一个校验问题导致记忆读写、后台任务与
+                # 面板 API 全部失效（#148 故障链，跟踪于 #152）。
+                logger.error(f"配置检查失败（非致命，已跳过该校验）: {e}", exc_info=True)
 
             try:
                 initialization.initialize_config_and_schema(self)
