@@ -28,14 +28,14 @@ class FilterParser:
 
     # 操作符优先级
     OPERATORS = {
-        '==': 'eq',
-        '!=': 'ne',
-        '>': 'gt',
-        '<': 'lt',
-        '>=': 'gte',
-        '<=': 'lte',
-        'in': 'in',
-        'not in': 'nin',
+        "==": "eq",
+        "!=": "ne",
+        ">": "gt",
+        "<": "lt",
+        ">=": "gte",
+        "<=": "lte",
+        "in": "in",
+        "not in": "nin",
     }
 
     @staticmethod
@@ -64,16 +64,16 @@ class FilterParser:
         expr = expr.strip()
 
         # 处理 NOT
-        if expr.lower().startswith('not '):
+        if expr.lower().startswith("not "):
             operand_expr = expr[4:].strip()
             return {
                 "type": "not",
                 "operator": "not",
-                "operand": FilterParser.parse(operand_expr)
+                "operand": FilterParser.parse(operand_expr),
             }
 
         # 处理括号
-        if expr.startswith('(') and expr.endswith(')'):
+        if expr.startswith("(") and expr.endswith(")"):
             return FilterParser.parse(expr[1:-1])
 
         # 查找最外层的 AND/OR
@@ -81,13 +81,13 @@ class FilterParser:
         if logical_op:
             op_keyword, op_pos = logical_op
             left_expr = expr[:op_pos].strip()
-            right_expr = expr[op_pos + len(op_keyword):].strip()
+            right_expr = expr[op_pos + len(op_keyword) :].strip()
 
             return {
                 "type": "logical",
                 "operator": "and" if op_keyword.lower() == "and" else "or",
                 "left": FilterParser.parse(left_expr),
-                "right": FilterParser.parse(right_expr)
+                "right": FilterParser.parse(right_expr),
             }
 
         # 处理比较表达式
@@ -105,20 +105,22 @@ class FilterParser:
         i = 0
 
         while i < len(expr):
-            if expr[i] == '(':
+            if expr[i] == "(":
                 paren_level += 1
-            elif expr[i] == ')':
+            elif expr[i] == ")":
                 paren_level -= 1
             elif paren_level == 0:
                 # 在括号外，查找 AND/OR
-                if i + 3 <= len(expr) and expr[i:i+3].lower() == 'and':
-                    if (i == 0 or not expr[i-1].isalnum()) and \
-                       (i+3 == len(expr) or not expr[i+3].isalnum()):
-                        return ('and', i)
-                elif i + 2 <= len(expr) and expr[i:i+2].lower() == 'or':
-                    if (i == 0 or not expr[i-1].isalnum()) and \
-                       (i+2 == len(expr) or not expr[i+2].isalnum()):
-                        return ('or', i)
+                if i + 3 <= len(expr) and expr[i : i + 3].lower() == "and":
+                    if (i == 0 or not expr[i - 1].isalnum()) and (
+                        i + 3 == len(expr) or not expr[i + 3].isalnum()
+                    ):
+                        return ("and", i)
+                elif i + 2 <= len(expr) and expr[i : i + 2].lower() == "or":
+                    if (i == 0 or not expr[i - 1].isalnum()) and (
+                        i + 2 == len(expr) or not expr[i + 2].isalnum()
+                    ):
+                        return ("or", i)
             i += 1
 
         return None
@@ -130,10 +132,10 @@ class FilterParser:
 
         # 尝试匹配各种操作符
         # 按长度从长到短匹配，避免 >= 被匹配成 >
-        operators = ['not in', '==', '!=', '>=', '<=', '>', '<', 'in']
+        operators = ["not in", "==", "!=", ">=", "<=", ">", "<", "in"]
 
         for op in operators:
-            pattern = r'(\w+)\s*' + re.escape(op) + r'\s*(.+)'
+            pattern = r"(\w+)\s*" + re.escape(op) + r"\s*(.+)"
             match = re.match(pattern, expr, re.IGNORECASE)
 
             if match:
@@ -147,7 +149,7 @@ class FilterParser:
                     "type": "comparison",
                     "operator": FilterParser.OPERATORS.get(op.lower(), op.lower()),
                     "field": field,
-                    "value": value
+                    "value": value,
                 }
 
         # 无法解析
@@ -159,26 +161,28 @@ class FilterParser:
         value_str = value_str.strip()
 
         # 字符串（带引号）
-        if (value_str.startswith('"') and value_str.endswith('"')) or \
-           (value_str.startswith("'") and value_str.endswith("'")):
+        if (value_str.startswith('"') and value_str.endswith('"')) or (
+            value_str.startswith("'") and value_str.endswith("'")
+        ):
             return value_str[1:-1]
 
         # 列表
-        if value_str.startswith('[') and value_str.endswith(']'):
+        if value_str.startswith("[") and value_str.endswith("]"):
             items_str = value_str[1:-1].strip()
             if not items_str:
                 return []
 
             items = []
-            for item in items_str.split(','):
+            for item in items_str.split(","):
                 item = item.strip()
-                if (item.startswith('"') and item.endswith('"')) or \
-                   (item.startswith("'") and item.endswith("'")):
+                if (item.startswith('"') and item.endswith('"')) or (
+                    item.startswith("'") and item.endswith("'")
+                ):
                     items.append(item[1:-1])
                 else:
                     # 尝试解析为数字
                     try:
-                        if '.' in item:
+                        if "." in item:
                             items.append(float(item))
                         else:
                             items.append(int(item))
@@ -187,12 +191,12 @@ class FilterParser:
             return items
 
         # 布尔值
-        if value_str.lower() in ('true', 'false'):
-            return value_str.lower() == 'true'
+        if value_str.lower() in ("true", "false"):
+            return value_str.lower() == "true"
 
         # 数字
         try:
-            if '.' in value_str:
+            if "." in value_str:
                 return float(value_str)
             else:
                 return int(value_str)
@@ -244,9 +248,7 @@ class ChromaFilterConverter:
 
         chroma_op = op_map.get(operator, "$eq")
 
-        return {
-            field: {chroma_op: value}
-        }
+        return {field: {chroma_op: value}}
 
     @staticmethod
     def _convert_logical(ast: dict) -> dict:
@@ -278,8 +280,6 @@ class QdrantFilterConverter:
         if not ast:
             return None
 
-        from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
-
         ast_type = ast.get("type")
 
         if ast_type == "comparison":
@@ -294,7 +294,13 @@ class QdrantFilterConverter:
     @staticmethod
     def _convert_comparison(ast: dict) -> Any:
         """转换比较表达式"""
-        from qdrant_client.models import Filter, FieldCondition, MatchValue, Range, MatchAny
+        from qdrant_client.models import (
+            FieldCondition,
+            Filter,
+            MatchAny,
+            MatchValue,
+            Range,
+        )
 
         field = ast["field"]
         operator = ast["operator"]
@@ -319,13 +325,9 @@ class QdrantFilterConverter:
             elif operator == "lte":
                 range_kwargs["lte"] = value
 
-            return Filter(
-                must=[FieldCondition(key=field, range=Range(**range_kwargs))]
-            )
+            return Filter(must=[FieldCondition(key=field, range=Range(**range_kwargs))])
         elif operator == "in":
-            return Filter(
-                must=[FieldCondition(key=field, match=MatchAny(any=value))]
-            )
+            return Filter(must=[FieldCondition(key=field, match=MatchAny(any=value))])
         elif operator == "nin":
             return Filter(
                 must_not=[FieldCondition(key=field, match=MatchAny(any=value))]
@@ -345,9 +347,9 @@ class QdrantFilterConverter:
         if operator == "and":
             # 合并 must 条件
             must_conditions = []
-            if left and hasattr(left, 'must'):
+            if left and hasattr(left, "must"):
                 must_conditions.extend(left.must or [])
-            if right and hasattr(right, 'must'):
+            if right and hasattr(right, "must"):
                 must_conditions.extend(right.must or [])
 
             return Filter(must=must_conditions)
@@ -370,7 +372,7 @@ class QdrantFilterConverter:
 
         operand = QdrantFilterConverter.convert(ast["operand"])
 
-        if operand and hasattr(operand, 'must'):
+        if operand and hasattr(operand, "must"):
             # 将 must 转换为 must_not
             return Filter(must_not=operand.must)
 
@@ -425,11 +427,7 @@ class WeaviateFilterConverter:
         elif isinstance(value, bool):
             value_key = "valueBoolean"
 
-        where_filter = {
-            "path": [field],
-            "operator": weaviate_op,
-            value_key: value
-        }
+        where_filter = {"path": [field], "operator": weaviate_op, value_key: value}
 
         return where_filter
 
@@ -442,10 +440,7 @@ class WeaviateFilterConverter:
 
         weaviate_op = "And" if operator == "and" else "Or"
 
-        return {
-            "operator": weaviate_op,
-            "operands": [left, right]
-        }
+        return {"operator": weaviate_op, "operands": [left, right]}
 
     @staticmethod
     def _convert_not(ast: dict) -> dict:

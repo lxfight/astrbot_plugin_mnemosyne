@@ -165,9 +165,7 @@ def _delete_memory_records(self: "Mnemosyne", records: list[dict]) -> int:
     deleted_count = 0
     for record in records:
         record_id = (
-            record.get(PRIMARY_FIELD_NAME)
-            if db_type == "milvus"
-            else record.get("id")
+            record.get(PRIMARY_FIELD_NAME) if db_type == "milvus" else record.get("id")
         )
         if record_id is None:
             raise ValueError("查询结果缺少可删除的 memory_id/id")
@@ -483,7 +481,9 @@ async def list_records_cmd_impl(
             content_preview = content[:200] + ("..." if len(content) > 200 else "")
             record_session_id = record.get("session_id", "未知会话")
             persona_id = record.get("personality_id", "未知人格")
-            pk = record.get(PRIMARY_FIELD_NAME) or record.get("id", "未知ID")  # 获取主键
+            pk = record.get(PRIMARY_FIELD_NAME) or record.get(
+                "id", "未知ID"
+            )  # 获取主键
 
             response_lines.append(
                 f"#{i} [ID: {pk}]\n"  # 使用从 1 开始的序号
@@ -964,9 +964,7 @@ async def delete_session_memory_cmd_impl(
             f"管理员 {sender_id} 请求删除会话 '{session_id_to_delete}' 的所有记忆 (集合: {collection_name}, 表达式: '{expr}') (确认执行)"
         )
 
-        mutation_result = vector_db.delete(
-            collection_name=collection_name, expr=expr
-        )
+        mutation_result = vector_db.delete(collection_name=collection_name, expr=expr)
 
         if mutation_result:
             delete_pk_count = (
@@ -1211,7 +1209,9 @@ async def init_memory_system_cmd_impl(
             return
 
         if not self.milvus_manager:
-            yield event.plain_result("⚠️ Milvus 管理器未初始化，无法执行 Milvus 专用迁移。")
+            yield event.plain_result(
+                "⚠️ Milvus 管理器未初始化，无法执行 Milvus 专用迁移。"
+            )
             return
 
         needs_migration = False

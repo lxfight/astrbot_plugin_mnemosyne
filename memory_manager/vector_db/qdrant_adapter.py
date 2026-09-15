@@ -115,7 +115,9 @@ class QdrantVectorDB(VectorDatabase):
                 vectors_config=VectorParams(size=vector_dim, distance=distance),
             )
 
-            logger.info(f"集合 '{collection_name}' 已创建（维度: {vector_dim}, 距离: {distance_metric}）")
+            logger.info(
+                f"集合 '{collection_name}' 已创建（维度: {vector_dim}, 距离: {distance_metric}）"
+            )
 
         except Exception as e:
             logger.error(f"创建集合 '{collection_name}' 失败: {e}", exc_info=True)
@@ -222,7 +224,9 @@ class QdrantVectorDB(VectorDatabase):
             if limit is not None:
                 formatted_results = formatted_results[:limit]
 
-            logger.info(f"从集合 '{collection_name}' 查询到 {len(formatted_results)} 条结果")
+            logger.info(
+                f"从集合 '{collection_name}' 查询到 {len(formatted_results)} 条结果"
+            )
             return formatted_results
 
         except Exception as e:
@@ -312,7 +316,9 @@ class QdrantVectorDB(VectorDatabase):
                 }
                 formatted_results.append(result)
 
-            logger.info(f"从集合 '{collection_name}' 搜索到 {len(formatted_results)} 条结果")
+            logger.info(
+                f"从集合 '{collection_name}' 搜索到 {len(formatted_results)} 条结果"
+            )
             return formatted_results
 
         except Exception as e:
@@ -345,9 +351,7 @@ class QdrantVectorDB(VectorDatabase):
         return self.list_collections()
 
     def get_latest_memory(
-        self,
-        collection_name: str,
-        limit: int = 10
+        self, collection_name: str, limit: int = 10
     ) -> list[dict[str, Any]]:
         """获取最新的记忆"""
         self._ensure_connected()
@@ -371,10 +375,7 @@ class QdrantVectorDB(VectorDatabase):
                 formatted_results.append(result)
 
             # 按 create_time 降序排序
-            formatted_results.sort(
-                key=lambda x: x.get("create_time", 0),
-                reverse=True
-            )
+            formatted_results.sort(key=lambda x: x.get("create_time", 0), reverse=True)
 
             return formatted_results[:limit]
 
@@ -395,7 +396,9 @@ class QdrantVectorDB(VectorDatabase):
                     collection_name=collection_name,
                     points_selector=[direct_id],
                 )
-                logger.info(f"从集合 '{collection_name}' 删除 ID 为 '{direct_id}' 的记录")
+                logger.info(
+                    f"从集合 '{collection_name}' 删除 ID 为 '{direct_id}' 的记录"
+                )
                 return VectorDeleteResult(delete_count=1)
 
             # 解析删除条件

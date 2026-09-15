@@ -16,8 +16,6 @@ from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.provider.provider import EmbeddingProvider
 
-from .web_api import MnemosyneWebApi, PLUGIN_NAME
-
 # --- 插件内部模块导入 ---
 from .core import (
     commands,  # 导入命令处理实现模块
@@ -33,6 +31,7 @@ from .core.tools import get_event_platform_id, is_group_chat
 from .memory_manager.context_manager import ConversationContextManager
 from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db_base import VectorDatabase
+from .web_api import MnemosyneWebApi
 
 if TYPE_CHECKING:
     from .memory_manager.vector_db.milvus_manager import MilvusManager
@@ -59,7 +58,7 @@ class Mnemosyne(Star):
         self.output_fields_for_query: list[str] = []
         self.collection_name: str = DEFAULT_COLLECTION_NAME
         self.vector_db: VectorDatabase | None = None
-        self.milvus_manager: "MilvusManager | None" = None
+        self.milvus_manager: MilvusManager | None = None
         self.milvus_adapter: Any = None  # MilvusVectorDB 适配器（可选）
         self.msg_counter: MessageCounter | None = None
         self.context_manager: ConversationContextManager | None = None
@@ -78,21 +77,15 @@ class Mnemosyne(Star):
         self._injection_round_counter: dict[str, int] = {}
         self._injection_round_counter_updated_at: dict[str, float] = {}
         # LLM/tool 循环可能复建 event 对象，去重状态放在插件实例上并做有界保留。
-        self._mnemosyne_processed_request_turns: OrderedDict[
-            str, float
-        ] = OrderedDict()
-        self._mnemosyne_recorded_user_turns: OrderedDict[
-            str, float
-        ] = OrderedDict()
-        self._mnemosyne_recorded_assistant_turns: OrderedDict[
-            str, float
-        ] = OrderedDict()
-        self._mnemosyne_recorded_tool_context_turns: OrderedDict[
-            str, float
-        ] = OrderedDict()
-        self._mnemosyne_last_user_turn_by_session: OrderedDict[
-            str, str
-        ] = OrderedDict()
+        self._mnemosyne_processed_request_turns: OrderedDict[str, float] = OrderedDict()
+        self._mnemosyne_recorded_user_turns: OrderedDict[str, float] = OrderedDict()
+        self._mnemosyne_recorded_assistant_turns: OrderedDict[str, float] = (
+            OrderedDict()
+        )
+        self._mnemosyne_recorded_tool_context_turns: OrderedDict[str, float] = (
+            OrderedDict()
+        )
+        self._mnemosyne_last_user_turn_by_session: OrderedDict[str, str] = OrderedDict()
         self._post_load_tasks_started = False
         self._summary_check_task: asyncio.Task | None = None
         self._ensure_vector_db_connection_task: asyncio.Task | None = None
@@ -446,7 +439,9 @@ class Mnemosyne(Star):
                 # 主配置的关系，不产出后续步骤依赖的状态。校验失败时记录错误
                 # 并继续初始化，避免一个校验问题导致记忆读写、后台任务与
                 # 面板 API 全部失效（#148 故障链，跟踪于 #152）。
-                logger.error(f"配置检查失败（非致命，已跳过该校验）: {e}", exc_info=True)
+                logger.error(
+                    f"配置检查失败（非致命，已跳过该校验）: {e}", exc_info=True
+                )
 
             try:
                 initialization.initialize_config_and_schema(self)
@@ -488,7 +483,7 @@ class Mnemosyne(Star):
                 initialization.initialize_vector_db(self, plugin_data_dir_str)
                 self._initialized_components.append("vector_db")
                 if self.vector_db is not None:
-                    self._vector_db_ready.set()    # 标记向量数据库已就绪
+                    self._vector_db_ready.set()  # 标记向量数据库已就绪
             except Exception as e:
                 logger.warning(
                     f"向量数据库初始化失败，插件将以降级模式运行，搜索功能不可用: {e}"
@@ -1001,13 +996,17 @@ class Mnemosyne(Star):
             logger.info("正在取消向量数据库自动连接任务...")
             self._ensure_vector_db_connection_task.cancel()
             try:
-                await asyncio.wait_for(self._ensure_vector_db_connection_task, timeout=5.0)
+                await asyncio.wait_for(
+                    self._ensure_vector_db_connection_task, timeout=5.0
+                )
             except asyncio.CancelledError:
                 logger.info("向量数据库自动连接任务已成功取消。")
             except asyncio.TimeoutError:
                 logger.warning("等待向量数据库自动连接任务取消超时。")
             except Exception as e:
-                logger.error(f"等待向量数据库自动连接任务取消时发生错误: {e}", exc_info=True)
+                logger.error(
+                    f"等待向量数据库自动连接任务取消时发生错误: {e}", exc_info=True
+                )
         self._ensure_vector_db_connection_task = None
         self._ensure_milvus_connection_task = None
 
@@ -1042,7 +1041,6 @@ class Mnemosyne(Star):
             except Exception as e:
                 logger.error(f"等待后台任务取消时发生错误: {e}", exc_info=True)
         self._summary_check_task = None
-
 
         # --- 清理消息计数器数据库连接 ---
         if self.msg_counter:

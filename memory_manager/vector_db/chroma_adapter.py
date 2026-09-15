@@ -5,9 +5,9 @@ Chroma 向量数据库适配器
 
 from __future__ import annotations
 
-import time
-import os
 import logging
+import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -131,9 +131,9 @@ class ChromaVectorDB(VectorDatabase):
 
         try:
             # Chroma 自动管理 schema，直接创建或获取集合
-            collection = self._client.get_or_create_collection(
+            self._client.get_or_create_collection(
                 name=collection_name,
-                metadata={"hnsw:space": "l2"}  # 使用 L2 距离
+                metadata={"hnsw:space": "l2"},  # 使用 L2 距离
             )
             logger.info(f"集合 '{collection_name}' 已创建或获取")
 
@@ -178,6 +178,7 @@ class ChromaVectorDB(VectorDatabase):
 
                 # 生成 ID（使用时间戳 + 随机数）
                 import uuid
+
                 item_id = f"{current_timestamp}_{uuid.uuid4().hex[:8]}"
                 ids.append(item_id)
 
@@ -199,10 +200,7 @@ class ChromaVectorDB(VectorDatabase):
 
             # 批量插入
             collection.add(
-                ids=ids,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                documents=documents
+                ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents
             )
 
             logger.info(f"成功向集合 '{collection_name}' 插入 {len(ids)} 条数据")
@@ -255,7 +253,9 @@ class ChromaVectorDB(VectorDatabase):
             for i in range(len(results["ids"])):
                 result = {
                     "id": results["ids"][i],
-                    "content": results["documents"][i] if "documents" in results else "",
+                    "content": results["documents"][i]
+                    if "documents" in results
+                    else "",
                 }
 
                 # 添加元数据
@@ -264,7 +264,9 @@ class ChromaVectorDB(VectorDatabase):
 
                 formatted_results.append(result)
 
-            logger.info(f"从集合 '{collection_name}' 查询到 {len(formatted_results)} 条结果")
+            logger.info(
+                f"从集合 '{collection_name}' 查询到 {len(formatted_results)} 条结果"
+            )
             return formatted_results
 
         except Exception as e:
@@ -288,11 +290,13 @@ class ChromaVectorDB(VectorDatabase):
             ids=[record_id],
             embeddings=[embedding],
             documents=[data.get("content", "")],
-            metadatas=[{
-                "personality_id": data.get("personality_id", ""),
-                "session_id": data.get("session_id", ""),
-                "create_time": data.get("create_time", int(time.time())),
-            }],
+            metadatas=[
+                {
+                    "personality_id": data.get("personality_id", ""),
+                    "session_id": data.get("session_id", ""),
+                    "create_time": data.get("create_time", int(time.time())),
+                }
+            ],
         )
         return VectorInsertResult(insert_count=1, primary_keys=[record_id])
 
@@ -353,14 +357,16 @@ class ChromaVectorDB(VectorDatabase):
                 query_embeddings=[query_vector],
                 n_results=top_k,
                 where=where,
-                include=["metadatas", "documents", "distances"]
+                include=["metadatas", "documents", "distances"],
             )
 
             # 格式化结果
             formatted_results = []
             if results and results["ids"]:
                 for i in range(len(results["ids"][0])):
-                    distance = results["distances"][0][i] if "distances" in results else 0.0
+                    distance = (
+                        results["distances"][0][i] if "distances" in results else 0.0
+                    )
                     score = 1.0 / (1.0 + distance)  # 转换为分数
 
                     result = {
@@ -369,7 +375,9 @@ class ChromaVectorDB(VectorDatabase):
                         "_score": score,
                         "distance": distance,
                         "score": score,
-                        "content": results["documents"][0][i] if "documents" in results else "",
+                        "content": results["documents"][0][i]
+                        if "documents" in results
+                        else "",
                     }
 
                     # 添加元数据
@@ -378,7 +386,9 @@ class ChromaVectorDB(VectorDatabase):
 
                     formatted_results.append(result)
 
-            logger.info(f"从集合 '{collection_name}' 搜索到 {len(formatted_results)} 条结果")
+            logger.info(
+                f"从集合 '{collection_name}' 搜索到 {len(formatted_results)} 条结果"
+            )
             return formatted_results
 
         except Exception as e:
@@ -410,9 +420,7 @@ class ChromaVectorDB(VectorDatabase):
         return self.list_collections()
 
     def get_latest_memory(
-        self,
-        collection_name: str,
-        limit: int = 10
+        self, collection_name: str, limit: int = 10
     ) -> list[dict[str, Any]]:
         """
         获取最新的记忆
@@ -430,17 +438,16 @@ class ChromaVectorDB(VectorDatabase):
             collection = self._client.get_collection(name=collection_name)
 
             # 获取所有数据
-            results = collection.get(
-                include=["metadatas", "documents"],
-                limit=limit
-            )
+            results = collection.get(include=["metadatas", "documents"], limit=limit)
 
             # 格式化并按时间排序
             formatted_results = []
             for i in range(len(results["ids"])):
                 result = {
                     "id": results["ids"][i],
-                    "content": results["documents"][i] if "documents" in results else "",
+                    "content": results["documents"][i]
+                    if "documents" in results
+                    else "",
                 }
 
                 if "metadatas" in results and i < len(results["metadatas"]):
@@ -449,10 +456,7 @@ class ChromaVectorDB(VectorDatabase):
                 formatted_results.append(result)
 
             # 按 create_time 降序排序
-            formatted_results.sort(
-                key=lambda x: x.get("create_time", 0),
-                reverse=True
-            )
+            formatted_results.sort(key=lambda x: x.get("create_time", 0), reverse=True)
 
             return formatted_results[:limit]
 
@@ -476,7 +480,9 @@ class ChromaVectorDB(VectorDatabase):
             direct_id = self._extract_direct_id(expr)
             if direct_id:
                 collection.delete(ids=[direct_id])
-                logger.info(f"从集合 '{collection_name}' 删除 ID 为 '{direct_id}' 的记录")
+                logger.info(
+                    f"从集合 '{collection_name}' 删除 ID 为 '{direct_id}' 的记录"
+                )
                 return VectorDeleteResult(delete_count=1)
 
             # 解析删除条件
@@ -488,7 +494,9 @@ class ChromaVectorDB(VectorDatabase):
 
             if ids_to_delete:
                 collection.delete(ids=ids_to_delete)
-                logger.info(f"从集合 '{collection_name}' 删除了 {len(ids_to_delete)} 条记录")
+                logger.info(
+                    f"从集合 '{collection_name}' 删除了 {len(ids_to_delete)} 条记录"
+                )
                 return VectorDeleteResult(delete_count=len(ids_to_delete))
             else:
                 logger.info(f"集合 '{collection_name}' 中没有匹配条件的记录")
@@ -544,7 +552,7 @@ class ChromaVectorDB(VectorDatabase):
             return None
 
         try:
-            from .filter_parser import FilterParser, ChromaFilterConverter
+            from .filter_parser import ChromaFilterConverter, FilterParser
 
             # 解析为 AST
             ast = FilterParser.parse(filters)

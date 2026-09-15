@@ -48,7 +48,9 @@ class MemoryService:
         return None
 
     def _vector_db_type(self) -> str:
-        return str(getattr(self.plugin, "config", {}).get("vector_db_type", "chroma")).lower()
+        return str(
+            getattr(self.plugin, "config", {}).get("vector_db_type", "chroma")
+        ).lower()
 
     @staticmethod
     def _native_id_expr(memory_id: str) -> str:
@@ -102,9 +104,7 @@ class MemoryService:
 
             if request.session_id:
                 expr_parts.append(
-                    safe_build_milvus_expression(
-                        "session_id", request.session_id, "=="
-                    )
+                    safe_build_milvus_expression("session_id", request.session_id, "==")
                 )
 
             # 注意：persona_id 字段可能不存在，需要先检查
@@ -197,7 +197,9 @@ class MemoryService:
                         key=lambda item: item.get("create_time", 0) or 0,
                         reverse=True,
                     )
-                    results = all_results[request.offset : request.offset + request.limit]
+                    results = all_results[
+                        request.offset : request.offset + request.limit
+                    ]
                     for result in results:
                         record = _to_record(result)
                         if record is not None:
@@ -486,10 +488,10 @@ class MemoryService:
             vector_db.flush([collection_name])
             if result.insert_count != 1:
                 raise RuntimeError("向量数据库未确认更新操作")
-            updated_id = str(result.primary_keys[0]) if result.primary_keys else memory_id
-            return self._updated_memory_response(
-                memory_id, updated_id, updated_payload
+            updated_id = (
+                str(result.primary_keys[0]) if result.primary_keys else memory_id
             )
+            return self._updated_memory_response(memory_id, updated_id, updated_payload)
 
         # Milvus 集合使用 AutoID，无法原地保留主键。删除前同时生成旧向量，
         # 这样新记录插入失败时仍可恢复原内容。
@@ -505,10 +507,7 @@ class MemoryService:
 
         delete_result = vector_db.delete(collection_name, filters)
         vector_db.flush([collection_name])
-        if (
-            delete_result.delete_count is not None
-            and delete_result.delete_count < 1
-        ):
+        if delete_result.delete_count is not None and delete_result.delete_count < 1:
             raise RuntimeError("原记忆删除失败，更新已取消")
 
         try:
@@ -580,7 +579,9 @@ class MemoryService:
             try:
                 expr = safe_build_milvus_expression("session_id", session_id, "==")
             except ValueError:
-                self.logger.warning(f"删除会话记忆失败：session_id 格式无效: {session_id}")
+                self.logger.warning(
+                    f"删除会话记忆失败：session_id 格式无效: {session_id}"
+                )
                 return 0
 
             # 先查询记忆数量

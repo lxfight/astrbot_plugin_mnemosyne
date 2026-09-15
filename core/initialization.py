@@ -21,6 +21,7 @@ except ImportError:
         FLOAT_VECTOR = "FLOAT_VECTOR"
         BINARY_VECTOR = "BINARY_VECTOR"
 
+
 from astrbot.api.star import StarTools
 from astrbot.core.log import LogManager
 
@@ -36,7 +37,6 @@ from .constants import (
     SESSION_ID_MAX_LENGTH,
     VECTOR_FIELD_NAME,
 )
-from .tools import parse_address
 
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
@@ -135,9 +135,9 @@ def initialize_config_check(plugin: "Mnemosyne"):
     # agent_runner.config.compression.max_turns（见 core/utils/migra_helper.py），
     # 旧键在新版配置中不存在，硬索引会抛 KeyError 中断整个插件初始化。
     # 这里先读旧键，读不到再读新键；均缺失时按 -1（不限制）处理。
-    astrbot_max_context_length = (astrbot_config or {}).get(
-        "provider_settings", {}
-    ).get("max_context_length")
+    astrbot_max_context_length = (
+        (astrbot_config or {}).get("provider_settings", {}).get("max_context_length")
+    )
     if astrbot_max_context_length is None:
         astrbot_max_context_length = (
             (astrbot_config or {})
@@ -348,9 +348,7 @@ def initialize_vector_db(plugin: "Mnemosyne", plugin_data_dir: str | None = None
         from ..memory_manager.vector_db.factory import VectorDatabaseFactory
 
         vector_db = VectorDatabaseFactory.create_vector_db(
-            db_type=db_type,
-            config=plugin.config,
-            plugin_data_dir=plugin_data_dir
+            db_type=db_type, config=plugin.config, plugin_data_dir=plugin_data_dir
         )
 
         # 保存数据库实例（兼容旧代码）
@@ -373,9 +371,7 @@ def initialize_vector_db(plugin: "Mnemosyne", plugin_data_dir: str | None = None
         init_logger.debug("向量数据库初始化流程成功完成")
 
     except Exception as e:
-        init_logger.error(
-            f"向量数据库初始化或设置过程中发生错误: {e}", exc_info=True
-        )
+        init_logger.error(f"向量数据库初始化或设置过程中发生错误: {e}", exc_info=True)
         plugin.vector_db = None
         plugin.milvus_manager = None
         plugin.milvus_adapter = None
@@ -394,309 +390,10 @@ def initialize_milvus(plugin: "Mnemosyne", plugin_data_dir: str | None = None):
         plugin_data_dir: 插件数据目录路径，必须从 main.py 传入
     """
     init_logger.warning(
-        "initialize_milvus 已被弃用，建议使用 initialize_vector_db。"
-        "将自动调用新函数..."
+        "initialize_milvus 已被弃用，建议使用 initialize_vector_db。将自动调用新函数..."
     )
     initialize_vector_db(plugin, plugin_data_dir)
     return
-    """
-    初始化 MilvusManager。
-    根据配置决定连接到 Milvus Lite 或标准 Milvus 服务器，
-    并进行必要的集合与索引设置。
-
-    注意：Windows 系统不支持 Milvus Lite，自动使用标准 Milvus。
-
-    Args:
-        plugin: Mnemosyne 插件实例
-        plugin_data_dir: 插件数据目录路径，必须从 main.py 传入
-    """
-    init_logger.debug("开始初始化 Milvus 连接和设置...")
-
-    # 验证必须的 plugin_data_dir 参数
-    if plugin_data_dir is None:
-        init_logger.error("initialize_milvus 必须接收 plugin_data_dir 参数")
-        raise ValueError("plugin_data_dir 参数不能为 None，必须从 main.py 传入")
-
-    connect_args = {}  # 用于收集传递给 MilvusManager 的参数
-    is_lite_mode = False  # 标记是否为 Lite 模式
-
-    # 检测操作系统：Windows 不支持 Milvus Lite
-    is_windows = platform.system() == "Windows"
-    if is_windows:
-        init_logger.info(
-            "检测到 Windows 系统，Milvus Lite 不支持 Windows，将使用标准 Milvus"
-        )
-
-    try:
-        # 1. 优先检查 Milvus Lite 配置（仅在非 Windows 系统上）
-        lite_path = plugin.config.get("milvus_lite_path", "") if not is_windows else ""
-
-        # 2. 获取标准 Milvus 的地址配置
-        milvus_address = plugin.config.get("address")
-
-        # ========== 修复：在创建 MilvusManager 前主动准备 Milvus Lite 数据目录 ==========
-        # 这是为了解决 issue 中描述的问题：当用户删除 milvus_data 文件夹后重载插件，
-        # 应该自动重新创建目录，而不是等到连接时才发现目录不存在
-        if lite_path and not is_windows:
-            # 用户显式配置了 Milvus Lite 路径
-            is_lite_mode = True
-            init_logger.info("检测到 Milvus Lite 配置，提前准备数据目录...")
-
-            try:
-                from pathlib import Path  # noqa: I001
-                import os
-
-                # 使用传入的插件数据目录
-                data_dir_path = Path(plugin_data_dir)
-
-                # 确定数据库文件的完整路径
-                if os.path.isabs(lite_path):
-                    db_file_path = lite_path
-                else:
-                    # 相对路径，相对于插件数据目录
-                    db_file_path = str(data_dir_path / lite_path)
-
-                # 如果路径不是以 .db 结尾，附加默认文件名
-                if not db_file_path.endswith(".db"):
-                    db_file_path = os.path.join(db_file_path, "mnemosyne_lite.db")
-
-                # 获取目录路径
-                db_dir = os.path.dirname(db_file_path)
-
-                # 主动创建目录
-                if not os.path.exists(db_dir):
-                    init_logger.info(f"Milvus Lite 数据目录不存在，正在创建: {db_dir}")
-                    os.makedirs(db_dir, exist_ok=True)
-                    init_logger.info(f"✅ 已成功创建 Milvus Lite 数据目录: {db_dir}")
-                else:
-                    init_logger.debug(f"✅ Milvus Lite 数据目录已存在: {db_dir}")
-
-                # 验证目录可写
-                if not os.access(db_dir, os.W_OK):
-                    raise PermissionError(f"Milvus Lite 数据目录不可写: {db_dir}")
-
-                init_logger.info(f"✅ Milvus Lite 数据目录验证通过: {db_dir}")
-
-            except Exception as e:
-                init_logger.error(f"准备 Milvus Lite 数据目录失败: {e}", exc_info=True)
-                raise RuntimeError(f"无法初始化 Milvus Lite 数据目录: {e}") from e
-
-        elif not lite_path and not milvus_address and not is_windows:
-            # 既没有配置 lite_path 也没有配置 address，将使用默认 Lite 模式
-            is_lite_mode = True
-            init_logger.warning(
-                "未配置 Milvus Lite 路径和标准 Milvus 地址，将使用默认 Milvus Lite 模式"
-            )
-
-            try:
-                from pathlib import Path  # noqa: I001
-                import os
-
-                # 使用传入的插件数据目录作为默认目录
-                db_dir = Path(plugin_data_dir)
-
-                # 确保默认数据目录存在
-                if not db_dir.exists():
-                    init_logger.info(f"创建默认 Milvus Lite 数据目录: {db_dir}")
-                    db_dir.mkdir(parents=True, exist_ok=True)
-                    init_logger.info(f"✅ 已创建默认数据目录: {db_dir}")
-                else:
-                    init_logger.debug(f"✅ 默认数据目录已存在: {db_dir}")
-
-                # 验证目录可写
-                if not os.access(str(db_dir), os.W_OK):
-                    raise PermissionError(f"默认数据目录不可写: {db_dir}")
-
-                init_logger.info(f"✅ 默认 Milvus Lite 数据目录验证通过: {db_dir}")
-
-            except Exception as e:
-                init_logger.error(
-                    f"准备默认 Milvus Lite 数据目录失败: {e}", exc_info=True
-                )
-                raise RuntimeError(f"无法初始化默认数据目录: {e}") from e
-        # ========== 修复结束 ==========
-
-        if lite_path and not is_windows:
-            # --- 检测到 Milvus Lite 配置（非 Windows）---
-            init_logger.info(f"检测到 Milvus Lite 配置，将使用本地路径: '{lite_path}'")
-            connect_args["lite_path"] = lite_path
-            is_lite_mode = True
-            if milvus_address:
-                init_logger.warning(
-                    f"同时配置了 'milvus_lite_path' 和 'address'，将优先使用 Lite 路径，忽略 'address' ('{milvus_address}')。"
-                )
-
-        elif milvus_address:
-            # --- 未配置 Lite 路径或为 Windows 系统，使用标准 Milvus 地址 ---
-            init_logger.info(
-                f"将根据 'address' 配置连接标准 Milvus: '{milvus_address}'"
-            )
-            is_lite_mode = False
-            # 判断 address 是 URI 还是 host:port
-            if milvus_address.startswith(("http://", "https://", "unix:")):
-                init_logger.debug(f"地址 '{milvus_address}' 被识别为 URI。")
-                connect_args["uri"] = milvus_address
-            else:
-                init_logger.debug(f"地址 '{milvus_address}' 将被解析为 host:port。")
-                try:
-                    host, port = parse_address(milvus_address)  # 使用工具函数解析
-                    connect_args["host"] = host
-                    connect_args["port"] = port
-                except ValueError as e:
-                    raise ValueError(
-                        f"解析标准 Milvus 地址 '{milvus_address}' (host:port 格式) 失败: {e}"
-                    ) from e
-        else:
-            # --- 既没有 Lite 路径也没有标准地址 ---
-            init_logger.warning(
-                "未配置 Milvus Lite 路径和标准 Milvus 地址。将使用标准插件数据目录"
-            )
-
-        # 3. 添加通用参数 (对 Lite 和 Standard 都可能有效)
-        #    添加数据库名称 (db_name)
-        db_name = plugin.config.get("db_name", "default")  # 提供默认值 'default'
-        # 只有当 db_name 不是 'default' 时才显式添加到参数中，以保持简洁
-        if db_name != "default":
-            connect_args["db_name"] = db_name
-            init_logger.info(f"将尝试连接到数据库: '{db_name}'。")
-        else:
-            init_logger.debug("将使用默认数据库 'default'。")
-
-        #    设置连接别名
-        #    如果未配置，生成一个基于集合名的默认别名
-        alias = plugin.config.get(
-            "connection_alias", f"mnemosyne_{plugin.collection_name}"
-        )
-        connect_args["alias"] = alias
-        init_logger.debug(f"设置 Milvus 连接别名为: '{alias}'。")
-
-        # 4. 添加仅适用于标准 Milvus 的参数 (如果不是 Lite 模式)
-        if not is_lite_mode:
-            init_logger.debug("为标准 Milvus 连接添加认证和安全设置（如果已配置）。")
-            # 安全地获取认证配置字典，如果不存在则为空字典
-            auth_config = plugin.config.get("authentication", {})
-
-            # 添加可选的认证和安全参数
-            added_auth_params = []
-            for key in ["user", "password", "token", "secure"]:
-                if key in auth_config and auth_config[key] is not None:
-                    # 特别处理 'secure'，确保它是布尔值
-                    if key == "secure":
-                        value = auth_config[key]
-                        if isinstance(value, str):
-                            # 从字符串 'true'/'false' (不区分大小写) 转为布尔值
-                            secure_bool = value.lower() == "true"
-                        else:
-                            # 尝试直接转为布尔值
-                            secure_bool = bool(value)
-                        connect_args[key] = secure_bool
-                        added_auth_params.append(f"{key}={secure_bool}")
-                    else:
-                        connect_args[key] = auth_config[key]
-                        # 安全处理：永远不记录 password 和 token 的真实值
-                        if key not in ["password", "token"]:
-                            added_auth_params.append(f"{key}={auth_config[key]}")
-                        else:
-                            # 使用脱敏处理，只显示配置项存在
-                            added_auth_params.append(f"{key}=***")  # 隐藏敏感值
-
-            if added_auth_params:
-                init_logger.info(
-                    f"从配置中添加了标准连接参数: {', '.join(added_auth_params)}"
-                )
-            else:
-                init_logger.debug("未找到额外的认证或安全配置。")
-
-        else:  # is_lite_mode is True
-            # 检查并警告：如果在 Lite 模式下配置了不适用的参数
-            auth_config = plugin.config.get("authentication", {})
-            ignored_keys = [
-                k
-                for k in ["user", "password", "token", "secure"]
-                if k in auth_config and auth_config[k] is not None
-            ]
-            if ignored_keys:
-                init_logger.warning(
-                    f"当前为 Milvus Lite 模式，配置中的以下认证/安全参数将被忽略: {ignored_keys}"
-                )
-
-        # 5. 将插件数据目录添加到连接参数中
-        connect_args["plugin_data_dir"] = plugin_data_dir
-        init_logger.debug(f"已将插件数据目录添加到连接参数: {plugin_data_dir}")
-
-        # 6. 选择使用 MilvusManager 或 MilvusVectorDB
-        use_adapter = plugin.config.get("use_milvus_adapter", False)
-
-        # 安全处理：创建用于日志记录的参数副本，敏感信息脱敏
-        loggable_connect_args = {}
-        for k, v in connect_args.items():
-            if k in ["password", "token"]:
-                loggable_connect_args[k] = "***"  # 完全隐藏敏感值
-            elif k == "plugin_data_dir":
-                loggable_connect_args[k] = v  # 数据目录不是敏感信息，可以显示
-            else:
-                loggable_connect_args[k] = v
-
-        if use_adapter:
-            # 使用新的 MilvusVectorDB 适配器
-            init_logger.info(
-                f"准备使用以下参数初始化 MilvusVectorDB 适配器: {loggable_connect_args}"
-            )
-            plugin.milvus_adapter = MilvusVectorDB(**connect_args)
-
-            # 不再在初始化时检查连接，而是延迟到首次使用时
-            if not plugin.milvus_adapter:
-                raise RuntimeError("创建 MilvusVectorDB 适配器实例失败。请检查配置。")
-
-            mode_name = (
-                "Milvus Lite"
-                if plugin.milvus_adapter._manager._is_lite
-                else "标准 Milvus"
-            )
-            init_logger.info(
-                f"MilvusVectorDB 适配器已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。"
-            )
-
-            # 为了向后兼容，将适配器的 manager 赋值给 milvus_manager
-            plugin.milvus_manager = plugin.milvus_adapter._manager
-        else:
-            # 使用原始的 MilvusManager（默认，保持向后兼容）
-            init_logger.info(
-                f"准备使用以下参数初始化 MilvusManager: {loggable_connect_args}"
-            )
-
-            # 创建 MilvusManager 实例
-            # 注意：不在初始化时立即连接，而是延迟到首次使用时连接
-            # 这样可以容错处理配置检查和初始化步骤
-            plugin.milvus_manager = MilvusManager(**connect_args)
-
-            # 6. 不再在初始化时检查连接，而是记录已准备好
-            if not plugin.milvus_manager:
-                mode_name = "Milvus Lite" if is_lite_mode else "标准 Milvus"
-                raise RuntimeError("创建 MilvusManager 实例失败。请检查配置。")
-
-            mode_name = (
-                "Milvus Lite" if plugin.milvus_manager._is_lite else "标准 Milvus"
-            )
-            init_logger.info(
-                f"MilvusManager 已初始化，连接将在首次使用时建立 ({mode_name}, 别名: {alias})。"
-            )
-
-        # 7. 设置集合和索引 - 延迟创建策略
-        init_logger.debug("开始设置 Milvus 集合和索引...")
-        # 使用 skip_if_not_ready=True，如果 embedding provider 未就绪则跳过
-        setup_milvus_collection_and_index(plugin, skip_if_not_ready=True)
-        init_logger.info("Milvus 集合和索引设置流程已调用。")
-
-        init_logger.debug("Milvus 初始化流程成功完成。")
-
-    except Exception as e:
-        init_logger.error(
-            f"Milvus 初始化或设置过程中发生错误: {e}", exc_info=True
-        )  # exc_info=True 会记录堆栈跟踪
-        plugin.milvus_manager = None  # 确保在初始化失败时 manager 被设为 None
-        # 不再抛出异常，允许插件以降级模式运行
-
 
 
 def setup_vector_db_collection_and_index(
@@ -748,8 +445,7 @@ def setup_vector_db_collection_and_index(
 
     except Exception as e:
         init_logger.error(
-            f"向量数据库连接失败: {e}\n"
-            f"提示：请检查数据库服务是否运行和网络连接",
+            f"向量数据库连接失败: {e}\n提示：请检查数据库服务是否运行和网络连接",
             exc_info=True,
         )
         raise ConnectionError(f"无法连接到向量数据库: {e}") from e
@@ -808,7 +504,6 @@ def setup_milvus_collection_and_index(
         skip_if_not_ready: 如果为 True，当 embedding_provider 未就绪时跳过集合创建
     """
     setup_vector_db_collection_and_index(plugin, skip_if_not_ready)
-
 
 
 def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):

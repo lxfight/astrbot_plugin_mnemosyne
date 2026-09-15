@@ -60,7 +60,9 @@ class WeaviateVectorDB(VectorDatabase):
 
             if self._embedded:
                 # 嵌入式模式
-                logger.info(f"使用嵌入式模式连接 Weaviate: {self._persistence_data_path}")
+                logger.info(
+                    f"使用嵌入式模式连接 Weaviate: {self._persistence_data_path}"
+                )
                 self._client = weaviate.Client(
                     embedded_options=weaviate.embedded.EmbeddedOptions(
                         persistence_data_path=self._persistence_data_path
@@ -86,7 +88,9 @@ class WeaviateVectorDB(VectorDatabase):
             logger.info("WeaviateVectorDB 连接成功")
 
         except ImportError:
-            logger.error("weaviate-client 库未安装，请运行: pip install weaviate-client")
+            logger.error(
+                "weaviate-client 库未安装，请运行: pip install weaviate-client"
+            )
             raise RuntimeError(
                 "weaviate-client 库未安装。请在 requirements.txt 中添加 weaviate-client 并安装"
             )
@@ -237,7 +241,9 @@ class WeaviateVectorDB(VectorDatabase):
             if "data" in result and "Get" in result["data"]:
                 objects = result["data"]["Get"].get(class_name, [])
                 for obj in objects:
-                    additional = obj.pop("_additional", {}) if isinstance(obj, dict) else {}
+                    additional = (
+                        obj.pop("_additional", {}) if isinstance(obj, dict) else {}
+                    )
                     item = dict(obj)
                     item["id"] = additional.get("id", "")
                     formatted_results.append(item)
@@ -314,7 +320,7 @@ class WeaviateVectorDB(VectorDatabase):
             query = (
                 self._client.query.get(
                     class_name,
-                    ["content", "personality_id", "session_id", "create_time"]
+                    ["content", "personality_id", "session_id", "create_time"],
                 )
                 .with_near_vector({"vector": query_vector})
                 .with_limit(top_k)
@@ -384,9 +390,7 @@ class WeaviateVectorDB(VectorDatabase):
         return self.list_collections()
 
     def get_latest_memory(
-        self,
-        collection_name: str,
-        limit: int = 10
+        self, collection_name: str, limit: int = 10
     ) -> list[dict[str, Any]]:
         """获取最新的记忆"""
         self._ensure_connected()
@@ -398,7 +402,7 @@ class WeaviateVectorDB(VectorDatabase):
             result = (
                 self._client.query.get(
                     class_name,
-                    ["content", "personality_id", "session_id", "create_time"]
+                    ["content", "personality_id", "session_id", "create_time"],
                 )
                 .with_limit(limit)
                 .with_sort([{"path": ["create_time"], "order": "desc"}])

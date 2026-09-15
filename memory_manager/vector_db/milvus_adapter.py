@@ -583,8 +583,10 @@ class MilvusVectorDB(VectorDatabase):
     def _flatten_search_result(result: dict[str, Any]) -> dict[str, Any]:
         """将 MilvusManager 的统一搜索包装转成记忆记录。"""
         entity = result.get("entity", {})
-        if isinstance(entity, dict) and "entity" in entity and isinstance(
-            entity.get("entity"), dict
+        if (
+            isinstance(entity, dict)
+            and "entity" in entity
+            and isinstance(entity.get("entity"), dict)
         ):
             entity = entity["entity"]
         record = dict(entity) if isinstance(entity, dict) else {}

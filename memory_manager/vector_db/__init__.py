@@ -17,6 +17,7 @@
 3. 使用 schema_utils 模块中的函数进行 Schema 转换和验证
 """
 
+
 # 定义一个虚拟的 MilvusDatabase 类以保持向后兼容性
 class MilvusDatabase:
     """虚拟的 MilvusDatabase 类，用于向后兼容（原文件已删除）"""

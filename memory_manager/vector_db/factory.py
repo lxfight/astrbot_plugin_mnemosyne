@@ -57,9 +57,7 @@ class VectorDatabaseFactory:
 
     @staticmethod
     def create_vector_db(
-        db_type: str,
-        config: dict[str, Any],
-        plugin_data_dir: str | None = None
+        db_type: str, config: dict[str, Any], plugin_data_dir: str | None = None
     ) -> VectorDatabase:
         """
         根据数据库类型创建相应的向量数据库实例
@@ -96,8 +94,7 @@ class VectorDatabaseFactory:
 
     @staticmethod
     def _create_milvus(
-        config: dict[str, Any],
-        plugin_data_dir: str | None = None
+        config: dict[str, Any], plugin_data_dir: str | None = None
     ) -> VectorDatabase:
         """
         创建 Milvus 向量数据库实例
@@ -171,8 +168,7 @@ class VectorDatabaseFactory:
 
     @staticmethod
     def _create_chroma(
-        config: dict[str, Any],
-        plugin_data_dir: str | None = None
+        config: dict[str, Any], plugin_data_dir: str | None = None
     ) -> VectorDatabase:
         """
         创建 Chroma 向量数据库实例
@@ -192,6 +188,7 @@ class VectorDatabaseFactory:
         if not persist_directory and plugin_data_dir:
             # 使用默认目录
             from pathlib import Path
+
             persist_directory = str(Path(plugin_data_dir) / "chroma_data")
 
         # 客户端模式配置
@@ -205,18 +202,12 @@ class VectorDatabaseFactory:
             if host:
                 # 使用客户端模式
                 logger.info(f"使用 Chroma 客户端模式: {host}:{port}")
-                return vector_db_class(
-                    host=host,
-                    port=port,
-                    persist_directory=None
-                )
+                return vector_db_class(host=host, port=port, persist_directory=None)
             else:
                 # 使用本地持久化模式
                 logger.info(f"使用 Chroma 本地持久化模式: {persist_directory}")
                 return vector_db_class(
-                    persist_directory=persist_directory,
-                    host=None,
-                    port=None
+                    persist_directory=persist_directory, host=None, port=None
                 )
         except Exception as e:
             logger.error(f"创建 Chroma 数据库实例失败: {e}", exc_info=True)
@@ -224,8 +215,7 @@ class VectorDatabaseFactory:
 
     @staticmethod
     def _create_qdrant(
-        config: dict[str, Any],
-        plugin_data_dir: str | None = None
+        config: dict[str, Any], plugin_data_dir: str | None = None
     ) -> VectorDatabase:
         """
         创建 Qdrant 向量数据库实例
@@ -245,6 +235,7 @@ class VectorDatabaseFactory:
         if not path and plugin_data_dir:
             # 使用默认目录
             from pathlib import Path
+
             path = str(Path(plugin_data_dir) / "qdrant_data")
 
         # 客户端模式配置
@@ -282,8 +273,7 @@ class VectorDatabaseFactory:
 
     @staticmethod
     def _create_weaviate(
-        config: dict[str, Any],
-        plugin_data_dir: str | None = None
+        config: dict[str, Any], plugin_data_dir: str | None = None
     ) -> VectorDatabase:
         """
         创建 Weaviate 向量数据库实例
@@ -304,6 +294,7 @@ class VectorDatabaseFactory:
 
         if embedded and not persistence_data_path and plugin_data_dir:
             from pathlib import Path
+
             persistence_data_path = str(Path(plugin_data_dir) / "weaviate_data")
 
         # 客户端模式

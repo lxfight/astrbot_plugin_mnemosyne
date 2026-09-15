@@ -6,17 +6,16 @@ Mnemosyne 插件 AstrBot Pages Web API handlers。
 - 失败: 返回 {"status": "error", "message": "错误信息"}
 - 文件下载: 返回 Quart Response 对象（Content-Disposition: attachment）
 """
+
 from __future__ import annotations
 
-import csv
-import io
-import json
 import re
 from datetime import datetime
 from typing import Any
 
-from astrbot.api import logger
 from quart import Response, jsonify, request
+
+from astrbot.api import logger
 
 from .admin_panel.models.memory import MemorySearchRequest
 from .admin_panel.services.memory_service import MemoryService
@@ -42,21 +41,63 @@ class MnemosyneWebApi:
         register = self.plugin.context.register_web_api
 
         # --- 监控 API ---
-        register(f"/{PLUGIN_NAME}/monitoring/dashboard", self.get_dashboard_data, ["GET"], "")
-        register(f"/{PLUGIN_NAME}/monitoring/status", self.get_system_status, ["GET"], "")
-        register(f"/{PLUGIN_NAME}/monitoring/metrics", self.get_performance_metrics, ["GET"], "")
-        register(f"/{PLUGIN_NAME}/monitoring/resources", self.get_resource_usage, ["GET"], "")
+        register(
+            f"/{PLUGIN_NAME}/monitoring/dashboard", self.get_dashboard_data, ["GET"], ""
+        )
+        register(
+            f"/{PLUGIN_NAME}/monitoring/status", self.get_system_status, ["GET"], ""
+        )
+        register(
+            f"/{PLUGIN_NAME}/monitoring/metrics",
+            self.get_performance_metrics,
+            ["GET"],
+            "",
+        )
+        register(
+            f"/{PLUGIN_NAME}/monitoring/resources", self.get_resource_usage, ["GET"], ""
+        )
 
         # --- 记忆管理 API ---
-        register(f"/{PLUGIN_NAME}/memories/search", self.search_memories, ["GET", "POST"], "")
-        register(f"/{PLUGIN_NAME}/memories/statistics", self.get_memory_statistics, ["GET"], "")
-        register(f"/{PLUGIN_NAME}/memories/sessions", self.get_session_list, ["GET"], "")
-        register(f"/{PLUGIN_NAME}/memories/delete", self.batch_delete_memories, ["POST"], "")
-        register(f"/{PLUGIN_NAME}/memories/<memory_id>/update", self.update_single_memory, ["POST"], "")
-        register(f"/{PLUGIN_NAME}/memories/<memory_id>/delete", self.delete_single_memory, ["POST"], "")
-        register(f"/{PLUGIN_NAME}/memories/session/<session_id>/delete", self.delete_session_memories, ["POST"], "")
+        register(
+            f"/{PLUGIN_NAME}/memories/search", self.search_memories, ["GET", "POST"], ""
+        )
+        register(
+            f"/{PLUGIN_NAME}/memories/statistics",
+            self.get_memory_statistics,
+            ["GET"],
+            "",
+        )
+        register(
+            f"/{PLUGIN_NAME}/memories/sessions", self.get_session_list, ["GET"], ""
+        )
+        register(
+            f"/{PLUGIN_NAME}/memories/delete", self.batch_delete_memories, ["POST"], ""
+        )
+        register(
+            f"/{PLUGIN_NAME}/memories/<memory_id>/update",
+            self.update_single_memory,
+            ["POST"],
+            "",
+        )
+        register(
+            f"/{PLUGIN_NAME}/memories/<memory_id>/delete",
+            self.delete_single_memory,
+            ["POST"],
+            "",
+        )
+        register(
+            f"/{PLUGIN_NAME}/memories/session/<session_id>/delete",
+            self.delete_session_memories,
+            ["POST"],
+            "",
+        )
         register(f"/{PLUGIN_NAME}/memories/export", self.export_memories, ["GET"], "")
-        register(f"/{PLUGIN_NAME}/memories/vector-search", self.vector_search_memories, ["POST"], "")
+        register(
+            f"/{PLUGIN_NAME}/memories/vector-search",
+            self.vector_search_memories,
+            ["POST"],
+            "",
+        )
 
         # --- 配置 API ---
         register(f"/{PLUGIN_NAME}/config", self.get_config, ["GET"], "")
@@ -72,11 +113,13 @@ class MnemosyneWebApi:
             status = await self.monitoring_service.get_system_status()
             metrics = self.monitoring_service.get_performance_metrics()
             resources = await self.monitoring_service.get_resource_usage()
-            return jsonify({
-                "status": status.to_dict(),
-                "metrics": metrics.to_dict(),
-                "resources": resources.to_dict(),
-            })
+            return jsonify(
+                {
+                    "status": status.to_dict(),
+                    "metrics": metrics.to_dict(),
+                    "resources": resources.to_dict(),
+                }
+            )
         except Exception as e:
             logger.error(f"获取仪表板数据失败: {e}", exc_info=True)
             return jsonify(self._error(str(e)))
@@ -84,7 +127,9 @@ class MnemosyneWebApi:
     async def get_system_status(self) -> Any:
         try:
             force_refresh = request.args.get("force_refresh", "false").lower() == "true"
-            status = await self.monitoring_service.get_system_status(force_refresh=force_refresh)
+            status = await self.monitoring_service.get_system_status(
+                force_refresh=force_refresh
+            )
             return jsonify(status.to_dict())
         except Exception as e:
             logger.error(f"获取系统状态失败: {e}", exc_info=True)
@@ -142,10 +187,15 @@ class MnemosyneWebApi:
             end_datetime = datetime.fromisoformat(end_date) if end_date else None
 
             search_req = MemorySearchRequest(
-                session_id=session_id, keyword=keyword,
-                start_date=start_datetime, end_date=end_datetime,
-                persona_id=persona_id, limit=limit, offset=offset,
-                sort_by=sort_by, sort_order=sort_order,
+                session_id=session_id,
+                keyword=keyword,
+                start_date=start_datetime,
+                end_date=end_datetime,
+                persona_id=persona_id,
+                limit=limit,
+                offset=offset,
+                sort_by=sort_by,
+                sort_order=sort_order,
             )
             response = await self.memory_service.search_memories(search_req)
             return jsonify(response.to_dict())
@@ -255,8 +305,10 @@ class MnemosyneWebApi:
             end_datetime = datetime.fromisoformat(end_date) if end_date else None
 
             content = await self.memory_service.export_memories(
-                format=fmt, session_id=session_id,
-                start_date=start_datetime, end_date=end_datetime,
+                format=fmt,
+                session_id=session_id,
+                start_date=start_datetime,
+                end_date=end_datetime,
             )
             if content is None:
                 return jsonify(self._error("导出失败"))
