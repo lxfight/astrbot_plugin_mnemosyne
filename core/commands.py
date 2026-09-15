@@ -1,7 +1,9 @@
 # Mnemosyne 插件的命令处理函数实现
 # (注意：装饰器已移除，函数接收 self)
 
+import asyncio
 import json
+import math
 import re
 import time as time_module
 from datetime import datetime
@@ -11,8 +13,12 @@ from typing import TYPE_CHECKING
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME
-from .security_utils import safe_build_milvus_expression, validate_session_id
+from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME, VECTOR_FIELD_NAME
+from .security_utils import (
+    safe_build_milvus_expression,
+    validate_safe_path,
+    validate_session_id,
+)
 from .tools import resolve_max_prompt_chars, truncate_for_embedding
 
 if TYPE_CHECKING:
@@ -39,6 +45,171 @@ def _build_memory_id_expression(memory_id: str) -> str:
         return f"memory_id == {int(normalized)}"
     except ValueError:
         return f'memory_id == "{normalized}"'
+
+
+def _parse_command_timestamp(value: str, label: str) -> float:
+    """Parse a Unix timestamp or ISO 8601 command argument.
+
+    Args:
+        value: Timestamp text supplied by a command.
+        label: Human-readable argument name for validation errors.
+
+    Returns:
+        The parsed Unix timestamp in seconds.
+
+    Raises:
+        ValueError: If the value is not a supported timestamp.
+    """
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ValueError(f"{label}不能为空")
+    try:
+        if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", normalized):
+            timestamp = float(normalized)
+            if not math.isfinite(timestamp):
+                raise ValueError("timestamp must be finite")
+            return timestamp
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+        return datetime.fromisoformat(normalized).timestamp()
+    except (TypeError, ValueError, OverflowError, OSError) as exc:
+        raise ValueError(
+            f"{label}格式无效，请使用 Unix 时间戳、YYYY-MM-DD 或 ISO 8601 日期时间"
+        ) from exc
+
+
+def _query_memory_records(
+    self: "Mnemosyne",
+    session_id: str | None = None,
+    start_timestamp: float | None = None,
+    end_timestamp: float | None = None,
+) -> tuple[list[dict], bool]:
+    """Query and locally filter memory records for administration commands.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        session_id: Optional session ID. ``None`` queries all sessions.
+        start_timestamp: Inclusive lower timestamp bound.
+        end_timestamp: Exclusive upper timestamp bound.
+
+    Returns:
+        A tuple containing matching records and a safety-limit flag.
+
+    Raises:
+        RuntimeError: If the vector database is unavailable.
+    """
+    vector_db = _get_vector_db(self)
+    if not vector_db or not vector_db.is_connected():
+        raise RuntimeError("向量数据库未初始化或未连接")
+
+    filters: list[str] = []
+    if session_id:
+        filters.append(safe_build_milvus_expression("session_id", session_id, "=="))
+    if start_timestamp is not None:
+        filters.append(
+            safe_build_milvus_expression("create_time", start_timestamp, ">=")
+        )
+    if end_timestamp is not None:
+        filters.append(safe_build_milvus_expression("create_time", end_timestamp, "<"))
+    expression = " and ".join(filters) if filters else None
+    db_type = self.config.get("vector_db_type", "chroma").lower()
+    output_fields = ["content", "create_time", "session_id", "personality_id"]
+    if db_type == "milvus":
+        output_fields.append(PRIMARY_FIELD_NAME)
+
+    records = (
+        vector_db.query(
+            collection_name=self.collection_name,
+            filters=expression,
+            output_fields=output_fields,
+            limit=MAX_TOTAL_FETCH_RECORDS,
+        )
+        or []
+    )
+    reached_limit = len(records) >= MAX_TOTAL_FETCH_RECORDS
+    matched_records: list[dict] = []
+    for record in records:
+        if session_id and record.get("session_id") != session_id:
+            continue
+        try:
+            create_time = float(record.get("create_time"))
+        except (TypeError, ValueError):
+            continue
+        if start_timestamp is not None and create_time < start_timestamp:
+            continue
+        if end_timestamp is not None and create_time >= end_timestamp:
+            continue
+        matched_records.append(record)
+    return matched_records, reached_limit
+
+
+def _delete_memory_records(self: "Mnemosyne", records: list[dict]) -> int:
+    """Delete records using IDs that match the active vector database backend.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        records: Records selected for deletion.
+
+    Returns:
+        The known number of deleted records reported by the vector database.
+
+    Raises:
+        RuntimeError: If the vector database is unavailable before deletion.
+        ValueError: If a selected record has no usable native ID.
+    """
+    vector_db = _get_vector_db(self)
+    if not vector_db or not vector_db.is_connected():
+        raise RuntimeError("向量数据库未初始化或未连接")
+
+    db_type = self.config.get("vector_db_type", "chroma").lower()
+    deleted_count = 0
+    for record in records:
+        record_id = (
+            record.get(PRIMARY_FIELD_NAME)
+            if db_type == "milvus"
+            else record.get("id")
+        )
+        if record_id is None:
+            raise ValueError("查询结果缺少可删除的 memory_id/id")
+        expression = (
+            _build_memory_id_expression(str(record_id))
+            if db_type == "milvus"
+            else safe_build_milvus_expression("id", str(record_id), "==")
+        )
+        result = vector_db.delete(self.collection_name, expression)
+        if isinstance(getattr(result, "delete_count", None), int):
+            deleted_count += result.delete_count
+    vector_db.flush([self.collection_name])
+    return deleted_count
+
+
+def _resolve_memory_export_path(
+    self: "Mnemosyne", filename: str, allow_creation: bool
+) -> Path:
+    """Resolve an export file inside the plugin's exports directory.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        filename: Relative export filename.
+        allow_creation: Whether the parent directory may be created.
+
+    Returns:
+        A validated absolute path.
+
+    Raises:
+        ValueError: If the plugin data directory or filename is invalid.
+    """
+    if not getattr(self, "plugin_data_dir", None):
+        raise ValueError("插件数据目录未初始化")
+    normalized = (filename or "").strip().strip('"`')
+    if not normalized:
+        raise ValueError("文件名不能为空")
+    if not normalized.lower().endswith(".json"):
+        normalized += ".json"
+    export_dir = Path(self.plugin_data_dir) / "exports"
+    return validate_safe_path(
+        normalized, str(export_dir), allow_creation=allow_creation
+    )
 
 
 async def list_collections_cmd_impl(self: "Mnemosyne", event: AstrMessageEvent):
@@ -332,6 +503,414 @@ async def list_records_cmd_impl(
             exc_info=True,  # 记录完整的错误堆栈
         )
         yield event.plain_result("⚠️ 查询记忆记录时发生内部错误，请联系管理员。")
+
+
+async def export_memory_cmd_impl(
+    self: "Mnemosyne",
+    event: AstrMessageEvent,
+    filename: str,
+    session_id: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+):
+    """Export selected memory records to a JSON file.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        event: Event supplying the current session ID.
+        filename: JSON filename relative to the exports directory.
+        session_id: Session ID or ``--all`` for all sessions.
+        start: Inclusive start timestamp.
+        end: Exclusive end timestamp.
+    """
+    try:
+        target_session_id = (
+            None if session_id == "--all" else session_id or event.unified_msg_origin
+        )
+        if target_session_id and not validate_session_id(target_session_id):
+            yield event.plain_result("会话 ID 格式无效，无法导出记忆。")
+            return
+
+        start_timestamp = _parse_command_timestamp(start, "开始时间") if start else None
+        end_timestamp = _parse_command_timestamp(end, "结束时间") if end else None
+        if (
+            start_timestamp is not None
+            and end_timestamp is not None
+            and start_timestamp >= end_timestamp
+        ):
+            yield event.plain_result("开始时间必须早于结束时间。")
+            return
+        records, reached_limit = _query_memory_records(
+            self, target_session_id, start_timestamp, end_timestamp
+        )
+        if reached_limit:
+            yield event.plain_result(
+                f"匹配记录达到查询上限 {MAX_TOTAL_FETCH_RECORDS} 条，为避免导出不完整，本次未执行。"
+            )
+            return
+
+        export_path = _resolve_memory_export_path(self, filename, allow_creation=True)
+        payload = {
+            "format": "mnemosyne-memory-export",
+            "version": 1,
+            "exported_at": datetime.now().astimezone().isoformat(),
+            "collection_name": self.collection_name,
+            "records": [
+                {
+                    "id": record.get("id") or record.get(PRIMARY_FIELD_NAME),
+                    "content": record.get("content", ""),
+                    "create_time": record.get("create_time"),
+                    "session_id": record.get("session_id", ""),
+                    "personality_id": record.get("personality_id", ""),
+                }
+                for record in records
+            ],
+        }
+        export_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        yield event.plain_result(
+            f"✅ 导出完成：{export_path}\n"
+            f"会话范围：{target_session_id or '全部会话'}\n"
+            f"记录数量：{len(records)}"
+        )
+    except (RuntimeError, ValueError) as exc:
+        yield event.plain_result(f"⚠️ 导出记忆失败：{exc}")
+    except OSError as exc:
+        logger.error(f"Failed to write memory export file: {exc}", exc_info=True)
+        yield event.plain_result("⚠️ 导出文件写入失败，请检查插件数据目录权限。")
+
+
+async def import_memory_cmd_impl(
+    self: "Mnemosyne",
+    event: AstrMessageEvent,
+    filename: str,
+    confirm: str | None = None,
+):
+    """Preview or import records from a Mnemosyne JSON export.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        event: Event used for the response.
+        filename: Export filename relative to the exports directory.
+        confirm: Must be ``--confirm`` to insert records.
+    """
+    try:
+        import_path = _resolve_memory_export_path(self, filename, allow_creation=False)
+        if not import_path.is_file():
+            yield event.plain_result(f"⚠️ 导入文件不存在：{import_path}")
+            return
+        payload = json.loads(import_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(payload, dict)
+            or payload.get("format") != "mnemosyne-memory-export"
+            or payload.get("version") != 1
+            or not isinstance(payload.get("records"), list)
+        ):
+            yield event.plain_result(
+                "⚠️ 导入文件格式无效，仅支持 Mnemosyne JSON 导出文件。"
+            )
+            return
+        records = payload["records"]
+        if not records:
+            yield event.plain_result("导入文件中没有记忆记录。")
+            return
+        if len(records) >= MAX_TOTAL_FETCH_RECORDS:
+            yield event.plain_result(
+                f"导入记录达到上限 {MAX_TOTAL_FETCH_RECORDS} 条，本次未执行。"
+            )
+            return
+
+        normalized_records = []
+        for index, record in enumerate(records, start=1):
+            if (
+                not isinstance(record, dict)
+                or not str(record.get("content", "")).strip()
+            ):
+                yield event.plain_result(f"⚠️ 第 {index} 条记录缺少有效 content。")
+                return
+            record_session_id = str(record.get("session_id", "")).strip()
+            if not validate_session_id(record_session_id):
+                yield event.plain_result(f"⚠️ 第 {index} 条记录的 session_id 无效。")
+                return
+            try:
+                create_time = int(float(record.get("create_time")))
+            except (TypeError, ValueError):
+                yield event.plain_result(f"⚠️ 第 {index} 条记录的 create_time 无效。")
+                return
+            normalized_records.append(
+                {
+                    "content": str(record["content"]).strip(),
+                    "create_time": create_time,
+                    "session_id": record_session_id,
+                    "personality_id": str(record.get("personality_id", "")),
+                }
+            )
+
+        if confirm != "--confirm":
+            yield event.plain_result(
+                f"将从 {import_path} 导入 {len(normalized_records)} 条记忆。\n"
+                "重复导入会产生重复记忆。当前只是预览；确认导入请执行：\n"
+                f"/memory import {filename} --confirm"
+            )
+            return
+
+        embedding_provider = getattr(self, "embedding_provider", None)
+        if not embedding_provider:
+            yield event.plain_result("⚠️ Embedding Provider 不可用，无法导入记忆。")
+            return
+        data_to_insert = []
+        for record in normalized_records:
+            embedding = await embedding_provider.get_embedding(record["content"])
+            if not embedding:
+                yield event.plain_result("⚠️ 生成 Embedding 失败，未写入任何记录。")
+                return
+            data_to_insert.append({**record, VECTOR_FIELD_NAME: embedding})
+
+        vector_db = _get_vector_db(self)
+        if not vector_db or not vector_db.is_connected():
+            yield event.plain_result("⚠️ 向量数据库未初始化或未连接。")
+            return
+        mutation_result = await asyncio.to_thread(
+            vector_db.insert,
+            collection_name=self.collection_name,
+            data=data_to_insert,
+        )
+        await asyncio.to_thread(vector_db.flush, [self.collection_name])
+        inserted_count = getattr(mutation_result, "insert_count", len(data_to_insert))
+        yield event.plain_result(f"✅ 导入完成：成功写入 {inserted_count} 条记忆。")
+    except (ValueError, json.JSONDecodeError) as exc:
+        yield event.plain_result(f"⚠️ 导入记忆失败：{exc}")
+    except OSError as exc:
+        logger.error(f"Failed to read memory import file: {exc}", exc_info=True)
+        yield event.plain_result("⚠️ 导入文件读取失败，请检查文件权限。")
+    except Exception as exc:
+        logger.error(f"memory import failed: {exc}", exc_info=True)
+        yield event.plain_result(f"⚠️ 导入记忆失败：{exc}")
+
+
+async def stats_memory_cmd_impl(
+    self: "Mnemosyne", event: AstrMessageEvent, session_id: str | None = None
+):
+    """Show count and time statistics for a session or all sessions.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        event: Event supplying the current session ID.
+        session_id: Session ID or ``--all`` for all sessions.
+    """
+    try:
+        target_session_id = (
+            None if session_id == "--all" else session_id or event.unified_msg_origin
+        )
+        if target_session_id and not validate_session_id(target_session_id):
+            yield event.plain_result("会话 ID 格式无效。")
+            return
+        records, reached_limit = _query_memory_records(self, target_session_id)
+        if not records:
+            yield event.plain_result("当前范围内没有记忆记录。")
+            return
+        timestamps = [float(record["create_time"]) for record in records]
+        earliest = datetime.fromtimestamp(min(timestamps)).strftime("%Y-%m-%d %H:%M:%S")
+        latest = datetime.fromtimestamp(max(timestamps)).strftime("%Y-%m-%d %H:%M:%S")
+        sessions = {str(record.get("session_id", "")) for record in records}
+        warning = (
+            f"\n⚠️ 查询达到上限 {MAX_TOTAL_FETCH_RECORDS} 条，结果可能不完整。"
+            if reached_limit
+            else ""
+        )
+        yield event.plain_result(
+            f"📊 记忆统计（{target_session_id or '全部会话'}）\n"
+            f"记忆数量：{len(records)}\n会话数量：{len(sessions)}\n"
+            f"最早时间：{earliest}\n最新时间：{latest}{warning}"
+        )
+    except (RuntimeError, ValueError, OSError) as exc:
+        yield event.plain_result(f"⚠️ 获取记忆统计失败：{exc}")
+
+
+async def search_memory_cmd_impl(
+    self: "Mnemosyne",
+    event: AstrMessageEvent,
+    keyword: str,
+    session_id: str | None = None,
+    limit: int = 10,
+):
+    """Search memory content by a case-insensitive substring.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        event: Event supplying the current session ID.
+        keyword: Text to find in memory content.
+        session_id: Session ID or ``--all`` for all sessions.
+        limit: Maximum number of results to display.
+    """
+    normalized_keyword = (keyword or "").strip()
+    if not normalized_keyword:
+        yield event.plain_result("⚠️ 请提供要搜索的关键词。")
+        return
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        yield event.plain_result("⚠️ limit 必须是有效整数。")
+        return
+    if limit <= 0 or limit > 50:
+        yield event.plain_result("⚠️ limit 必须在 1 到 50 之间。")
+        return
+    try:
+        target_session_id = (
+            None if session_id == "--all" else session_id or event.unified_msg_origin
+        )
+        if target_session_id and not validate_session_id(target_session_id):
+            yield event.plain_result("会话 ID 格式无效。")
+            return
+        records, reached_limit = _query_memory_records(self, target_session_id)
+        matches = [
+            record
+            for record in records
+            if normalized_keyword.casefold()
+            in str(record.get("content", "")).casefold()
+        ][:limit]
+        if not matches:
+            yield event.plain_result(f"未找到包含“{normalized_keyword}”的记忆。")
+            return
+        lines = [f"🔎 找到 {len(matches)} 条匹配记忆："]
+        for index, record in enumerate(matches, start=1):
+            try:
+                time_text = datetime.fromtimestamp(
+                    float(record.get("create_time"))
+                ).strftime("%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError, OSError):
+                time_text = str(record.get("create_time"))
+            record_id = record.get("id") or record.get(PRIMARY_FIELD_NAME, "未知")
+            content = str(record.get("content", ""))
+            preview = content[:200] + ("..." if len(content) > 200 else "")
+            lines.append(
+                f"#{index} [ID: {record_id}] {time_text}\n"
+                f"会话：{record.get('session_id', '未知')}\n内容：{preview}"
+            )
+        if reached_limit:
+            lines.append(
+                f"⚠️ 查询达到上限 {MAX_TOTAL_FETCH_RECORDS} 条，结果可能不完整。"
+            )
+        yield event.plain_result("\n\n".join(lines))
+    except (RuntimeError, ValueError, OSError) as exc:
+        yield event.plain_result(f"⚠️ 搜索记忆失败：{exc}")
+
+
+async def delete_between_memory_cmd_impl(
+    self: "Mnemosyne",
+    event: AstrMessageEvent,
+    start: str,
+    end: str,
+    session_id: str | None = None,
+    confirm: str | None = None,
+):
+    """Preview or delete records in a half-open time range.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        event: Event supplying the current session ID.
+        start: Inclusive start timestamp.
+        end: Exclusive end timestamp.
+        session_id: Optional session ID; defaults to the current session.
+        confirm: Must be ``--confirm`` to perform deletion.
+    """
+    if session_id == "--confirm" and confirm is None:
+        confirm, session_id = session_id, None
+    target_session_id = session_id or event.unified_msg_origin
+    if not target_session_id or not validate_session_id(target_session_id):
+        yield event.plain_result("会话 ID 无效，无法按时间范围清理。")
+        return
+    try:
+        start_timestamp = _parse_command_timestamp(start, "开始时间")
+        end_timestamp = _parse_command_timestamp(end, "结束时间")
+        if start_timestamp >= end_timestamp:
+            yield event.plain_result("开始时间必须早于结束时间。")
+            return
+        records, reached_limit = _query_memory_records(
+            self, target_session_id, start_timestamp, end_timestamp
+        )
+        if reached_limit:
+            yield event.plain_result(
+                f"匹配记录达到查询上限 {MAX_TOTAL_FETCH_RECORDS} 条，为避免只删除部分记忆，本次未执行。"
+            )
+            return
+        if not records:
+            yield event.plain_result("指定时间范围内没有匹配的记忆。")
+            return
+        if confirm != "--confirm":
+            yield event.plain_result(
+                f"将删除会话 '{target_session_id}' 在 [{start}, {end}) 内的 "
+                f"{len(records)} 条记忆。\n当前只是预览，确认删除请执行：\n"
+                f"/memory delete_between {start} {end} {target_session_id} --confirm"
+            )
+            return
+        deleted_count = _delete_memory_records(self, records)
+        yield event.plain_result(
+            f"✅ 时间范围删除已执行。匹配记录：{len(records)}\n"
+            f"向量数据库返回删除数：{deleted_count}"
+        )
+    except (RuntimeError, ValueError, OSError) as exc:
+        logger.error(f"memory delete_between failed: {exc}", exc_info=True)
+        yield event.plain_result(f"⚠️ 按时间范围删除记忆失败：{exc}")
+
+
+async def delete_before_memory_cmd_impl(
+    self: "Mnemosyne",
+    event: AstrMessageEvent,
+    cutoff: str,
+    session_id: str | None = None,
+    confirm: str | None = None,
+):
+    """Preview or delete records created before a cutoff timestamp.
+
+    Args:
+        self: Mnemosyne plugin instance.
+        event: Event supplying the current session ID.
+        cutoff: ISO 8601 cutoff date or datetime.
+        session_id: Optional session ID; defaults to the current session.
+        confirm: Must be ``--confirm`` to perform deletion.
+    """
+    if session_id == "--confirm" and confirm is None:
+        confirm, session_id = session_id, None
+    target_session_id = session_id or event.unified_msg_origin
+    if not target_session_id or not validate_session_id(target_session_id):
+        yield event.plain_result("⚠️ 会话 ID 无效，无法执行按时间清理。")
+        return
+    try:
+        cutoff_timestamp = _parse_command_timestamp(cutoff, "截止时间")
+        records, reached_limit = _query_memory_records(
+            self, target_session_id, end_timestamp=cutoff_timestamp
+        )
+        if reached_limit:
+            yield event.plain_result(
+                f"匹配记录达到查询上限 {MAX_TOTAL_FETCH_RECORDS} 条，为避免只删除部分旧记忆，本次未执行。"
+            )
+            return
+        cutoff_display = datetime.fromtimestamp(cutoff_timestamp).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        if not records:
+            yield event.plain_result(
+                f"未找到会话 '{target_session_id}' 在 {cutoff_display} 以前的记忆。"
+            )
+            return
+        if confirm != "--confirm":
+            yield event.plain_result(
+                f"⚠️ 将删除会话 '{target_session_id}' 在 {cutoff_display} 以前的 "
+                f"{len(records)} 条记忆。\n当前只是预览，确认删除请执行：\n"
+                f"/memory delete_before {cutoff} {target_session_id} --confirm"
+            )
+            return
+        deleted_count = _delete_memory_records(self, records)
+        yield event.plain_result(
+            f"✅ 删除请求已执行。会话: {target_session_id}\n"
+            f"截止时间: {cutoff_display}\n匹配记录: {len(records)}\n"
+            f"向量数据库返回删除数: {deleted_count}"
+        )
+    except (RuntimeError, ValueError, OSError) as exc:
+        logger.error(f"memory delete_before failed: {exc}", exc_info=True)
+        yield event.plain_result(f"⚠️ 按时间删除记忆失败：{exc}")
 
 
 async def delete_session_memory_cmd_impl(

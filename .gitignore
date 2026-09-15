@@ -88,6 +88,7 @@ node_modules/
 *.db-journal
 *.db-wal
 *.db-shm
+data/
 docs/admin_panel_enhancement_log.md
 docs/API.md
 docs/architecture_analysis.md
