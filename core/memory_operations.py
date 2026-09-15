@@ -4,16 +4,20 @@ Mnemosyne 插件核心记忆操作逻辑
 """
 
 import asyncio
+import hashlib
 import re
 import time
+from collections import OrderedDict
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 try:
     from pymilvus.exceptions import MilvusException
 except ImportError:
+
     class MilvusException(Exception):
         pass
+
 
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.provider import LLMResponse, ProviderRequest
@@ -34,6 +38,7 @@ from .security_utils import (
 from .tools import (
     extract_query_keywords,
     format_context_to_string,
+    format_tool_calls_result_to_string,
     pack_memory_content,
     remove_mnemosyne_tags,
     remove_system_content,
@@ -50,6 +55,17 @@ if TYPE_CHECKING:
 
 logger = LogManager.GetLogger(__name__)
 
+USER_RECORDED_EXTRA_KEY = "_mnemosyne_user_recorded"
+ASSISTANT_RECORDED_EXTRA_KEY = "_mnemosyne_assistant_recorded"
+TOOL_CONTEXT_RECORDED_EXTRA_KEY = "_mnemosyne_tool_context_recorded"
+REQUEST_PROCESSED_EXTRA_KEY = "_mnemosyne_request_processed"
+TOOL_CONTEXT_MARKER_METADATA_KEY = "_mnemosyne_tool_context_turn_marker"
+_MISSING = object()
+_TURN_MARKER_TTL_SECONDS = 10 * 60
+_TURN_MARKER_MAX_ENTRIES = 4096
+_INJECTION_COUNTER_MAX_SESSIONS = 2048
+_LAST_USER_TURN_MAX_SESSIONS = 2048
+_MAX_RETAINED_TOOL_CONTEXT_MESSAGES = 8
 DEFAULT_SUMMARY_SPEAKER_MAPPING_PROMPT = (
     "说话人映射：assistant 表示当前会话正在运行的人格角色"
     "（persona_id={persona_id}），user 表示当前对话用户"
@@ -89,6 +105,441 @@ def _extract_explicit_memory_content(prompt: str) -> str | None:
             if content:
                 return content
     return None
+
+
+def _get_event_extra(event: AstrMessageEvent, key: str, default: Any = None) -> Any:
+    getter = getattr(event, "get_extra", None)
+    if not callable(getter):
+        return default
+    try:
+        return getter(key, default)
+    except TypeError:
+        try:
+            value = getter(key)
+        except Exception:
+            return default
+        return default if value is _MISSING else value
+    except Exception:
+        return default
+
+
+def _set_event_extra(event: AstrMessageEvent, key: str, value: Any) -> None:
+    setter = getattr(event, "set_extra", None)
+    if not callable(setter):
+        return
+    try:
+        setter(key, value)
+    except Exception:
+        logger.debug(f"写入事件标记 {key} 失败", exc_info=True)
+
+
+def _get_turn_marker_store(
+    plugin: "Mnemosyne", attr_name: str
+) -> OrderedDict[str, float]:
+    store = getattr(plugin, attr_name, None)
+    if not isinstance(store, OrderedDict):
+        converted: OrderedDict[str, float] = OrderedDict()
+        if isinstance(store, dict):
+            for key, value in store.items():
+                if isinstance(key, str) and isinstance(value, (int, float)):
+                    converted[key] = float(value)
+        store = converted
+        setattr(plugin, attr_name, store)
+    return store
+
+
+def _prune_turn_marker_store(store: OrderedDict[str, float]) -> None:
+    now = time.monotonic()
+    while store:
+        oldest_key = next(iter(store))
+        oldest_updated_at = store[oldest_key]
+        if now - oldest_updated_at <= _TURN_MARKER_TTL_SECONDS:
+            break
+        store.popitem(last=False)
+
+    while len(store) > _TURN_MARKER_MAX_ENTRIES:
+        store.popitem(last=False)
+
+
+def _warn_empty_turn_marker(plugin: "Mnemosyne", attr_name: str) -> None:
+    warned_attrs = getattr(plugin, "_mnemosyne_empty_marker_warning_attrs", None)
+    if not isinstance(warned_attrs, set):
+        warned_attrs = set()
+        plugin._mnemosyne_empty_marker_warning_attrs = warned_attrs
+    if attr_name in warned_attrs:
+        return
+    warned_attrs.add(attr_name)
+    logger.warning(f"无法为 {attr_name} 构建稳定 turn marker，已保守跳过本轮记忆处理。")
+
+
+def _mark_turn_once(plugin: "Mnemosyne", attr_name: str, marker: str) -> bool:
+    if not marker:
+        _warn_empty_turn_marker(plugin, attr_name)
+        return False
+
+    store = _get_turn_marker_store(plugin, attr_name)
+    _prune_turn_marker_store(store)
+    if marker in store:
+        store[marker] = time.monotonic()
+        store.move_to_end(marker)
+        return False
+    store[marker] = time.monotonic()
+    _prune_turn_marker_store(store)
+    return True
+
+
+def _has_turn_marker(plugin: "Mnemosyne", attr_name: str, marker: str) -> bool:
+    if not marker:
+        return False
+    store = _get_turn_marker_store(plugin, attr_name)
+    _prune_turn_marker_store(store)
+    if marker not in store:
+        return False
+    store[marker] = time.monotonic()
+    store.move_to_end(marker)
+    return True
+
+
+def _stringify_marker_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    try:
+        text = str(value)
+    except Exception:
+        text = repr(value)
+    return text.strip()
+
+
+def _digest_marker_text(*parts: Any) -> str:
+    text_parts = [
+        _stringify_marker_value(part) for part in parts if _stringify_marker_value(part)
+    ]
+    if not text_parts:
+        return ""
+    payload = "\u241f".join(text_parts)
+    return hashlib.sha1(payload.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _extract_event_message_token(event: AstrMessageEvent) -> str:
+    candidate_attrs = [
+        "message_id",
+        "msg_id",
+        "message_uid",
+        "id",
+        "timestamp",
+        "time",
+    ]
+    for attr in candidate_attrs:
+        value = _stringify_marker_value(getattr(event, attr, None))
+        if value:
+            return f"{attr}={value}"
+
+    for container_attr in ("message_obj", "message", "msg"):
+        container = getattr(event, container_attr, None)
+        if not container:
+            continue
+        for attr in candidate_attrs:
+            value = _stringify_marker_value(getattr(container, attr, None))
+            if value:
+                return f"{container_attr}.{attr}={value}"
+    return ""
+
+
+def _extract_event_outline(event: AstrMessageEvent) -> str:
+    outline_getter = getattr(event, "get_message_outline", None)
+    if callable(outline_getter):
+        try:
+            outline = outline_getter()
+        except Exception:
+            outline = ""
+        value = _stringify_marker_value(outline)
+        if value:
+            return value
+    return ""
+
+
+def _build_turn_marker(
+    plugin: "Mnemosyne",
+    event: AstrMessageEvent,
+    *,
+    session_id: str | None = None,
+    prompt_text: str | None = None,
+) -> str:
+    session = _stringify_marker_value(session_id) or _stringify_marker_value(
+        getattr(event, "unified_msg_origin", "")
+    )
+    if not session:
+        return ""
+
+    sender_id = ""
+    sender_getter = getattr(event, "get_sender_id", None)
+    if callable(sender_getter):
+        try:
+            sender_id = _stringify_marker_value(sender_getter())
+        except Exception:
+            sender_id = ""
+
+    token = _extract_event_message_token(event)
+    if token:
+        parts = [session]
+        if sender_id:
+            parts.append(f"sender={sender_id}")
+        parts.append(token)
+        return "|".join(parts)
+
+    if prompt_text is None:
+        prompt_text = _extract_event_outline(event)
+
+    image_urls = getattr(event, "image_urls", None)
+    digest = _digest_marker_text(
+        prompt_text,
+        _extract_event_outline(event),
+        image_urls,
+        getattr(event, "platform_meta", None),
+    )
+    if not digest:
+        return ""
+
+    parts = [session]
+    if sender_id:
+        parts.append(f"sender={sender_id}")
+    parts.append(f"digest={digest}")
+    return "|".join(parts)
+
+
+def _resolve_response_turn_marker(
+    plugin: "Mnemosyne", event: AstrMessageEvent, session_id: str
+) -> str:
+    event_marker = _build_turn_marker(plugin, event, session_id=session_id)
+    if event_marker:
+        return event_marker
+
+    # 只有当前响应事件无法构建稳定 marker 时才回退到最近的用户轮次。
+    # 如果当前事件有 marker 但未记录过用户消息，必须保留该 marker，让
+    # handle_on_llm_resp 的 user_was_recorded=False 分支继续执行总结检查。
+    last_turns = _get_last_user_turn_store(plugin)
+    last_marker = last_turns.get(session_id, "")
+    if last_marker and _has_turn_marker(
+        plugin, "_mnemosyne_recorded_user_turns", last_marker
+    ):
+        last_turns.move_to_end(session_id)
+        return last_marker
+
+    return event_marker
+
+
+def _get_last_user_turn_store(plugin: "Mnemosyne") -> OrderedDict[str, str]:
+    store = getattr(plugin, "_mnemosyne_last_user_turn_by_session", None)
+    if not isinstance(store, OrderedDict):
+        converted: OrderedDict[str, str] = OrderedDict()
+        if isinstance(store, dict):
+            for session_id, marker in store.items():
+                session = _stringify_marker_value(session_id)
+                marker_text = _stringify_marker_value(marker)
+                if session and marker_text:
+                    converted[session] = marker_text
+        store = converted
+        plugin._mnemosyne_last_user_turn_by_session = store
+    while len(store) > _LAST_USER_TURN_MAX_SESSIONS:
+        store.popitem(last=False)
+    return store
+
+
+def _remember_last_user_turn(
+    plugin: "Mnemosyne", session_id: str, turn_marker: str
+) -> None:
+    if not session_id or not turn_marker:
+        return
+    last_turns = _get_last_user_turn_store(plugin)
+    last_turns[session_id] = turn_marker
+    last_turns.move_to_end(session_id)
+    while len(last_turns) > _LAST_USER_TURN_MAX_SESSIONS:
+        last_turns.popitem(last=False)
+
+
+def _summary_should_include_tool_context(plugin: "Mnemosyne") -> bool:
+    try:
+        return bool(plugin.config.get("include_tool_context_in_summary", False))
+    except Exception:
+        return False
+
+
+def _append_tool_context_if_enabled(
+    plugin: "Mnemosyne",
+    event: AstrMessageEvent,
+    session_id: str,
+    turn_marker: str,
+) -> None:
+    if not _summary_should_include_tool_context(plugin):
+        return
+    tool_context_recorded = _get_event_extra(
+        event, TOOL_CONTEXT_RECORDED_EXTRA_KEY, False
+    ) or _has_turn_marker(
+        plugin,
+        "_mnemosyne_recorded_tool_context_turns",
+        turn_marker,
+    )
+    if tool_context_recorded:
+        return
+    if not plugin.context_manager:
+        return
+
+    provider_request = _get_event_extra(event, "provider_request")
+    tool_calls_result = getattr(provider_request, "tool_calls_result", None)
+    tool_context = format_tool_calls_result_to_string(tool_calls_result)
+    if not tool_context.strip():
+        return
+
+    plugin.context_manager.add_message(
+        session_id,
+        "tool",
+        tool_context,
+        metadata={
+            "speaker_id": "tool",
+            TOOL_CONTEXT_MARKER_METADATA_KEY: turn_marker,
+        },
+    )
+    _trim_recorded_tool_context(plugin, session_id)
+    _set_event_extra(event, TOOL_CONTEXT_RECORDED_EXTRA_KEY, True)
+    _mark_turn_once(plugin, "_mnemosyne_recorded_tool_context_turns", turn_marker)
+    logger.debug(
+        f"已记录工具调用上下文用于记忆总结，session={session_id}, 长度={len(tool_context)}"
+    )
+
+
+def _collect_tool_context_markers(context_history: list[dict] | None) -> set[str]:
+    if not isinstance(context_history, list):
+        return set()
+    markers: set[str] = set()
+    for message in context_history:
+        if not isinstance(message, dict) or message.get("role") != "tool":
+            continue
+        metadata = message.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        marker = metadata.get(TOOL_CONTEXT_MARKER_METADATA_KEY)
+        if isinstance(marker, str) and marker:
+            markers.add(marker)
+    return markers
+
+
+def _clear_recorded_tool_context(
+    plugin: "Mnemosyne", session_id: str, turn_markers: set[str]
+) -> None:
+    context_manager = getattr(plugin, "context_manager", None)
+    if not context_manager or not turn_markers:
+        return
+
+    clear_method = getattr(context_manager, "clear_role_messages_by_metadata", None)
+    if not callable(clear_method):
+        return
+
+    removed = clear_method(
+        session_id,
+        "tool",
+        TOOL_CONTEXT_MARKER_METADATA_KEY,
+        turn_markers,
+    )
+    if removed:
+        logger.debug(f"已清理会话 {session_id} 的 {removed} 条临时 tool 上下文。")
+
+
+def _trim_recorded_tool_context(plugin: "Mnemosyne", session_id: str) -> None:
+    context_manager = getattr(plugin, "context_manager", None)
+    if not context_manager:
+        return
+
+    trim_method = getattr(context_manager, "trim_role_messages", None)
+    if not callable(trim_method):
+        return
+
+    removed = trim_method(session_id, "tool", _MAX_RETAINED_TOOL_CONTEXT_MESSAGES)
+    if removed:
+        logger.debug(f"已裁剪会话 {session_id} 的 {removed} 条旧临时 tool 上下文。")
+
+
+def _prune_injection_round_counter(plugin: "Mnemosyne") -> None:
+    counter = getattr(plugin, "_injection_round_counter", None)
+    touched_at = getattr(plugin, "_injection_round_counter_updated_at", None)
+    if not isinstance(counter, dict):
+        plugin._injection_round_counter = {}
+        counter = plugin._injection_round_counter
+    if not isinstance(touched_at, dict):
+        plugin._injection_round_counter_updated_at = {}
+        touched_at = plugin._injection_round_counter_updated_at
+
+    stale_sessions = [
+        session_id for session_id in touched_at if session_id not in counter
+    ]
+    for session_id in stale_sessions:
+        touched_at.pop(session_id, None)
+
+    excess = len(counter) - _INJECTION_COUNTER_MAX_SESSIONS
+    if excess <= 0:
+        return
+
+    oldest_sessions = sorted(
+        counter.keys(), key=lambda session_id: touched_at.get(session_id, 0.0)
+    )[:excess]
+    for session_id in oldest_sessions:
+        counter.pop(session_id, None)
+        touched_at.pop(session_id, None)
+
+
+def _resolve_memory_injection_interval(plugin: "Mnemosyne") -> int:
+    raw_interval = 1
+    try:
+        raw_interval = plugin.config.get("memory_injection_interval", 1)
+    except Exception:
+        raw_interval = 1
+
+    try:
+        interval = int(raw_interval)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"memory_injection_interval={raw_interval!r} 无法解析为整数，已回退为 1。"
+        )
+        return 1
+
+    if interval < 1:
+        logger.warning(f"memory_injection_interval={interval} 小于 1，已回退为 1。")
+        return 1
+    return interval
+
+
+def _should_inject_memory_this_turn(plugin: "Mnemosyne", session_id: str) -> bool:
+    """
+    维护每会话注入间隔计数器，返回当前轮是否应执行 RAG 检索与注入。
+    计数器有上限裁剪，避免长期运行时无界增长。
+    """
+    injection_interval = _resolve_memory_injection_interval(plugin)
+    if injection_interval <= 1:
+        return True
+
+    _prune_injection_round_counter(plugin)
+    counter = plugin._injection_round_counter
+    touched_at = plugin._injection_round_counter_updated_at
+    current = counter.get(session_id, 0) + 1
+
+    if current < injection_interval:
+        counter[session_id] = current
+        touched_at[session_id] = time.monotonic()
+        logger.debug(
+            f"间隔注入门控：会话 {session_id} 当前第 {current}/{injection_interval} 轮，"
+            f"本轮跳过记忆检索与注入。"
+        )
+        return False
+
+    # 达到间隔阈值，本轮触发注入并重置计数。
+    counter.pop(session_id, None)
+    touched_at.pop(session_id, None)
+    logger.debug(
+        f"间隔注入门控：会话 {session_id} 已达 {injection_interval} 轮，"
+        "本轮触发记忆注入。"
+    )
+    return True
 
 
 def _collect_participants_from_context(context_history: list[dict] | None) -> list[str]:
@@ -473,7 +924,9 @@ async def handle_query_memory(
             safe_user_prompt = "[图片]"
 
         # 在写入会话历史前先剥离群聊包装，避免把整段 chatroom 模板污染进记忆上下文
-        actual_query_raw = ChatroomContextParser.extract_actual_message(safe_user_prompt)
+        actual_query_raw = ChatroomContextParser.extract_actual_message(
+            safe_user_prompt
+        )
         if not actual_query_raw.strip() and getattr(req, "image_urls", None):
             actual_query_raw = "[图片]"
         if actual_query_raw != safe_user_prompt:
@@ -495,21 +948,76 @@ async def handle_query_memory(
                 f"用户输入过长 ({original_query_len} chars)，已截断到 {max_prompt_chars} chars。"
             )
 
-        # 添加用户消息（写入插件上下文管理器）
+        turn_marker = _build_turn_marker(
+            plugin,
+            event,
+            session_id=session_id,
+            prompt_text=actual_query,
+        )
+        if _get_event_extra(
+            event, REQUEST_PROCESSED_EXTRA_KEY, False
+        ) or not _mark_turn_once(
+            plugin, "_mnemosyne_processed_request_turns", turn_marker
+        ):
+            logger.debug(
+                f"会话 {session_id} 当前轮已处理过记忆请求，跳过重复计数与注入。"
+            )
+            return
+        _set_event_extra(event, REQUEST_PROCESSED_EXTRA_KEY, True)
+
+        # 添加用户消息（写入插件上下文管理器）。同一个 AstrBot 事件可能经历多次
+        # LLM/tool 循环，用户输入只应计入一次。
         sender_name, sender_id = _resolve_sender_identity(event, session_id)
-        memory_store_text = _build_identity_prefixed_user_text(
-            actual_query,
-            sender_name=sender_name,
-            sender_id=sender_id,
-        )
-        plugin.context_manager.add_message(
-            session_id,
-            "user",
-            memory_store_text,
-            metadata=_build_speaker_metadata(sender_id),
-        )
-        # 计数器+1
-        plugin.msg_counter.increment_counter(session_id)
+        user_already_recorded = _get_event_extra(
+            event, USER_RECORDED_EXTRA_KEY, False
+        ) or _has_turn_marker(plugin, "_mnemosyne_recorded_user_turns", turn_marker)
+        if not user_already_recorded:
+            memory_store_text = _build_identity_prefixed_user_text(
+                actual_query,
+                sender_name=sender_name,
+                sender_id=sender_id,
+            )
+            plugin.context_manager.add_message(
+                session_id,
+                "user",
+                memory_store_text,
+                metadata=_build_speaker_metadata(sender_id),
+            )
+            plugin.msg_counter.increment_counter(session_id)
+            _set_event_extra(event, USER_RECORDED_EXTRA_KEY, True)
+            _mark_turn_once(plugin, "_mnemosyne_recorded_user_turns", turn_marker)
+            _remember_last_user_turn(plugin, session_id, turn_marker)
+        else:
+            logger.debug(f"会话 {session_id} 当前事件用户消息已记录，跳过重复计数。")
+            _set_event_extra(event, USER_RECORDED_EXTRA_KEY, True)
+            _mark_turn_once(plugin, "_mnemosyne_recorded_user_turns", turn_marker)
+            _remember_last_user_turn(plugin, session_id, turn_marker)
+
+        # 支持显式记忆触发：只要用户明确要求“记住”，就不受间隔注入门控影响。
+        if plugin.config.get("enable_explicit_memory_capture", False):
+            explicit_content = _extract_explicit_memory_content(actual_query)
+            if explicit_content:
+                try:
+                    stored = await store_manual_memory(
+                        plugin=plugin,
+                        event=event,
+                        memory_content=explicit_content,
+                        source="explicit_trigger",
+                    )
+                    if stored:
+                        logger.info("已根据显式“记住”触发写入长期记忆。")
+                except Exception as e:
+                    logger.error(
+                        f"显式记忆写入失败，将继续执行后续记忆流程: {e}",
+                        exc_info=True,
+                    )
+
+        # --- 间隔注入门控 ---
+        # “每隔 N 轮对话才触发一次记忆插入”。N<=1 表示每轮都注入（保持原行为）。
+        # 该门控仅控制本轮是否执行 RAG 检索与注入，不影响用户消息入库与总结计数。
+        # 注意：此处不累计召回历史，触发时仅注入“当前这一轮”检索到的记忆。
+        if not _should_inject_memory_this_turn(plugin, session_id):
+            return
 
         # --- RAG 搜索 ---
         detailed_results = []
@@ -524,19 +1032,6 @@ async def handle_query_memory(
                 ):
                     logger.warning("Embedding Provider 不可用，无法执行 RAG 搜索")
                     return
-
-                # 支持显式记忆触发：仅在强触发语句下执行，默认关闭以避免误触。
-                if plugin.config.get("enable_explicit_memory_capture", False):
-                    explicit_content = _extract_explicit_memory_content(actual_query)
-                    if explicit_content:
-                        stored = await store_manual_memory(
-                            plugin=plugin,
-                            event=event,
-                            memory_content=explicit_content,
-                            source="explicit_trigger",
-                        )
-                        if stored:
-                            logger.info("已根据显式“记住”触发写入长期记忆。")
 
                 # 使用 AstrBot EmbeddingProvider 的 embed 方法
                 if plugin.embedding_provider:
@@ -609,23 +1104,69 @@ async def handle_on_llm_resp(
             logger.error("无法获取当前 session_id,无法记录 LLM 响应到Mnemosyne。")
             return
         persona_id = await _get_persona_id(plugin, event)
+        turn_marker = _resolve_response_turn_marker(plugin, event, session_id)
 
-        # 判断是否需要总结
+        tool_call_names = getattr(resp, "tools_call_name", _MISSING)
+        if tool_call_names is None:
+            tool_call_names = []
+        if tool_call_names is not _MISSING and tool_call_names:
+            logger.debug(
+                f"检测到工具调用中间响应，不计入记忆总结轮数: {tool_call_names}"
+            )
+            return
+
+        completion_text = str(getattr(resp, "completion_text", "") or "").strip()
+        if not completion_text:
+            logger.debug("LLM 助手响应为空，不计入记忆总结轮数。")
+            return
+
+        context_history = plugin.context_manager.get_history(session_id)
+        user_was_recorded = _get_event_extra(
+            event, USER_RECORDED_EXTRA_KEY, False
+        ) or _has_turn_marker(plugin, "_mnemosyne_recorded_user_turns", turn_marker)
+        if not user_was_recorded:
+            logger.debug(
+                "当前轮未经过 Mnemosyne 用户消息记录，跳过响应记录但继续检查总结。"
+            )
+            await _check_and_trigger_summary(
+                plugin,
+                session_id,
+                context_history,
+                persona_id,
+            )
+            return
+
+        assistant_already_recorded = _get_event_extra(
+            event, ASSISTANT_RECORDED_EXTRA_KEY, False
+        ) or _has_turn_marker(
+            plugin,
+            "_mnemosyne_recorded_assistant_turns",
+            turn_marker,
+        )
+        if assistant_already_recorded:
+            logger.debug(f"会话 {session_id} 当前轮助手回复已记录，跳过重复计数。")
+            return
+
+        _append_tool_context_if_enabled(plugin, event, session_id, turn_marker)
+
+        logger.debug(f"返回的内容：{completion_text}")
+        plugin.context_manager.add_message(
+            session_id,
+            "assistant",
+            completion_text,
+            metadata={"speaker_id": "assistant"},
+        )
+        plugin.msg_counter.increment_counter(session_id)
+        _set_event_extra(event, ASSISTANT_RECORDED_EXTRA_KEY, True)
+        _mark_turn_once(plugin, "_mnemosyne_recorded_assistant_turns", turn_marker)
+
+        # 判断是否需要总结。放在助手回复记录之后，确保总结素材包含本轮最终回复。
         await _check_and_trigger_summary(
             plugin,
             session_id,
             plugin.context_manager.get_history(session_id),
             persona_id,
         )
-
-        logger.debug(f"返回的内容：{resp.completion_text}")
-        plugin.context_manager.add_message(
-            session_id,
-            "assistant",
-            resp.completion_text,
-            metadata={"speaker_id": "assistant"},
-        )
-        plugin.msg_counter.increment_counter(session_id)
 
     except Exception as e:
         logger.error(f"处理 LLM 响应后的记忆记录失败: {e}", exc_info=True)
@@ -713,6 +1254,61 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str |
     return persona_id
 
 
+def _attach_summary_task_callback(
+    task: asyncio.Task,
+    plugin: "Mnemosyne",
+    session_id: str,
+    tool_context_markers: set[str],
+    pre_summary_count: int | None = None,
+) -> None:
+    """
+    后台总结结束后清理本次任务捕获的临时 tool 上下文。
+
+    Args:
+        task: 总结任务。
+        plugin: Mnemosyne 插件实例。
+        session_id: 会话 ID。
+        tool_context_markers: 本次总结任务捕获的临时 tool 上下文标记。
+        pre_summary_count: 提交任务前的消息计数快照；任务失败时用于回滚
+            计数器，使下一轮对话重新触发总结（issue #150）。
+    """
+
+    def task_done_callback(t: asyncio.Task):
+        succeeded = False
+        try:
+            # 获取任务结果，如果有异常会在这里抛出
+            succeeded = bool(t.result())
+        except asyncio.CancelledError:
+            logger.info(f"总结任务被取消 (session: {session_id})")
+        except Exception as e:
+            logger.error(
+                f"后台总结任务执行失败 (session: {session_id}): {e}", exc_info=True
+            )
+        finally:
+            _clear_recorded_tool_context(plugin, session_id, tool_context_markers)
+
+        if succeeded:
+            return
+
+        # 总结失败时回滚计数器，让下一轮对话重新触发总结，
+        # 避免本轮记忆因 LLM 请求失败而被静默丢弃（issue #150）。
+        # 未传入计数值快照的调用方（如部分测试）跳过回滚。
+        if pre_summary_count is None:
+            return
+
+        try:
+            if plugin.msg_counter:
+                plugin.msg_counter.restore_counter(session_id, pre_summary_count)
+                logger.warning(
+                    f"总结任务未成功 (session: {session_id})，"
+                    f"已恢复计数器至 {pre_summary_count}，将在下一轮对话重新触发总结。"
+                )
+        except Exception as e:
+            logger.error(f"回滚会话 {session_id} 的消息计数器失败: {e}", exc_info=True)
+
+    task.add_done_callback(task_done_callback)
+
+
 async def _check_and_trigger_summary(
     plugin: "Mnemosyne",
     session_id: str,
@@ -742,9 +1338,10 @@ async def _check_and_trigger_summary(
         history_contents = format_context_to_string(
             context,  # type: ignore
             num_pairs * 2,  # 传递消息条数而不是轮数
+            include_tool_context=_summary_should_include_tool_context(plugin),
         )
+        tool_context_markers = _collect_tool_context_markers(context)
 
-        # M19 修复: 为后台任务添加异常处理回调
         task = asyncio.create_task(
             handle_summary_long_memory(
                 plugin,
@@ -754,42 +1351,11 @@ async def _check_and_trigger_summary(
                 context_history=context,
             )
         )
-
         # 记录提交总结任务前的计数值，供失败回滚使用（issue #150）
         pre_summary_count = plugin.msg_counter.get_counter(session_id)
-
-        def task_done_callback(t: asyncio.Task):
-            """后台任务完成时的回调，用于捕获未处理的异常"""
-            try:
-                # 获取任务结果，如果有异常会在这里抛出
-                succeeded = bool(t.result())
-            except asyncio.CancelledError:
-                logger.info(f"总结任务被取消 (session: {session_id})")
-                succeeded = False
-            except Exception as e:
-                logger.error(
-                    f"后台总结任务执行失败 (session: {session_id}): {e}", exc_info=True
-                )
-                succeeded = False
-
-            if succeeded:
-                return
-
-            # 总结失败时回滚计数器，让下一轮对话重新触发总结，
-            # 避免本轮记忆因 LLM 请求失败而被静默丢弃（issue #150）。
-            try:
-                if plugin.msg_counter:
-                    plugin.msg_counter.restore_counter(session_id, pre_summary_count)
-                    logger.warning(
-                        f"总结任务未成功 (session: {session_id})，"
-                        f"已恢复计数器至 {pre_summary_count}，将在下一轮对话重新触发总结。"
-                    )
-            except Exception as e:
-                logger.error(
-                    f"回滚会话 {session_id} 的消息计数器失败: {e}", exc_info=True
-                )
-
-        task.add_done_callback(task_done_callback)
+        _attach_summary_task_callback(
+            task, plugin, session_id, tool_context_markers, pre_summary_count
+        )
         logger.info("总结历史对话任务已提交到后台执行。")
         # M24 修复: 添加类型检查
         if plugin.msg_counter:
@@ -1079,11 +1645,65 @@ def _format_and_inject_memory(
         else:
             req.contexts.insert(0, payload)
 
+    elif injection_method == "extra_user_parts":
+        # 模仿 koko toolbox 的 <system_WARNING> 注入方式：
+        # 将记忆作为一个额外的用户内容块追加到 req.extra_user_content_parts，
+        # AstrBot 会把它拼接到“当前这条用户消息”之后再发给 LLM。
+        _inject_via_extra_user_parts(req, long_memory, injection_position)
+
     else:
         logger.warning(
             f"未知的记忆注入方法 '{injection_method}'，将默认追加到用户 prompt。"
         )
         current_prompt = req.prompt if isinstance(req.prompt, str) else ""
+        req.prompt = long_memory + "\n" + current_prompt
+
+
+def _mark_content_part_as_temp(part: Any) -> None:
+    marker = getattr(part, "mark_as_temp", None)
+    if callable(marker):
+        marker()
+        return
+
+    # 兼容测试桩或字典式 ContentPart；持久化会过滤 _no_save=True。
+    if isinstance(part, dict):
+        part["_no_save"] = True
+        return
+
+    try:
+        setattr(part, "_no_save", True)
+    except Exception:
+        logger.debug("无法为 extra_user_content_parts 标记临时内容", exc_info=True)
+
+
+def _inject_via_extra_user_parts(
+    req: ProviderRequest, long_memory: str, injection_position: str
+):
+    """以 koko toolbox 的方式，将记忆作为额外用户内容块注入。
+
+    使用 TextPart，避免克隆 ImageURLPart/AudioURLPart 时因 text 字段不兼容而失败。
+    注入的记忆必须标记为临时内容，防止持久化进会话历史。
+    """
+    try:
+        parts = getattr(req, "extra_user_content_parts", None)
+        if parts is not None:
+            from astrbot.core.agent.message import TextPart
+
+            part = TextPart(text=long_memory)
+            _mark_content_part_as_temp(part)
+            req.extra_user_content_parts.append(part)
+            logger.debug("已通过 extra_user_content_parts 注入长期记忆。")
+            return
+    except Exception as e:
+        logger.warning(
+            f"通过 extra_user_content_parts 注入记忆失败，回退到 prompt: {e}"
+        )
+
+    # 兜底：按配置写回 prompt。
+    current_prompt = req.prompt if isinstance(req.prompt, str) else ""
+    if injection_position == "append":
+        req.prompt = current_prompt + "\n" + long_memory
+    else:
         req.prompt = long_memory + "\n" + current_prompt
 
 
@@ -1102,6 +1722,10 @@ def clean_contexts(plugin: "Mnemosyne", req: ProviderRequest):
         )
     elif injection_method == "insert_system_prompt":
         req.contexts = remove_system_content(req.contexts, contexts_memory_len)
+    elif injection_method == "extra_user_parts":
+        # extra_user_parts 注入的是临时 ContentPart，不应清理 req.contexts；
+        # 历史里可能存在的 list 型多模态内容也不应由这里重写。
+        pass
     return
 
 
@@ -1272,9 +1896,7 @@ async def _get_summary_llm_response(
             context_history,
         )
         if speaker_mapping:
-            summary_contexts.append(
-                {"role": "system", "content": speaker_mapping}
-            )
+            summary_contexts.append({"role": "system", "content": speaker_mapping})
 
         for provider_kind, llm_provider in providers:
             try:
@@ -1283,9 +1905,7 @@ async def _get_summary_llm_response(
                     contexts=summary_contexts,
                     **summary_llm_config,
                 )
-                logger.debug(
-                    f"{provider_kind} LLM 总结响应原始数据: {llm_response}"
-                )
+                logger.debug(f"{provider_kind} LLM 总结响应原始数据: {llm_response}")
                 if _summary_response_has_text(llm_response):
                     return llm_response
                 logger.warning(f"{provider_kind}总结 Provider 返回空内容。")
@@ -1380,6 +2000,7 @@ async def _store_summary_to_vector_db(
         return False
 
     try:
+
         def _insert_data():
             return vector_db.insert(
                 collection_name=collection_name,
@@ -1654,11 +2275,17 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                         history_contents = format_context_to_string(
                             session_context["history"],
                             counter,  # type: ignore
+                            include_tool_context=_summary_should_include_tool_context(
+                                plugin
+                            ),
+                        )
+                        tool_context_markers = _collect_tool_context_markers(
+                            session_context["history"]
                         )
                         persona_id = await _get_persona_id(
                             plugin, session_context["event"]
                         )
-                        asyncio.create_task(
+                        task = asyncio.create_task(
                             handle_summary_long_memory(
                                 plugin,
                                 persona_id,
@@ -1666,6 +2293,9 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                                 history_contents,
                                 context_history=session_context["history"],
                             )
+                        )
+                        _attach_summary_task_callback(
+                            task, plugin, session_id, tool_context_markers
                         )
                         logger.info("总结历史对话任务已提交到后台执行。")
 

@@ -15,6 +15,176 @@ MNEMO_META_PREFIX = "<MNEMO_META>"
 MNEMO_META_SUFFIX = "</MNEMO_META>"
 DEFAULT_EMBEDDING_MAX_CHARS = 4000
 TRUNCATED_SUFFIX = "…(truncated)"
+DEFAULT_SUMMARY_TEXT_MAX_CHARS = 2000
+DEFAULT_TOOL_TEXT_MAX_CHARS = 1200
+DEFAULT_TOOL_CONTEXT_LINE_LIMIT = 12
+
+
+def _truncate_text(text: str, max_chars: int = DEFAULT_SUMMARY_TEXT_MAX_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + TRUNCATED_SUFFIX
+
+
+def _model_to_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump()
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    return {}
+
+
+def _content_to_safe_text(
+    content: Any, max_chars: int = DEFAULT_SUMMARY_TEXT_MAX_CHARS
+) -> str:
+    """将 AstrBot/OpenAI 风格上下文内容安全转为文本。"""
+
+    if isinstance(content, str):
+        if content.startswith("base64://") or content.startswith("data:image"):
+            return "[图片]"
+        if content.startswith("data:audio"):
+            return "[音频]"
+        return _truncate_text(content, max_chars)
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            item_dict = _model_to_dict(item)
+            if not item_dict:
+                continue
+
+            item_type = item_dict.get("type")
+
+            if item_type == "text":
+                text = item_dict.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(_truncate_text(text, max_chars))
+                continue
+
+            if item_type == "image_url" or "image_url" in item_dict:
+                parts.append("[图片]")
+                continue
+
+            if item_type == "audio_url" or "audio_url" in item_dict:
+                parts.append("[音频]")
+                continue
+
+            if item_type == "think":
+                continue
+
+            if isinstance(item_type, str) and item_type:
+                parts.append(f"[{item_type}]")
+
+        return " ".join(p for p in parts if p)
+
+    if isinstance(content, dict):
+        if "image_url" in content or "audio_url" in content:
+            return "[图片]" if "image_url" in content else "[音频]"
+        text = content.get("text")
+        if isinstance(text, str):
+            return _truncate_text(text, max_chars)
+        return ""
+
+    return ""
+
+
+def _safe_json_text(value: Any, max_chars: int = DEFAULT_TOOL_TEXT_MAX_CHARS) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(value)
+    return _truncate_text(text, max_chars)
+
+
+def _normalize_tool_call(tool_call: Any) -> tuple[str, str, str]:
+    tool_dict = _model_to_dict(tool_call)
+    if not tool_dict:
+        return "", "", ""
+
+    call_id = str(tool_dict.get("id") or "").strip()
+    function = tool_dict.get("function")
+    function_dict = _model_to_dict(function)
+    name = ""
+    args: Any = ""
+
+    if function_dict:
+        name = str(function_dict.get("name") or "").strip()
+        args = function_dict.get("arguments", "")
+    elif isinstance(function, dict):
+        name = str(function.get("name") or "").strip()
+        args = function.get("arguments", "")
+    else:
+        name = str(tool_dict.get("name") or "").strip()
+        args = tool_dict.get("arguments", "")
+
+    if isinstance(args, str):
+        args_text = _truncate_text(args, DEFAULT_TOOL_TEXT_MAX_CHARS)
+    else:
+        args_text = _safe_json_text(args)
+
+    return call_id, name or "unknown_tool", args_text
+
+
+def _format_tool_call_line(tool_call: Any) -> str:
+    call_id, name, args_text = _normalize_tool_call(tool_call)
+    suffix = f" id={call_id}" if call_id else ""
+    if args_text:
+        return f"assistant called tool {name}{suffix} args={args_text}"
+    return f"assistant called tool {name}{suffix}"
+
+
+def _iter_tool_call_result_items(tool_calls_result: Any) -> list[Any]:
+    if not tool_calls_result:
+        return []
+    if isinstance(tool_calls_result, list):
+        return tool_calls_result
+    return [tool_calls_result]
+
+
+def format_tool_calls_result_to_string(tool_calls_result: Any) -> str:
+    """
+    将 ProviderRequest.tool_calls_result 压缩成可总结的安全文本。
+    """
+    lines: list[str] = []
+    for tool_result in _iter_tool_call_result_items(tool_calls_result):
+        info = getattr(tool_result, "tool_calls_info", None)
+        if info is None and isinstance(tool_result, dict):
+            info = tool_result.get("tool_calls_info")
+        info_dict = _model_to_dict(info)
+
+        if info_dict:
+            content_text = _content_to_safe_text(info_dict.get("content"))
+            for tool_call in info_dict.get("tool_calls") or []:
+                lines.append(_format_tool_call_line(tool_call))
+            if content_text:
+                lines.append(f"assistant tool-call context: {content_text}")
+
+        result_messages = getattr(tool_result, "tool_calls_result", None)
+        if result_messages is None and isinstance(tool_result, dict):
+            result_messages = tool_result.get("tool_calls_result")
+        if result_messages and not isinstance(result_messages, list):
+            result_messages = [result_messages]
+
+        for result_message in result_messages or []:
+            result_dict = _model_to_dict(result_message)
+            if not result_dict:
+                continue
+            call_id = str(result_dict.get("tool_call_id") or "").strip()
+            content_text = _content_to_safe_text(
+                result_dict.get("content"), DEFAULT_TOOL_TEXT_MAX_CHARS
+            )
+            if not content_text:
+                continue
+            id_text = f" id={call_id}" if call_id else ""
+            lines.append(f"tool result{id_text}: {content_text}")
+
+    return "\n".join(lines)
 
 
 def resolve_max_prompt_chars(
@@ -238,109 +408,77 @@ def remove_system_content(
 
 
 def format_context_to_string(
-    context_history: list[dict[str, str] | str], length: int = 10
+    context_history: list[dict[str, str] | str],
+    length: int = 10,
+    include_tool_context: bool = False,
+    tool_context_limit: int = DEFAULT_TOOL_CONTEXT_LINE_LIMIT,
 ) -> str:
     """
     从上下文历史记录中提取最后 'length' 条用户和AI的对话消息，
     并将它们的内容转换为用换行符分隔的字符串。
+    tool_context_limit 单独限制工具调用上下文，避免挤占普通对话额度。
     """
     if length <= 0:
         return ""
 
-    def _truncate_text(text: str, max_chars: int = 2000) -> str:
-        if len(text) <= max_chars:
-            return text
-        return text[:max_chars] + "…(truncated)"
-
-    def _content_to_safe_text(content: Any) -> str:
-        """将 AstrBot/OpenAI 风格上下文内容安全转为文本。
-
-        精确依据 AstrBot 源码结构：
-        - `content` 可能是 `str`
-        - 或 `list[dict]`，元素为 ContentPart，常见 `type`: text/image_url/audio_url/think
-          其中图片真实数据在 `image_url.url` (data:image/...;base64,...)，绝不能展开。
-        """
-
-        # 1) 纯文本
-        if isinstance(content, str):
-            # 保险：若出现 data-url/base64 直接降级为占位符
-            if content.startswith("base64://") or content.startswith("data:image"):
-                return "[图片]"
-            return _truncate_text(content)
-
-        # 2) OpenAI 多模态 content blocks
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if not isinstance(item, dict):
-                    continue
-
-                item_type = item.get("type")
-
-                # AstrBot/OpenAI: {"type": "text", "text": "..."}
-                if item_type == "text":
-                    text = item.get("text")
-                    if isinstance(text, str) and text.strip():
-                        parts.append(_truncate_text(text))
-                    continue
-
-                # AstrBot/OpenAI: {"type": "image_url", "image_url": {"url": "data:image/...;base64,..."}}
-                # openai_source 的实现也会用 `"image_url" in item` 来判断，因此这里双保险。
-                if item_type == "image_url" or "image_url" in item:
-                    parts.append("[图片]")
-                    continue
-
-                # AstrBot: {"type": "audio_url", "audio_url": {"url": "data:audio/...;base64,..."}}
-                if item_type == "audio_url" or "audio_url" in item:
-                    parts.append("[音频]")
-                    continue
-
-                # assistant content 可能包含 think part；总结/记忆无需包含
-                if item_type == "think":
-                    continue
-
-                # 其他 ContentPart：不展开 payload，给占位
-                if isinstance(item_type, str) and item_type:
-                    parts.append(f"[{item_type}]")
-
-            merged = " ".join(p for p in parts if p)
-            return merged or ""
-
-        # 3) 其他结构：避免展开潜在大对象
-        if isinstance(content, dict):
-            if "image_url" in content or "audio_url" in content:
-                return "[图片]" if "image_url" in content else "[音频]"
-            text = content.get("text")
-            if isinstance(text, str):
-                return _truncate_text(text)
-            return ""
-
-        return ""
-
-    selected_contents: list[str] = []
-    count = 0
+    selected_blocks: list[list[str]] = []
+    dialog_count = 0
+    tool_count = 0
+    tool_context_limit = max(0, int(tool_context_limit))
 
     for message in reversed(context_history):
-        if count >= length:
+        if dialog_count >= length:
             break
 
         role = None
         content = None
 
-        if isinstance(message, dict) and "role" in message and "content" in message:
+        tool_lines: list[str] = []
+        if isinstance(message, dict) and "role" in message:
             role = message.get("role")
             content = message.get("content")
+            if include_tool_context:
+                if role == "assistant" and message.get("tool_calls"):
+                    for tool_call in message.get("tool_calls") or []:
+                        tool_lines.append(_format_tool_call_line(tool_call))
+                elif role == "tool":
+                    call_id = str(message.get("tool_call_id") or "").strip()
+                    tool_text = _content_to_safe_text(
+                        content, DEFAULT_TOOL_TEXT_MAX_CHARS
+                    )
+                    if tool_text:
+                        if call_id:
+                            tool_lines.append(f"tool result id={call_id}: {tool_text}")
+                        else:
+                            tool_lines.append(f"tool context: {tool_text}")
 
-        if content is not None:
+        block: list[str] = []
+        has_dialog_line = False
+        if content is not None and role in ("user", "assistant"):
             safe_text = _content_to_safe_text(content)
-            if role == "user":
-                selected_contents.insert(0, "user:" + safe_text + "\n")
-                count += 1
-            elif role == "assistant":
-                selected_contents.insert(0, "assistant:" + safe_text + "\n")
-                count += 1
+            if safe_text.strip() and dialog_count < length:
+                block.append(f"{role}:{safe_text}\n")
+                has_dialog_line = True
 
-    return "\n".join(selected_contents)
+        if include_tool_context and tool_lines:
+            remaining = tool_context_limit - tool_count
+            if remaining > 0:
+                selected_tool_lines = tool_lines[:remaining]
+                block.extend(line + "\n" for line in selected_tool_lines)
+                tool_count += len(selected_tool_lines)
+
+        if not block:
+            continue
+
+        selected_blocks.append(block)
+        if has_dialog_line:
+            dialog_count += 1
+
+    selected_lines: list[str] = []
+    for block in reversed(selected_blocks):
+        selected_lines.extend(block)
+
+    return "\n".join(selected_lines)
 
 
 def is_group_chat(event: AstrMessageEvent) -> bool:

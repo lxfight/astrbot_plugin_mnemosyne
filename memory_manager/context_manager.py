@@ -108,6 +108,91 @@ class ConversationContextManager:
             else:
                 return []
 
+    def clear_role_messages(self, session_id: str, role: str) -> int:
+        """
+        删除指定会话中指定角色的临时消息。
+        """
+        with self._lock:
+            if session_id not in self.conversations:
+                return 0
+            history = self.conversations[session_id].get("history", [])
+            if not isinstance(history, list):
+                return 0
+            kept_history = [
+                message
+                for message in history
+                if not (isinstance(message, dict) and message.get("role") == role)
+            ]
+            removed = len(history) - len(kept_history)
+            if removed:
+                self.conversations[session_id]["history"] = kept_history
+            return removed
+
+    def clear_role_messages_by_metadata(
+        self,
+        session_id: str,
+        role: str,
+        metadata_key: str,
+        metadata_values: set[str],
+    ) -> int:
+        """删除指定角色中 metadata 字段匹配的消息。"""
+        if not metadata_values:
+            return 0
+        with self._lock:
+            if session_id not in self.conversations:
+                return 0
+            history = self.conversations[session_id].get("history", [])
+            if not isinstance(history, list):
+                return 0
+
+            def should_remove(message: dict) -> bool:
+                metadata = message.get("metadata")
+                return (
+                    message.get("role") == role
+                    and isinstance(metadata, dict)
+                    and metadata.get(metadata_key) in metadata_values
+                )
+
+            kept_history = [
+                message
+                for message in history
+                if not (isinstance(message, dict) and should_remove(message))
+            ]
+            removed = len(history) - len(kept_history)
+            if removed:
+                self.conversations[session_id]["history"] = kept_history
+            return removed
+
+    def trim_role_messages(self, session_id: str, role: str, keep_last: int) -> int:
+        """
+        只保留指定会话中最近 keep_last 条指定角色消息。
+        """
+        with self._lock:
+            if keep_last < 0:
+                keep_last = 0
+            if session_id not in self.conversations:
+                return 0
+            history = self.conversations[session_id].get("history", [])
+            if not isinstance(history, list):
+                return 0
+
+            role_indices = [
+                index
+                for index, message in enumerate(history)
+                if isinstance(message, dict) and message.get("role") == role
+            ]
+            remove_count = max(0, len(role_indices) - keep_last)
+            if remove_count <= 0:
+                return 0
+
+            indices_to_remove = set(role_indices[:remove_count])
+            self.conversations[session_id]["history"] = [
+                message
+                for index, message in enumerate(history)
+                if index not in indices_to_remove
+            ]
+            return remove_count
+
     def get_session_context(self, session_id: str):
         """
         获取session_id对应的所有信息

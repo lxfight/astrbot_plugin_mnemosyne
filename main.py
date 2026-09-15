@@ -5,6 +5,7 @@ Mnemosyne - 基于 RAG 的 AstrBot 长期记忆插件主文件
 
 import asyncio
 import time
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, cast
 
 from astrbot.api import AstrBotConfig, logger  # 使用统一的 logger 和配置类型
@@ -73,6 +74,25 @@ class Mnemosyne(Star):
         self._embedding_provider_ready = False
         self._migrated_sessions: set[str] = set()  # 用于记录已迁移的会话
         self._warned_missing_provider_ids: set[str] = set()
+        # 间隔注入计数器：session_id -> 已处理轮次，用于“每隔 N 轮注入一次记忆”
+        self._injection_round_counter: dict[str, int] = {}
+        self._injection_round_counter_updated_at: dict[str, float] = {}
+        # LLM/tool 循环可能复建 event 对象，去重状态放在插件实例上并做有界保留。
+        self._mnemosyne_processed_request_turns: OrderedDict[
+            str, float
+        ] = OrderedDict()
+        self._mnemosyne_recorded_user_turns: OrderedDict[
+            str, float
+        ] = OrderedDict()
+        self._mnemosyne_recorded_assistant_turns: OrderedDict[
+            str, float
+        ] = OrderedDict()
+        self._mnemosyne_recorded_tool_context_turns: OrderedDict[
+            str, float
+        ] = OrderedDict()
+        self._mnemosyne_last_user_turn_by_session: OrderedDict[
+            str, str
+        ] = OrderedDict()
         self._post_load_tasks_started = False
         self._summary_check_task: asyncio.Task | None = None
         self._ensure_vector_db_connection_task: asyncio.Task | None = None

@@ -273,9 +273,18 @@
     "memory_injection_method":{
         "description":"记忆插入方式",
         "type":"string",
-        "hint":"user_prompt 注入到 LLM 用户提示词，位置由 memory_injection_position 控制；system_prompt 注入到 LLM 系统提示词；insert_system_prompt 会新增一条独立系统消息，可能降低部分模型的提示词缓存命中率",
-        "options": ["user_prompt", "system_prompt", "insert_system_prompt"],
+        "hint":"user_prompt 注入到 LLM 用户提示词，位置由 memory_injection_position 控制；system_prompt 注入到 LLM 系统提示词；insert_system_prompt 会新增一条独立系统消息，可能降低部分模型的提示词缓存命中率；extra_user_parts 会将临时记忆作为额外用户内容块追加到当前消息",
+        "options": ["user_prompt", "system_prompt", "insert_system_prompt", "extra_user_parts"],
         "default": "user_prompt"
+    },
+    "memory_injection_interval":{
+        "description":"记忆插入间隔轮数",
+        "type":"int",
+        "hint":"每隔 N 轮（次）对话才触发一次记忆插入。1 表示每轮都插入（默认行为）。该功能不累计召回历史，触发时仅注入当前这一轮检索到的记忆",
+        "obvious_hint":true,
+        "default":1,
+        "minimum":1,
+        "maximum":50
     },
     "memory_injection_position":{
         "description":"记忆插入位置",
@@ -310,6 +319,12 @@
         "hint":"减少模型在总结文本中臆造随机年份/日期",
         "default":true
     },
+    "include_tool_context_in_summary":{
+        "description":"记忆总结时包含工具上下文",
+        "type":"bool",
+        "hint":"开启后，自动总结会把本轮 LLM 工具调用名称、参数和工具返回结果一并纳入总结素材；关闭时只总结用户与助手的普通对话文本",
+        "default":false
+    },
     "summary_speaker_mapping_prompt":{
         "description":"记忆总结说话人映射提示词",
         "type":"text",
@@ -318,7 +333,7 @@
     },
     "long_memory_prompt":{
         "description":"对话总结提示词",
-        "type":"string",
+        "type":"text",
         "default":"请基于以下对话内容生成一段连贯的长期记忆：1. 使用单段自然语言，不加序号或分点；2. 聚焦参与者身份、核心事件、关键时间、特殊需求、争议与解决方案；3. 保留金额、数量、规格等信息；4. 严格遵循说话人映射，不混淆 user 与 assistant 的经历和第一人称；5. 不输出解释或分析过程。",
         "minLength":10,
         "maxLength":1000

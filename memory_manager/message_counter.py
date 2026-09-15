@@ -41,6 +41,30 @@ except ImportError:
         return target
 
 
+def _is_countable_dialog_message(message) -> bool:
+    if not isinstance(message, dict):
+        return False
+    role = message.get("role")
+    if role == "user":
+        return True
+    if role != "assistant":
+        return False
+    content = message.get("content")
+    if content is None:
+        return False
+    if isinstance(content, str):
+        has_content = bool(content.strip())
+    elif isinstance(content, (list, tuple, dict)):
+        has_content = bool(content)
+    else:
+        has_content = True
+    if not has_content:
+        return False
+    # 只有没有正文的 assistant 工具中间态不计入对话消息；带正文的
+    # assistant + tool_calls 仍代表一次可见的 assistant 回复。
+    return True
+
+
 class MessageCounter:
     """
     消息计数器类，使用 SQLite 存储每个会话的消息轮次计数。
@@ -314,7 +338,9 @@ class MessageCounter:
             return False
 
         current_counter = self.get_counter(session_id)
-        history_length = len(context_history)
+        history_length = sum(
+            1 for message in context_history if _is_countable_dialog_message(message)
+        )
 
         if history_length < current_counter:
             logging.warning(
