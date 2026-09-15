@@ -755,16 +755,38 @@ async def _check_and_trigger_summary(
             )
         )
 
+        # 记录提交总结任务前的计数值，供失败回滚使用（issue #150）
+        pre_summary_count = plugin.msg_counter.get_counter(session_id)
+
         def task_done_callback(t: asyncio.Task):
             """后台任务完成时的回调，用于捕获未处理的异常"""
             try:
                 # 获取任务结果，如果有异常会在这里抛出
-                t.result()
+                succeeded = bool(t.result())
             except asyncio.CancelledError:
                 logger.info(f"总结任务被取消 (session: {session_id})")
+                succeeded = False
             except Exception as e:
                 logger.error(
                     f"后台总结任务执行失败 (session: {session_id}): {e}", exc_info=True
+                )
+                succeeded = False
+
+            if succeeded:
+                return
+
+            # 总结失败时回滚计数器，让下一轮对话重新触发总结，
+            # 避免本轮记忆因 LLM 请求失败而被静默丢弃（issue #150）。
+            try:
+                if plugin.msg_counter:
+                    plugin.msg_counter.restore_counter(session_id, pre_summary_count)
+                    logger.warning(
+                        f"总结任务未成功 (session: {session_id})，"
+                        f"已恢复计数器至 {pre_summary_count}，将在下一轮对话重新触发总结。"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"回滚会话 {session_id} 的消息计数器失败: {e}", exc_info=True
                 )
 
         task.add_done_callback(task_done_callback)

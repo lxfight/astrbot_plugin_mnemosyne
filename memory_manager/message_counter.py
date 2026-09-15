@@ -198,6 +198,40 @@ class MessageCounter:
                 conn.rollback()
                 raise
 
+    def restore_counter(self, session_id: str, value: int):
+        """
+        将指定会话 ID 的消息计数器恢复为指定值。
+
+        用于后台总结任务失败后回滚之前的重置操作，
+        使会话在下一轮对话重新达到阈值并重试总结。
+
+        Args:
+            session_id (str): 会话 ID
+            value (int): 要恢复的计数值
+        """
+        if not session_id:
+            logging.warning("尝试恢复空 session_id 的计数器，已忽略")
+            return
+
+        if value < 0:
+            logging.warning(f"尝试恢复负数计数值 ({value})，已忽略")
+            return
+
+        with self._lock:
+            try:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT OR REPLACE INTO message_counts (session_id, count) VALUES (?, ?)",
+                    (session_id, value),
+                )
+                conn.commit()
+                logging.debug(f"会话 {session_id} 的计数器已恢复为 {value}。")
+            except sqlite3.Error as e:
+                logging.error(f"恢复会话 {session_id} 计数器时发生数据库错误: {e}")
+                conn.rollback()
+                raise
+
     def increment_counter(self, session_id: str):
         """
         为指定会话 ID 的消息计数器加 1。
