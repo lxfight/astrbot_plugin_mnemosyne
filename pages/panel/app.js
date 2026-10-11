@@ -615,9 +615,83 @@ function clearMemorySelection() {
     updateBatchActions();
 }
 
+// 原生 confirm() 在未授权 allow-modals 的插件 iframe 中会被浏览器拦截。
+let deletionConfirmationOpen = false;
+
+function confirmDeletion(message) {
+    // 避免重复点击叠加弹窗或重复提交删除。
+    if (deletionConfirmationOpen) return Promise.resolve(false);
+    deletionConfirmationOpen = true;
+    return new Promise(resolve => {
+        const previousFocus = document.activeElement;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal';
+        const content = document.createElement('div');
+        content.className = 'modal-content';
+        content.setAttribute('role', 'alertdialog');
+        content.setAttribute('aria-modal', 'true');
+        content.setAttribute('aria-labelledby', 'deletion-confirmation-title');
+        content.setAttribute('aria-describedby', 'deletion-confirmation-message');
+        const header = document.createElement('div');
+        header.className = 'modal-header';
+        const title = document.createElement('h3');
+        title.id = 'deletion-confirmation-title';
+        title.textContent = '确认删除';
+        header.appendChild(title);
+        const body = document.createElement('div');
+        body.className = 'modal-body';
+        body.id = 'deletion-confirmation-message';
+        // 会话 ID 等动态内容只能作为文本插入。
+        body.textContent = message;
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer';
+        footer.style.gap = '12px';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'btn btn-secondary';
+        cancel.textContent = '取消';
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.className = 'btn btn-danger';
+        confirm.textContent = '确认删除';
+        let settled = false;
+        const finish = answer => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener('keydown', onKey, true);
+            overlay.remove();
+            deletionConfirmationOpen = false;
+            if (previousFocus?.isConnected) previousFocus.focus();
+            resolve(answer);
+        };
+        const onKey = event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                finish(false);
+            } else if (event.key === 'Tab') {
+                event.preventDefault();
+                (document.activeElement === cancel ? confirm : cancel).focus();
+            }
+        };
+        cancel.onclick = () => finish(false);
+        confirm.onclick = () => finish(true);
+        overlay.onclick = event => { if (event.target === overlay) finish(false); };
+        footer.appendChild(cancel);
+        footer.appendChild(confirm);
+        content.appendChild(header);
+        content.appendChild(body);
+        content.appendChild(footer);
+        overlay.appendChild(content);
+        document.body.appendChild(overlay);
+        document.addEventListener('keydown', onKey, true);
+        cancel.focus();
+    });
+}
+
 async function batchDeleteMemories() {
     if (selectedMemoryIds.size === 0) { showToast('请先选择要删除的记忆', 'warning'); return; }
-    if (!confirm(`确定要删除选中的 ${selectedMemoryIds.size} 条记忆吗？此操作不可恢复！`)) return;
+    if (!(await confirmDeletion(`确定要删除选中的 ${selectedMemoryIds.size} 条记忆吗？此操作不可恢复！`))) return;
     showLoading(true);
     try {
         await apiPost('memories/delete', { memory_ids: Array.from(selectedMemoryIds) });
@@ -632,7 +706,7 @@ async function batchDeleteMemories() {
 }
 
 async function deleteMemory(memoryId) {
-    if (!confirm('确定要删除这条记忆吗？此操作不可恢复！')) return;
+    if (!(await confirmDeletion('确定要删除这条记忆吗？此操作不可恢复！'))) return;
     showLoading(true);
     try {
         await apiPost(`memories/${memoryId}/delete`);
@@ -940,7 +1014,7 @@ function viewSessionMemories(sessionId) {
 async function deleteSession(sessionId) {
     const session = AppState.sessionsData?.sessions?.find(s => s.session_id === sessionId);
     if (!session) { showToast('会话数据未找到', 'error'); return; }
-    if (!confirm(`确定要删除会话 "${sessionId}" 及其 ${session.memory_count} 条记忆吗？此操作不可恢复！`)) return;
+    if (!(await confirmDeletion(`确定要删除会话 "${sessionId}" 及其 ${session.memory_count} 条记忆吗？此操作不可恢复！`))) return;
     showLoading(true);
     try {
         await apiPost(`memories/session/${sessionId}/delete`);
