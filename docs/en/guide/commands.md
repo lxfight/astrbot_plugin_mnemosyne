@@ -85,7 +85,7 @@ When no session ID is supplied, commands operate on the current session. Use `--
 
 ## Web Admin Panel
 
-Open the long-term memory page under **Alkaid** in AstrBot Dashboard to:
+Open the long-term memory page under **Alkaid** in AstrBot Dashboard to perform the following tasks. See [Admin Panel](/en/guide/admin-panel) for the full guide.
 
 - Inspect database connection status.
 - Search and browse memory records.

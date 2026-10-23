@@ -85,7 +85,7 @@ Mnemosyne 提供 `/memory` 命令用于初始化、查询、写入和清理长�
 
 ## Web 管理面板
 
-在 AstrBot Dashboard 的 **Alkaid** 页面中打开长期记忆管理，可以完成以下操作：
+在 AstrBot Dashboard 的 **Alkaid** 页面中打开长期记忆管理，可以完成以下操作。完整说明见[管理面板](/guide/admin-panel)。
 
 - 查看数据库连接状态。
 - 搜索和浏览记忆记录。

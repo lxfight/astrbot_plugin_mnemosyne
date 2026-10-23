@@ -36,6 +36,8 @@ features:
 - 需要马上跑起来：阅读[快速开始](/guide/getting-started)。
 - 需要理解配置项：阅读[配置说明](/guide/configuration)。
 - 需要选择向量数据库：阅读[数据库选择](/guide/database)。
-- 需要管理记忆：阅读[命令与管理](/guide/commands)。
+- 需要日常管理：阅读[管理面板](/guide/admin-panel)与[命令与管理](/guide/commands)。
+- 需要理解实现：阅读[架构与数据流](/reference/architecture)。
+- 需要参与开发：阅读[本地开发与文档部署](/reference/development)。
 
 English documentation is available at [/en/](/en/).
