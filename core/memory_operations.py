@@ -59,6 +59,7 @@ USER_RECORDED_EXTRA_KEY = "_mnemosyne_user_recorded"
 ASSISTANT_RECORDED_EXTRA_KEY = "_mnemosyne_assistant_recorded"
 TOOL_CONTEXT_RECORDED_EXTRA_KEY = "_mnemosyne_tool_context_recorded"
 REQUEST_PROCESSED_EXTRA_KEY = "_mnemosyne_request_processed"
+CAPTURED_MEMORY_CONTENT_EXTRA_KEY = "_mnemosyne_captured_memory_content"
 TOOL_CONTEXT_MARKER_METADATA_KEY = "_mnemosyne_tool_context_turn_marker"
 _MISSING = object()
 _TURN_MARKER_TTL_SECONDS = 10 * 60
@@ -1005,6 +1006,11 @@ async def handle_query_memory(
                         source="explicit_trigger",
                     )
                     if stored:
+                        _set_event_extra(
+                            event,
+                            CAPTURED_MEMORY_CONTENT_EXTRA_KEY,
+                            explicit_content,
+                        )
                         logger.info("已根据显式“记住”触发写入长期记忆。")
                 except Exception as e:
                     logger.error(
@@ -2212,6 +2218,49 @@ async def store_manual_memory(
         summary_text=stored_content,
         embedding_vector=embedding_vector,
     )
+
+
+async def store_memory_from_tool(
+    plugin: "Mnemosyne",
+    event: AstrMessageEvent,
+    content: str,
+) -> str:
+    """存储模型提供的记忆内容，并返回供模型续答的简短结果。"""
+    normalized_content = content.strip()
+    if not normalized_content:
+        return "记忆内容为空，未写入。"
+
+    captured_content = _get_event_extra(event, CAPTURED_MEMORY_CONTENT_EXTRA_KEY)
+    if captured_content == normalized_content:
+        return "该内容已写入当前轮次的长期记忆，无需重复写入。"
+
+    max_chars = resolve_max_prompt_chars(
+        getattr(plugin, "config", None),
+        default=4000,
+    )
+    normalized_content, was_truncated = truncate_for_embedding(
+        normalized_content,
+        max_chars,
+        append_suffix=False,
+    )
+    if was_truncated:
+        logger.info(
+            f"记忆工具输入超长，已按 max_prompt_chars_for_embedding={max_chars} 截断。"
+        )
+    if captured_content == normalized_content:
+        return "该内容已写入当前轮次的长期记忆，无需重复写入。"
+
+    stored = await store_manual_memory(
+        plugin=plugin,
+        event=event,
+        memory_content=normalized_content,
+        source="llm_tool",
+    )
+    if not stored:
+        return "长期记忆写入失败，请检查插件日志。"
+
+    _set_event_extra(event, CAPTURED_MEMORY_CONTENT_EXTRA_KEY, normalized_content)
+    return "已写入长期记忆。"
 
 
 # 计时器

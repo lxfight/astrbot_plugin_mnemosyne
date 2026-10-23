@@ -40,6 +40,7 @@ Embedding Provider 的向量维度决定集合结构。更换 Embedding 模型�
 | `summary_fallback_provider_id` | 主总结模型失败或返回空内容时重试的备用模型。 | 空 |
 | `summary_speaker_mapping_prompt` | 约束 `user`、`assistant` 和第一人称归属，支持会话与说话人变量。 | 内置通用映射 |
 | `score_threshold` | 相似度阈值，低于阈值的记忆会被过滤。 | `0.0` |
+| `enable_llm_memory_tool` | 允许支持工具调用的模型通过 `mnemosyne_remember_memory` 写入当前会话记忆。关闭后模型仍可调用工具，但不会写入。 | `true` |
 
 如果记忆过多干扰回复，可以降低 `top_k`、提高 `score_threshold` 或减少 `contexts_memory_len`。
 

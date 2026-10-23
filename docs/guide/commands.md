@@ -44,6 +44,10 @@ Mnemosyne 提供 `/memory` 命令用于初始化、查询、写入和清理长�
 /memory remember 用户正在调试 Mnemosyne 的 VitePress 文档站。
 ```
 
+### 模型工具写入
+
+插件注册 `mnemosyne_remember_memory` 工具。当 `enable_llm_memory_tool` 开启时，用户明确要求记住某件事，或对话中出现稳定的偏好、个人事实和重要安排时，支持工具调用的模型可主动写入当前会话记忆。该入口与 `/memory remember` 共用 Embedding 和存储流程。
+
 ## 删除数据
 
 删除命令通常需要确认参数。执行前先使用 `list_records` 或管理面板确认记录 ID。

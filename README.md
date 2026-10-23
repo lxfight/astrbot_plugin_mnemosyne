@@ -11,7 +11,7 @@
 ---
 
 [![License](https://img.shields.io/badge/license-Custom-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.3.1-green.svg)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
+[![Version](https://img.shields.io/badge/version-v2.4.0-green.svg)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
 [![QQ Group](https://img.shields.io/badge/QQ群-953245617-blue?style=flat-square&logo=tencent-qq)](https://qm.qq.com/cgi-bin/qm/qr?k=WdyqoP-AOEXqGAN08lOFfVSguF2EmBeO&jump_from=webapi&authKey=tPyfv90TVYSGVhbAhsAZCcSBotJuTTLf03wnn7/lQZPUkWfoQ/J8e9nkAipkOzwh)
 
 </div>
@@ -33,6 +33,7 @@
 <li><strong>智能记忆检索</strong><br/>基于语义相似度检索最相关的历史记忆</li>
 <li><strong>会话隔离</strong><br/>为不同会话维护独立的记忆上下文</li>
 <li><strong>向量化存储</strong><br/>默认使用 Chroma，并支持 Milvus、Qdrant、Weaviate 后端</li>
+<li><strong>模型工具写入</strong><br/>支持模型在对话中按需写入当前会话记忆</li>
 </ul>
 
 </td>
@@ -187,6 +188,11 @@
 <td><code>enable_explicit_memory_capture</code></td>
 <td>开启后支持“记住/remember”显式触发即时记忆写入</td>
 <td>false</td>
+</tr>
+<tr>
+<td><code>enable_llm_memory_tool</code></td>
+<td>允许模型通过 <code>mnemosyne_remember_memory</code> 工具写入记忆</td>
+<td>true</td>
 </tr>
 <tr>
 <td><code>use_participant_filtering</code></td>
@@ -431,7 +437,7 @@ uv pip install -r requirements.txt
 
 **项目地址**：[github.com/lxfight/astrbot_plugin_mnemosyne](https://github.com/lxfight/astrbot_plugin_mnemosyne)
 
-**作者**：lxfight | **版本**：v2.0.0
+**作者**：lxfight | **版本**：v2.4.0
 
 ---
 
