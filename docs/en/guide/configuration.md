@@ -40,6 +40,7 @@ See [Database Options](/en/guide/database) for backend guidance.
 | `summary_fallback_provider_id` | Retry with this provider when the primary summarizer fails or returns empty text. | Empty |
 | `summary_speaker_mapping_prompt` | Constrain `user`, `assistant`, and first-person ownership with session and speaker variables. | Built-in mapping |
 | `score_threshold` | Filter out memories below this similarity score. | `0.0` |
+| `enable_llm_memory_tool` | Let tool-capable models write to the current session through `mnemosyne_remember_memory`. When disabled, calls return without writing. | `true` |
 
 If memories become too noisy, lower `top_k`, increase `score_threshold`, or reduce `contexts_memory_len`.
 

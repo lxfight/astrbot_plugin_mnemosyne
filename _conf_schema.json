@@ -307,6 +307,12 @@
         "hint":"当用户消息以“记住/请记住/remember”开头时，自动写入长期记忆",
         "default":false
     },
+    "enable_llm_memory_tool":{
+        "description":"启用模型工具写入记忆",
+        "type":"bool",
+        "hint":"允许支持工具调用的模型在用户明确要求或出现稳定偏好、个人事实、重要安排时写入当前会话记忆",
+        "default":true
+    },
     "use_lightweight_memory_graph":{
         "description":"启用轻量图谱重排",
         "type":"bool",

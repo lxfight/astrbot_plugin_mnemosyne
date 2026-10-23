@@ -44,6 +44,10 @@ When `enable_explicit_memory_capture` is enabled, natural language triggers can 
 /memory remember The user is working on the Mnemosyne VitePress documentation site.
 ```
 
+### Model Tool Writes
+
+The plugin exposes the `mnemosyne_remember_memory` tool. When `enable_llm_memory_tool` is enabled, a tool-capable model can write to the current session if the user explicitly asks it to remember something, or if a durable preference, personal fact, or important plan is clear. It shares the same embedding and storage path as `/memory remember`.
+
 ## Deleting Data
 
 Deletion commands generally require confirmation. Use `list_records` or the admin panel to verify record IDs first.

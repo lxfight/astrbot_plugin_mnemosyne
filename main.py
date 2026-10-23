@@ -656,6 +656,22 @@ class Mnemosyne(Star):
             logger.error(f"处理 on_llm_response 钩子时发生捕获异常: {e}", exc_info=True)
         return
 
+    @filter.llm_tool(name="mnemosyne_remember_memory")
+    async def remember_memory_tool(self, event: AstrMessageEvent, content: str) -> str:
+        """保存一条长期记忆。
+
+        当用户明确要求记住某件事，或表达了稳定的偏好、个人事实、重要安排等值得长期保留的信息时调用。
+        只保存独立、可复用的记忆内容，不要保存寒暄、临时上下文或重复内容。
+
+        Args:
+            content(string): 要保存的独立记忆文本
+        """
+        if not self.config.get("enable_llm_memory_tool", True):
+            return "长期记忆工具已禁用。"
+        if self._is_memory_disabled_for_event(event):
+            return "当前平台已禁用长期记忆。"
+        return await memory_operations.store_memory_from_tool(self, event, content)
+
     # --- 命令处理 (定义方法并应用装饰器，调用 commands.py 中的实现) ---
 
     @filter.command_group("memory")

@@ -366,6 +366,13 @@ class TestMemoryMetaHelpers(unittest.TestCase):
 
 
 class TestConfigSchema(unittest.TestCase):
+    def test_llm_memory_tool_is_enabled_by_default(self) -> None:
+        schema = json.loads(
+            (PLUGIN_ROOT / "_conf_schema.json").read_text(encoding="utf-8")
+        )
+
+        self.assertIs(schema["enable_llm_memory_tool"]["default"], True)
+
     def test_memory_injection_schema_has_single_interval_gate(self) -> None:
         duplicates: list[str] = []
 
@@ -418,6 +425,10 @@ class TestHandleQueryMemory(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(stored_calls), 1)
         self.assertEqual(stored_calls[0]["memory_content"], "Alice likes tea")
         self.assertEqual(stored_calls[0]["source"], "explicit_trigger")
+        self.assertEqual(
+            event._extra[memory_operations.CAPTURED_MEMORY_CONTENT_EXTRA_KEY],
+            "Alice likes tea",
+        )
         self.assertEqual(plugin._injection_round_counter[event.unified_msg_origin], 1)
         self.assertEqual(plugin.msg_counter.get_counter(event.unified_msg_origin), 1)
         self.assertEqual(req.prompt, "记住: Alice likes tea")
