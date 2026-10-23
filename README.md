@@ -11,7 +11,7 @@
 ---
 
 [![License](https://img.shields.io/badge/license-Custom-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.3.1-green.svg)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
+[![Version](https://img.shields.io/badge/version-v2.4.0-green.svg)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
 [![QQ Group](https://img.shields.io/badge/QQ群-953245617-blue?style=flat-square&logo=tencent-qq)](https://qm.qq.com/cgi-bin/qm/qr?k=WdyqoP-AOEXqGAN08lOFfVSguF2EmBeO&jump_from=webapi&authKey=tPyfv90TVYSGVhbAhsAZCcSBotJuTTLf03wnn7/lQZPUkWfoQ/J8e9nkAipkOzwh)
 
 </div>
@@ -437,7 +437,7 @@ uv pip install -r requirements.txt
 
 **项目地址**：[github.com/lxfight/astrbot_plugin_mnemosyne](https://github.com/lxfight/astrbot_plugin_mnemosyne)
 
-**作者**：lxfight | **版本**：v2.0.0
+**作者**：lxfight | **版本**：v2.4.0
 
 ---
 
