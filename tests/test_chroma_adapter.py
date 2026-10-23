@@ -2,8 +2,9 @@
 Chroma 适配器单元测试
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, Mock
 
 
 class TestChromaVectorDB:
@@ -155,6 +156,17 @@ class TestChromaVectorDB:
         mock_collection2.name = "collection2"
 
         mock_client.list_collections.return_value = [mock_collection1, mock_collection2]
+        chroma_db._client = mock_client
+        chroma_db._is_connected = True
+
+        collections = chroma_db.list_collections()
+
+        assert collections == ["collection1", "collection2"]
+
+    def test_list_collections_chroma_06_strings(self, chroma_db):
+        """测试 Chroma 0.6 返回字符串集合名称。"""
+        mock_client = MagicMock()
+        mock_client.list_collections.return_value = ["collection1", "collection2"]
         chroma_db._client = mock_client
         chroma_db._is_connected = True
 

@@ -407,7 +407,10 @@ class ChromaVectorDB(VectorDatabase):
 
         try:
             collections = self._client.list_collections()
-            collection_names = [c.name for c in collections]
+            # Chroma 0.6 returns names as strings; older versions return Collection objects.
+            collection_names = [
+                c if isinstance(c, str) else c.name for c in collections
+            ]
             logger.info(f"获取到 {len(collection_names)} 个集合")
             return collection_names
 

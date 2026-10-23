@@ -412,7 +412,7 @@ function addMetricItem(container, title, value, label) {
 }
 
 function getComponentDisplayName(name) {
-    const names = { 'milvus': 'Milvus 向量库', 'embedding_api': 'Embedding API', 'message_counter': '消息计数器', 'background_task': '后台任务' };
+    const names = { 'milvus': '向量数据库', 'embedding_api': 'Embedding API', 'message_counter': '消息计数器', 'background_task': '后台任务' };
     return names[name] || name;
 }
 
