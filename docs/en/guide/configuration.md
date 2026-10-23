@@ -34,15 +34,16 @@ See [Database Options](/en/guide/database) for backend guidance.
 | --- | --- | --- |
 | `num_pairs` | Conversation rounds required before automatic summarization. | `5` |
 | `top_k` | Number of memories returned by retrieval. | `3` |
-| `contexts_memory_len` | Number of long-term memories injected into context. | `3` |
+| `contexts_memory_len` | Number of long-term memory tag blocks retained in context. Values below 0 keep all blocks; 0 removes all. | `0` |
 | `memory_injection_method` | Use the user prompt, the LLM system prompt, or a separate system message. | `user_prompt` |
+| `memory_injection_interval` | Retrieve and inject memories once every N conversation turns. | `1` |
 | `memory_injection_position` | Inject before or after the active prompt. | `prepend` |
+| `max_prompt_chars_for_embedding` | Maximum input characters before embedding; longer text is truncated. | `4000` |
 | `summary_fallback_provider_id` | Retry with this provider when the primary summarizer fails or returns empty text. | Empty |
 | `summary_speaker_mapping_prompt` | Constrain `user`, `assistant`, and first-person ownership with session and speaker variables. | Built-in mapping |
-| `score_threshold` | Filter out memories below this similarity score. | `0.0` |
 | `enable_llm_memory_tool` | Let tool-capable models write to the current session through `mnemosyne_remember_memory`. When disabled, calls return without writing. | `true` |
 
-If memories become too noisy, lower `top_k`, increase `score_threshold`, or reduce `contexts_memory_len`.
+If memories become too noisy, lower `top_k`, increase `memory_injection_interval`, or disable lightweight graph reranking.
 
 `memory_injection_position` controls placement for both `user_prompt` and `system_prompt`. `insert_system_prompt` creates a separate system message and may reduce prompt-cache hits on some models; prefer the first two modes when cache stability matters.
 

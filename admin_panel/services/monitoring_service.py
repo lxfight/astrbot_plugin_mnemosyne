@@ -20,6 +20,9 @@ from ..models.monitoring import (
 )
 
 
+RESOURCE_USAGE_CACHE_TTL_SECONDS = 10.0
+
+
 class MetricsCollector:
     """指标收集器 - 用于收集和计算性能指标"""
 
@@ -154,6 +157,8 @@ class MonitoringService:
             plugin_instance.metrics_collector = self.metrics_collector
         self._last_health_check = None
         self._health_check_cache_duration = 30  # 健康检查缓存30秒
+        self._resource_cache: ResourceUsage | None = None
+        self._resource_cache_at = 0.0
 
     async def get_system_status(self, force_refresh: bool = False) -> SystemStatus:
         """
@@ -355,6 +360,13 @@ class MonitoringService:
 
     async def get_resource_usage(self) -> ResourceUsage:
         """获取资源使用情况"""
+        now = time.monotonic()
+        if (
+            self._resource_cache is not None
+            and now - self._resource_cache_at < RESOURCE_USAGE_CACHE_TTL_SECONDS
+        ):
+            return self._resource_cache
+
         usage = ResourceUsage()
 
         try:
@@ -433,6 +445,8 @@ class MonitoringService:
         except Exception as e:
             self.logger.error(f"获取后台任务状态失败: {e}")
 
+        self._resource_cache = usage
+        self._resource_cache_at = time.monotonic()
         return usage
 
     def record_operation_time(self, operation_type: str, duration_ms: float):

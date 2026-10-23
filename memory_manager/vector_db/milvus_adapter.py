@@ -265,7 +265,7 @@ class MilvusVectorDB(VectorDatabase):
                 query_vectors=[query_vector],
                 vector_field=vector_field,
                 search_params=search_params
-                or {"metric_type": "L2", "params": {"nprobe": 10}},
+                or {"metric_type": "L2", "params": {}},
                 limit=top_k,
                 expression=filters,
                 output_fields=output_fields or ["*"],

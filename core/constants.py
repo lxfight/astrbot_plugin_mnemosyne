@@ -22,7 +22,7 @@ DEFAULT_MAX_TURNS = 10  # 短期记忆最大对话轮数（用于总结）
 DEFAULT_MAX_HISTORY = 20  # 短期记忆最大历史消息数（用于总结）
 
 # --- RAG 相关常量 ---
-DEFAULT_TOP_K = 5  # 默认检索的记忆数量
+DEFAULT_TOP_K = 3  # 与 _conf_schema.json / 文档保持一致
 DEFAULT_PERSONA_ON_NONE = "UNKNOWN_PERSONA"  # 当人格ID为空时使用的占位符或默认值
 
 # --- 性能观测阈值（毫秒） ---

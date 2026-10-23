@@ -5,6 +5,7 @@
 import csv
 import io
 import json
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
@@ -28,6 +29,9 @@ except ImportError:
     from core.security_utils import safe_build_milvus_expression
 
 
+MEMORY_SERVICE_CACHE_TTL_SECONDS = 10.0
+
+
 class MemoryService:
     """记忆管理服务"""
 
@@ -40,6 +44,14 @@ class MemoryService:
         """
         self.plugin = plugin_instance
         self.logger = logger
+        self._stats_cache: MemoryStatistics | None = None
+        self._stats_cache_at = 0.0
+        self._sessions_cache: list[dict[str, Any]] | None = None
+        self._sessions_cache_at = 0.0
+
+    def _invalidate_caches(self) -> None:
+        self._stats_cache = None
+        self._sessions_cache = None
 
     def _get_vector_db(self):
         return getattr(self.plugin, "vector_db", None)
@@ -300,6 +312,13 @@ class MemoryService:
         Returns:
             MemoryStatistics: 统计信息
         """
+        now = time.monotonic()
+        if (
+            self._stats_cache is not None
+            and now - self._stats_cache_at < MEMORY_SERVICE_CACHE_TTL_SECONDS
+        ):
+            return self._stats_cache
+
         stats = MemoryStatistics()
 
         try:
@@ -324,6 +343,8 @@ class MemoryService:
                 # 检查查询结果
                 if not results:
                     self.logger.warning("统计查询返回空结果")
+                    self._stats_cache = stats
+                    self._stats_cache_at = time.monotonic()
                     return stats
 
                 # 统计各会话的记忆数
@@ -376,7 +397,10 @@ class MemoryService:
 
         except Exception as e:
             self.logger.error(f"获取记忆统计失败: {e}", exc_info=True)
+            return stats
 
+        self._stats_cache = stats
+        self._stats_cache_at = time.monotonic()
         return stats
 
     async def delete_memory(self, memory_id: str) -> bool:
@@ -414,6 +438,7 @@ class MemoryService:
 
             delete_count = getattr(mutation_result, "delete_count", None)
             self.logger.info(f"已删除记忆: {memory_id}, 删除计数: {delete_count}")
+            self._invalidate_caches()
             return delete_count is None or delete_count > 0
 
         except Exception as e:
@@ -491,6 +516,7 @@ class MemoryService:
             updated_id = (
                 str(result.primary_keys[0]) if result.primary_keys else memory_id
             )
+            self._invalidate_caches()
             return self._updated_memory_response(memory_id, updated_id, updated_payload)
 
         # Milvus 集合使用 AutoID，无法原地保留主键。删除前同时生成旧向量，
@@ -537,6 +563,7 @@ class MemoryService:
             if insert_result.primary_keys
             else memory_id
         )
+        self._invalidate_caches()
         return self._updated_memory_response(memory_id, updated_id, updated_payload)
 
     @staticmethod
@@ -597,6 +624,7 @@ class MemoryService:
             if count > 0:
                 vector_db.delete(collection_name, expr)
                 vector_db.flush([collection_name])
+                self._invalidate_caches()
 
                 self.logger.info(f"已删除会话 {session_id} 的 {count} 条记忆")
 
@@ -692,6 +720,13 @@ class MemoryService:
         Returns:
             List[Dict]: 会话列表
         """
+        now = time.monotonic()
+        if (
+            self._sessions_cache is not None
+            and now - self._sessions_cache_at < MEMORY_SERVICE_CACHE_TTL_SECONDS
+        ):
+            return self._sessions_cache[:limit]
+
         try:
             vector_db = self._get_vector_db()
             if not vector_db or not vector_db.is_connected():
@@ -712,6 +747,8 @@ class MemoryService:
             # 检查查询结果
             if not results:
                 self.logger.warning("会话列表查询返回空结果")
+                self._sessions_cache = []
+                self._sessions_cache_at = time.monotonic()
                 return []
 
             # 统计每个会话
@@ -765,7 +802,7 @@ class MemoryService:
             )
 
             # 格式化时间
-            for session in sessions[:limit]:
+            for session in sessions:
                 last_time = session.get("last_memory_time")
                 if last_time and isinstance(last_time, datetime):
                     session["last_memory_time"] = last_time.isoformat()
@@ -774,6 +811,8 @@ class MemoryService:
                 if first_time and isinstance(first_time, datetime):
                     session["first_memory_time"] = first_time.isoformat()
 
+            self._sessions_cache = sessions
+            self._sessions_cache_at = time.monotonic()
             return sessions[:limit]
 
         except Exception as e:
