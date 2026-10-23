@@ -277,7 +277,7 @@ class MilvusVectorDB(VectorDatabase):
                 for item in self._manager.format_search_results(raw_results)
             ]
 
-            logger.info(
+            logger.debug(
                 f"从集合 '{collection_name}' 搜索到 {len(formatted_results)} 条结果"
             )
             return formatted_results
