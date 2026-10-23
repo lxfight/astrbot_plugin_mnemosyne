@@ -31,6 +31,7 @@ from .core.tools import get_event_platform_id, is_group_chat
 from .memory_manager.context_manager import ConversationContextManager
 from .memory_manager.message_counter import MessageCounter
 from .memory_manager.vector_db_base import VectorDatabase
+from .admin_panel.services.monitoring_service import MetricsCollector
 from .web_api import MnemosyneWebApi
 
 if TYPE_CHECKING:
@@ -64,6 +65,7 @@ class Mnemosyne(Star):
         self.context_manager: ConversationContextManager | None = None
         self.embedding_provider: EmbeddingProvider | None = None
         self.provider = None
+        self.metrics_collector = MetricsCollector()
         self.web_api: MnemosyneWebApi | None = None  # Pages Web API
         self.plugin_data_dir: str | None = None  # 插件数据目录
 

@@ -28,6 +28,12 @@ from .constants import (
     DEFAULT_MILVUS_TIMEOUT,
     DEFAULT_PERSONA_ON_NONE,
     DEFAULT_TOP_K,
+    SLOW_DB_OPERATION_THRESHOLD_MS,
+    SLOW_EMBEDDING_THRESHOLD_MS,
+    SLOW_INJECTION_THRESHOLD_MS,
+    SLOW_POSTPROCESS_THRESHOLD_MS,
+    SLOW_RAG_QUERY_THRESHOLD_MS,
+    SLOW_VECTOR_SEARCH_THRESHOLD_MS,
     VECTOR_FIELD_NAME,
 )
 from .security_utils import (
@@ -80,6 +86,38 @@ DEFAULT_SUMMARY_SPEAKER_MAPPING_PROMPT = (
 def _get_vector_db(plugin: "Mnemosyne"):
     """获取当前配置的向量数据库实例。"""
     return getattr(plugin, "vector_db", None)
+
+
+def _record_operation(
+    plugin: "Mnemosyne",
+    operation_type: str,
+    started_at: float,
+    threshold_ms: float,
+    detail: str = "",
+) -> float:
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    collector = getattr(plugin, "metrics_collector", None)
+    if collector is not None:
+        collector.record_operation_time(operation_type, duration_ms)
+    if duration_ms >= threshold_ms:
+        suffix = f" ({detail})" if detail else ""
+        logger.warning(
+            f"{operation_type} 耗时 {duration_ms:.1f} ms，"
+            f"超过阈值 {threshold_ms:.0f} ms{suffix}"
+        )
+    return duration_ms
+
+
+def _record_embedding_api_call(plugin: "Mnemosyne", success: bool) -> None:
+    collector = getattr(plugin, "metrics_collector", None)
+    if collector is not None:
+        collector.record_embedding_api_call(success)
+
+
+def _record_vector_db_api_call(plugin: "Mnemosyne", success: bool) -> None:
+    collector = getattr(plugin, "metrics_collector", None)
+    if collector is not None:
+        collector.record_vector_db_api_call(success)
 
 
 def _extract_explicit_memory_content(prompt: str) -> str | None:
@@ -1027,32 +1065,22 @@ async def handle_query_memory(
 
         # --- RAG 搜索 ---
         detailed_results = []
+        rag_started = time.perf_counter()
+        rag_succeeded = False
         try:
             # 1. 向量化用户查询
             # 使用 AstrBot EmbeddingProvider（异步）
+            if not plugin.embedding_provider:
+                logger.warning("Embedding Provider 不可用，无法执行 RAG 搜索")
+                return
+
+            embedding_started = time.perf_counter()
+            embedding_succeeded = False
             try:
-                # 等待 Embedding Provider 就绪
-                if (
-                    not plugin.embedding_provider
-                    and not plugin._embedding_provider_ready
-                ):
-                    logger.warning("Embedding Provider 不可用，无法执行 RAG 搜索")
-                    return
-
-                # 使用 AstrBot EmbeddingProvider 的 embed 方法
-                if plugin.embedding_provider:
-                    # 使用提取的真实消息进行向量化
-                    query_vector = await plugin.embedding_provider.get_embedding(
-                        actual_query
-                    )
-                else:
-                    logger.error("Embedding Provider 未正确初始化")
-                    return
-
-                if not query_vector:
-                    logger.error("无法获取用户查询的 Embedding 向量。")
-                    return
-
+                query_vector = await plugin.embedding_provider.get_embedding(
+                    actual_query
+                )
+                embedding_succeeded = bool(query_vector)
             except ConnectionError as e:
                 logger.error(f"网络连接错误，无法获取 Embedding: {e}", exc_info=True)
                 return
@@ -1064,6 +1092,19 @@ async def handle_query_memory(
                 return
             except Exception as e:
                 logger.error(f"获取 Embedding 时发生未知错误: {e}", exc_info=True)
+                return
+            finally:
+                _record_operation(
+                    plugin,
+                    "embedding",
+                    embedding_started,
+                    SLOW_EMBEDDING_THRESHOLD_MS,
+                    f"chars={len(actual_query)}",
+                )
+                _record_embedding_api_call(plugin, embedding_succeeded)
+
+            if not query_vector:
+                logger.error("无法获取用户查询的 Embedding 向量。")
                 return
 
             # 2. 执行 Milvus 搜索
@@ -1078,11 +1119,33 @@ async def handle_query_memory(
 
             # 3. 格式化结果并注入到提示中
             if detailed_results:
-                _format_and_inject_memory(plugin, detailed_results, req)
+                injection_started = time.perf_counter()
+                try:
+                    _format_and_inject_memory(plugin, detailed_results, req)
+                finally:
+                    _record_operation(
+                        plugin,
+                        "injection",
+                        injection_started,
+                        SLOW_INJECTION_THRESHOLD_MS,
+                        f"memories={len(detailed_results)}",
+                    )
+
+            rag_succeeded = True
 
         except Exception as e:
             logger.error(f"处理长期记忆 RAG 查询时发生错误: {e}", exc_info=True)
-            return
+        finally:
+            _record_operation(
+                plugin,
+                "memory_query",
+                rag_started,
+                SLOW_RAG_QUERY_THRESHOLD_MS,
+                f"session={session_id}",
+            )
+            collector = getattr(plugin, "metrics_collector", None)
+            if collector is not None:
+                collector.record_request(rag_succeeded)
 
     except Exception as e:
         logger.error(f"处理 LLM 请求前的记忆查询流程失败: {e}", exc_info=True)
@@ -1454,6 +1517,8 @@ async def _perform_vector_db_search(
         logger.error("向量数据库不可用")
         return None
 
+    search_started = time.perf_counter()
+    search_succeeded = False
     try:
         detailed_results = await asyncio.wait_for(
             asyncio.to_thread(
@@ -1467,6 +1532,7 @@ async def _perform_vector_db_search(
             ),
             timeout=timeout_seconds,
         )
+        search_succeeded = True
     except asyncio.TimeoutError:
         logger.error(f"向量数据库搜索超时 ({timeout_seconds} 秒)，操作已取消。")
         return None
@@ -1476,17 +1542,36 @@ async def _perform_vector_db_search(
     except Exception as e:
         logger.error(f"执行向量数据库搜索时发生未知错误: {e}", exc_info=True)
         return None
+    finally:
+        _record_operation(
+            plugin,
+            "vector_search",
+            search_started,
+            SLOW_VECTOR_SEARCH_THRESHOLD_MS,
+            f"candidates={candidate_limit}",
+        )
+        _record_vector_db_api_call(plugin, search_succeeded)
 
     if not detailed_results:
         logger.info("向量搜索未找到相关记忆。")
         return None
 
-    post_processed = _post_process_search_results(
-        plugin=plugin,
-        detailed_results=detailed_results,
-        query_text=query_text,
-        sender_id=sender_id,
-    )
+    postprocess_started = time.perf_counter()
+    try:
+        post_processed = _post_process_search_results(
+            plugin=plugin,
+            detailed_results=detailed_results,
+            query_text=query_text,
+            sender_id=sender_id,
+        )
+    finally:
+        _record_operation(
+            plugin,
+            "postprocess",
+            postprocess_started,
+            SLOW_POSTPROCESS_THRESHOLD_MS,
+            f"results={len(detailed_results)}",
+        )
     return post_processed[:top_k]
 
 
@@ -2005,6 +2090,7 @@ async def _store_summary_to_vector_db(
         logger.error("向量数据库不可用")
         return False
 
+    insert_started = time.perf_counter()
     try:
 
         def _insert_data():
@@ -2024,6 +2110,13 @@ async def _store_summary_to_vector_db(
             )
         else:
             logger.debug("Milvus 插入操作完成，正在进行资源清理。")
+        _record_operation(
+            plugin,
+            "db_operation",
+            insert_started,
+            SLOW_DB_OPERATION_THRESHOLD_MS,
+            "summary_insert",
+        )
 
     if mutation_result and mutation_result.insert_count > 0:
         inserted_ids = mutation_result.primary_keys
