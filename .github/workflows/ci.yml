@@ -31,3 +31,23 @@ jobs:
 
       - name: Test
         run: pytest tests -q
+
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      DOCS_BASE: /astrbot_plugin_mnemosyne/
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install documentation dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build documentation
+        run: npm run docs:build
