@@ -6,6 +6,7 @@ const zhGuide = [
   { text: '快速开始', link: '/guide/getting-started' },
   { text: '配置说明', link: '/guide/configuration' },
   { text: '数据库选择', link: '/guide/database' },
+  { text: '性能调优', link: '/guide/performance' },
   { text: '命令与管理', link: '/guide/commands' }
 ]
 
@@ -13,6 +14,7 @@ const enGuide = [
   { text: 'Getting Started', link: '/en/guide/getting-started' },
   { text: 'Configuration', link: '/en/guide/configuration' },
   { text: 'Database Options', link: '/en/guide/database' },
+  { text: 'Performance', link: '/en/guide/performance' },
   { text: 'Commands and Admin', link: '/en/guide/commands' }
 ]
 
