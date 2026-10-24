@@ -332,7 +332,7 @@ use_personality_filtering: true
 
 - **QQ 群**：953245617
 - **GitHub Issues**：https://github.com/lxfight/astrbot_plugin_mnemosyne/issues
-- **官方文档**：https://github.com/lxfight/astrbot_plugin_mnemosyne
+- **官方文档**：https://lxfight.github.io/astrbot_plugin_mnemosyne/
 
 ---
 

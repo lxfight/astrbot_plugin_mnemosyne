@@ -34,15 +34,16 @@ Embedding Provider 的向量维度决定集合结构。更换 Embedding 模型�
 | --- | --- | --- |
 | `num_pairs` | 触发自动总结的对话轮数。 | `5` |
 | `top_k` | 检索时返回的记忆数量。 | `3` |
-| `contexts_memory_len` | 注入上下文的长期记忆数量。 | `3` |
+| `contexts_memory_len` | 历史上下文保留的长期记忆标签数量；小于 0 表示全部保留，0 表示清理全部。 | `0` |
 | `memory_injection_method` | `user_prompt` 注入用户提示；`system_prompt` 注入 LLM 系统提示；`insert_system_prompt` 新增独立系统消息。 | `user_prompt` |
+| `memory_injection_interval` | 每隔 N 轮对话触发一次记忆检索与注入。 | `1` |
 | `memory_injection_position` | 注入位置，可选前置或后置。 | `prepend` |
+| `max_prompt_chars_for_embedding` | 向量化前允许的最大输入字符数，超出部分会截断。 | `4000` |
 | `summary_fallback_provider_id` | 主总结模型失败或返回空内容时重试的备用模型。 | 空 |
 | `summary_speaker_mapping_prompt` | 约束 `user`、`assistant` 和第一人称归属，支持会话与说话人变量。 | 内置通用映射 |
-| `score_threshold` | 相似度阈值，低于阈值的记忆会被过滤。 | `0.0` |
 | `enable_llm_memory_tool` | 允许支持工具调用的模型通过 `mnemosyne_remember_memory` 写入当前会话记忆。关闭后模型仍可调用工具，但不会写入。 | `true` |
 
-如果记忆过多干扰回复，可以降低 `top_k`、提高 `score_threshold` 或减少 `contexts_memory_len`。
+如果记忆过多干扰回复，可以降低 `top_k`、提高 `memory_injection_interval`，或关闭轻量图谱重排。
 
 `memory_injection_position` 同时控制 `user_prompt` 和 `system_prompt` 的前后位置。`insert_system_prompt` 会创建独立系统消息；部分模型会因此重新计算提示词缓存，缓存成本敏感时优先使用前两种方式。
 

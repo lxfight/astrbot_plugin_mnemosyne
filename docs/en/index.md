@@ -36,6 +36,8 @@ features:
 - First install: read [Getting Started](/en/guide/getting-started).
 - Configuration details: read [Configuration](/en/guide/configuration).
 - Backend selection: read [Database Options](/en/guide/database).
-- Daily operations: read [Commands and Admin](/en/guide/commands).
+- Daily operations: read [Admin Panel](/en/guide/admin-panel) and [Commands](/en/guide/commands).
+- Implementation details: read [Architecture](/en/reference/architecture).
+- Contributing: read [Development and Deployment](/en/reference/development).
 
 中文文档位于 [/](/).

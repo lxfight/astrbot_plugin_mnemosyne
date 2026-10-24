@@ -1277,7 +1277,7 @@ class MilvusManager:
             logger.error(f"无法获取集合 '{collection_name}' 以执行搜索。")
             return None
 
-        logger.info(
+        logger.debug(
             f"在集合 '{collection_name}' 中搜索 {len(query_vectors)} 个向量 (字段: {vector_field}, top_k: {limit})..."
         )
         try:
@@ -1324,7 +1324,7 @@ class MilvusManager:
             except Exception:
                 num_results = 0
 
-            logger.info(f"搜索完成。返回 {num_results} 组结果。")
+            logger.debug(f"搜索完成。返回 {num_results} 组结果。")
 
             # 返回原始结果，由调用方处理具体类型
             # 为了类型安全，直接返回，不进行转换
@@ -1370,7 +1370,7 @@ class MilvusManager:
                         except Exception:
                             num_results = 0
 
-                        logger.info(f"重试搜索成功。返回 {num_results} 组结果。")
+                        logger.debug(f"重试搜索成功。返回 {num_results} 组结果。")
                         if search_result is not None:
                             return search_result  # type: ignore
                         else:
@@ -1426,7 +1426,7 @@ class MilvusManager:
 
         effective_limit = limit
 
-        logger.info(
+        logger.debug(
             f"在集合 '{collection_name}' 中执行查询: '{expression}' (Limit: {effective_limit}, Offset: {offset})..."
         )
         try:
@@ -1464,7 +1464,7 @@ class MilvusManager:
                 **kwargs,
             )
             # query_results is List[Dict]
-            logger.info(f"查询完成。返回 {len(query_results)} 个实体。")
+            logger.debug(f"查询完成。返回 {len(query_results)} 个实体。")
             return query_results
         except MilvusException as e:
             # 检查是否是因为集合未加载的错误 (code 101)
@@ -1487,7 +1487,7 @@ class MilvusManager:
                             timeout=timeout,
                             **kwargs,
                         )
-                        logger.info(f"重试查询成功。返回 {len(query_results)} 个实体。")
+                        logger.debug(f"重试查询成功。返回 {len(query_results)} 个实体。")
                         return query_results
                     except MilvusException as retry_e:
                         logger.error(f"重试查询仍失败: {retry_e}")

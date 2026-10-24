@@ -67,4 +67,6 @@ Open AstrBot Dashboard and enter the long-term memory page under **Alkaid** to i
 
 - Read [Configuration](/en/guide/configuration) for core options.
 - Read [Database Options](/en/guide/database) before switching to Milvus, Qdrant, or Weaviate.
+- Read [Admin Panel](/en/guide/admin-panel) to inspect, edit, and delete memories.
 - Read [Commands and Admin](/en/guide/commands) for routine operations.
+- Read [Architecture](/en/reference/architecture) to understand the write and retrieval paths.

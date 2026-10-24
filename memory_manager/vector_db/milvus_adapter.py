@@ -265,7 +265,7 @@ class MilvusVectorDB(VectorDatabase):
                 query_vectors=[query_vector],
                 vector_field=vector_field,
                 search_params=search_params
-                or {"metric_type": "L2", "params": {"nprobe": 10}},
+                or {"metric_type": "L2", "params": {}},
                 limit=top_k,
                 expression=filters,
                 output_fields=output_fields or ["*"],
@@ -277,7 +277,7 @@ class MilvusVectorDB(VectorDatabase):
                 for item in self._manager.format_search_results(raw_results)
             ]
 
-            logger.info(
+            logger.debug(
                 f"从集合 '{collection_name}' 搜索到 {len(formatted_results)} 条结果"
             )
             return formatted_results

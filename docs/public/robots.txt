@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://lxfight.github.io/astrbot_plugin_mnemosyne/sitemap.xml

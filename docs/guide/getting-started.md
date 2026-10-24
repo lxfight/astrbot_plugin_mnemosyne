@@ -67,4 +67,6 @@ Chroma 的 `persist_directory` 可以留空。留空时，插件会在自身数�
 
 - 阅读[配置说明](/guide/configuration)理解核心配置。
 - 阅读[数据库选择](/guide/database)决定是否切换到 Milvus、Qdrant 或 Weaviate。
+- 阅读[管理面板](/guide/admin-panel)熟悉检索、编辑和删除操作。
 - 阅读[命令与管理](/guide/commands)学习日常维护命令。
+- 阅读[架构与数据流](/reference/architecture)理解总结与检索链路。

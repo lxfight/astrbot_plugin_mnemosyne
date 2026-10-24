@@ -46,6 +46,22 @@ if TYPE_CHECKING:
 init_logger = LogManager.GetLogger(log_name="MnemosyneInit")
 
 
+def _default_search_params(index_params: dict) -> dict:
+    """按索引类型生成 Milvus 默认搜索参数。"""
+    index_type = str(index_params.get("index_type", "AUTOINDEX")).upper()
+    params = {
+        "IVF_FLAT": {"nprobe": 10},
+        "IVF_SQ8": {"nprobe": 10},
+        "IVF_PQ": {"nprobe": 10},
+        "HNSW": {"ef": 64},
+        "DISKANN": {"search_list": 16},
+    }.get(index_type, {})
+    return {
+        "metric_type": index_params.get("metric_type", "L2"),
+        "params": params,
+    }
+
+
 @dataclass
 class GenericFieldSchema:
     """Minimal schema field used when pymilvus is unavailable."""
@@ -286,12 +302,7 @@ def initialize_config_and_schema(plugin: "Mnemosyne"):
         # 定义搜索参数
         plugin.search_params = plugin.config.get(
             "search_params",
-            {
-                "metric_type": plugin.index_params.get(
-                    "metric_type", "L2"
-                ),  # 必须匹配索引度量类型
-                "params": {"nprobe": 10},  # IVF_* 的示例搜索参数, AutoIndex 通常不需要
-            },
+            _default_search_params(plugin.index_params),
         )
 
         plugin.output_fields_for_query = plugin.config.get(

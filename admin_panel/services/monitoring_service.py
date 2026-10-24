@@ -20,6 +20,9 @@ from ..models.monitoring import (
 )
 
 
+RESOURCE_USAGE_CACHE_TTL_SECONDS = 10.0
+
+
 class MetricsCollector:
     """指标收集器 - 用于收集和计算性能指标"""
 
@@ -28,22 +31,39 @@ class MetricsCollector:
         self.memory_query_times = deque(maxlen=max_samples)
         self.vector_search_times = deque(maxlen=max_samples)
         self.db_operation_times = deque(maxlen=max_samples)
+        self.embedding_times = deque(maxlen=max_samples)
+        self.postprocess_times = deque(maxlen=max_samples)
+        self.injection_times = deque(maxlen=max_samples)
+        self._operation_times = {
+            "memory_query": self.memory_query_times,
+            "vector_search": self.vector_search_times,
+            "db_operation": self.db_operation_times,
+            "embedding": self.embedding_times,
+            "postprocess": self.postprocess_times,
+            "injection": self.injection_times,
+        }
         self.embedding_api_calls = {"success": 0, "failed": 0}
         self.milvus_api_calls = {"success": 0, "failed": 0}
         self.total_requests = 0
         self.failed_requests = 0
 
+    def record_operation_time(self, operation_type: str, duration_ms: float):
+        """记录任意已知阶段的操作耗时。"""
+        times = self._operation_times.get(operation_type)
+        if times is not None:
+            times.append(duration_ms)
+
     def record_memory_query(self, duration_ms: float):
         """记录记忆查询时间"""
-        self.memory_query_times.append(duration_ms)
+        self.record_operation_time("memory_query", duration_ms)
 
     def record_vector_search(self, duration_ms: float):
         """记录向量搜索时间"""
-        self.vector_search_times.append(duration_ms)
+        self.record_operation_time("vector_search", duration_ms)
 
     def record_db_operation(self, duration_ms: float):
         """记录数据库操作时间"""
-        self.db_operation_times.append(duration_ms)
+        self.record_operation_time("db_operation", duration_ms)
 
     def record_embedding_api_call(self, success: bool):
         """记录 Embedding API 调用结果"""
@@ -59,6 +79,10 @@ class MetricsCollector:
         else:
             self.milvus_api_calls["failed"] += 1
 
+    def record_vector_db_api_call(self, success: bool):
+        """记录当前向量数据库的 API 调用结果。"""
+        self.record_milvus_api_call(success)
+
     def record_request(self, success: bool):
         """记录请求"""
         self.total_requests += 1
@@ -73,45 +97,23 @@ class MetricsCollector:
         index = int(len(sorted_data) * percentile)
         return sorted_data[min(index, len(sorted_data) - 1)]
 
+    def _set_percentiles(self, metrics: PerformanceMetrics, prefix: str, data: deque):
+        if not data:
+            return
+        setattr(metrics, f"{prefix}_p50", self._calculate_percentile(data, 0.50))
+        setattr(metrics, f"{prefix}_p95", self._calculate_percentile(data, 0.95))
+        setattr(metrics, f"{prefix}_p99", self._calculate_percentile(data, 0.99))
+
     def get_metrics(self) -> PerformanceMetrics:
         """获取当前性能指标"""
         metrics = PerformanceMetrics()
 
-        # 计算记忆查询性能
-        if self.memory_query_times:
-            metrics.memory_query_p50 = self._calculate_percentile(
-                self.memory_query_times, 0.50
-            )
-            metrics.memory_query_p95 = self._calculate_percentile(
-                self.memory_query_times, 0.95
-            )
-            metrics.memory_query_p99 = self._calculate_percentile(
-                self.memory_query_times, 0.99
-            )
-
-        # 计算向量搜索性能
-        if self.vector_search_times:
-            metrics.vector_search_p50 = self._calculate_percentile(
-                self.vector_search_times, 0.50
-            )
-            metrics.vector_search_p95 = self._calculate_percentile(
-                self.vector_search_times, 0.95
-            )
-            metrics.vector_search_p99 = self._calculate_percentile(
-                self.vector_search_times, 0.99
-            )
-
-        # 计算数据库操作性能
-        if self.db_operation_times:
-            metrics.db_operation_p50 = self._calculate_percentile(
-                self.db_operation_times, 0.50
-            )
-            metrics.db_operation_p95 = self._calculate_percentile(
-                self.db_operation_times, 0.95
-            )
-            metrics.db_operation_p99 = self._calculate_percentile(
-                self.db_operation_times, 0.99
-            )
+        self._set_percentiles(metrics, "memory_query", self.memory_query_times)
+        self._set_percentiles(metrics, "vector_search", self.vector_search_times)
+        self._set_percentiles(metrics, "db_operation", self.db_operation_times)
+        self._set_percentiles(metrics, "rag_embedding", self.embedding_times)
+        self._set_percentiles(metrics, "rag_postprocess", self.postprocess_times)
+        self._set_percentiles(metrics, "rag_injection", self.injection_times)
 
         # 计算 API 成功率
         total_embedding = (
@@ -149,9 +151,14 @@ class MonitoringService:
         """
         self.plugin = plugin_instance
         self.logger = logger
-        self.metrics_collector = MetricsCollector()
+        self.metrics_collector = getattr(plugin_instance, "metrics_collector", None)
+        if self.metrics_collector is None:
+            self.metrics_collector = MetricsCollector()
+            plugin_instance.metrics_collector = self.metrics_collector
         self._last_health_check = None
         self._health_check_cache_duration = 30  # 健康检查缓存30秒
+        self._resource_cache: ResourceUsage | None = None
+        self._resource_cache_at = 0.0
 
     async def get_system_status(self, force_refresh: bool = False) -> SystemStatus:
         """
@@ -353,6 +360,13 @@ class MonitoringService:
 
     async def get_resource_usage(self) -> ResourceUsage:
         """获取资源使用情况"""
+        now = time.monotonic()
+        if (
+            self._resource_cache is not None
+            and now - self._resource_cache_at < RESOURCE_USAGE_CACHE_TTL_SECONDS
+        ):
+            return self._resource_cache
+
         usage = ResourceUsage()
 
         try:
@@ -431,6 +445,8 @@ class MonitoringService:
         except Exception as e:
             self.logger.error(f"获取后台任务状态失败: {e}")
 
+        self._resource_cache = usage
+        self._resource_cache_at = time.monotonic()
         return usage
 
     def record_operation_time(self, operation_type: str, duration_ms: float):
@@ -438,12 +454,8 @@ class MonitoringService:
         记录操作时间
 
         Args:
-            operation_type: 操作类型 (memory_query, vector_search, db_operation)
+            operation_type: 操作类型 (memory_query, vector_search, db_operation,
+                embedding, postprocess, injection)
             duration_ms: 持续时间（毫秒）
         """
-        if operation_type == "memory_query":
-            self.metrics_collector.record_memory_query(duration_ms)
-        elif operation_type == "vector_search":
-            self.metrics_collector.record_vector_search(duration_ms)
-        elif operation_type == "db_operation":
-            self.metrics_collector.record_db_operation(duration_ms)
+        self.metrics_collector.record_operation_time(operation_type, duration_ms)

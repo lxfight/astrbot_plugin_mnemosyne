@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -199,3 +200,78 @@ async def test_update_memory_rolls_back_milvus_when_insert_fails():
     rollback_payload = plugin.vector_db.inserted[1][1]
     assert rollback_payload["content"] == "原始记忆"
     assert rollback_payload["embedding"] == [4.0, 0.5]
+
+
+class _QueryVectorDB:
+    def __init__(self):
+        self.query_calls = 0
+
+    def is_connected(self):
+        return True
+
+    def has_collection(self, _collection_name):
+        return True
+
+    def query(self, **_kwargs):
+        self.query_calls += 1
+        now = time.time()
+        return [
+            {
+                "id": "1",
+                "memory_id": "1",
+                "session_id": "session-1",
+                "content": "abc",
+                "create_time": now,
+            },
+            {
+                "id": "2",
+                "memory_id": "2",
+                "session_id": "session-2",
+                "content": "defg",
+                "create_time": now - 60,
+            },
+        ]
+
+    def delete(self, _collection_name, _expr):
+        return VectorDeleteResult(delete_count=1)
+
+    def flush(self, _collection_names):
+        return True
+
+
+class _QueryPlugin:
+    def __init__(self):
+        self.config = {"vector_db_type": "chroma"}
+        self.collection_name = "memory_collection"
+        self.vector_db = _QueryVectorDB()
+
+
+@pytest.mark.asyncio
+async def test_memory_statistics_uses_short_ttl_cache_and_invalidates_on_delete():
+    plugin = _QueryPlugin()
+    service = MemoryService(plugin)
+
+    first = await service.get_memory_statistics()
+    second = await service.get_memory_statistics()
+
+    assert first.total_memories == 2
+    assert second is first
+    assert plugin.vector_db.query_calls == 1
+
+    await service.delete_memory("1")
+    await service.get_memory_statistics()
+
+    assert plugin.vector_db.query_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_session_list_uses_short_ttl_cache():
+    plugin = _QueryPlugin()
+    service = MemoryService(plugin)
+
+    first = await service.get_session_list(limit=1)
+    second = await service.get_session_list(limit=2)
+
+    assert len(first) == 1
+    assert len(second) == 2
+    assert plugin.vector_db.query_calls == 1

@@ -357,7 +357,7 @@ class WeaviateVectorDB(VectorDatabase):
                     }
                     formatted_results.append(result_item)
 
-            logger.info(f"从集合 '{class_name}' 搜索到 {len(formatted_results)} 条结果")
+            logger.debug(f"从集合 '{class_name}' 搜索到 {len(formatted_results)} 条结果")
             return formatted_results
 
         except Exception as e:

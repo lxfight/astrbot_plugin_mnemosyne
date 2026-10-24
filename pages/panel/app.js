@@ -392,11 +392,14 @@ function renderPerformanceMetrics(metricsData) {
     if (!container) return;
     container.innerHTML = '';
     if (metricsData.memory_query) addMetricItem(container, '记忆查询 (P95)', `${metricsData.memory_query.p95.toFixed(1)} ms`, '95百分位延迟');
+    if (metricsData.rag_stages?.embedding) addMetricItem(container, 'Embedding (P95)', `${metricsData.rag_stages.embedding.p95.toFixed(1)} ms`, 'RAG 向量化');
     if (metricsData.vector_search) addMetricItem(container, '向量搜索 (P95)', `${metricsData.vector_search.p95.toFixed(1)} ms`, '95百分位延迟');
+    if (metricsData.rag_stages?.postprocess) addMetricItem(container, '后处理 (P95)', `${metricsData.rag_stages.postprocess.p95.toFixed(1)} ms`, '过滤与重排');
+    if (metricsData.rag_stages?.injection) addMetricItem(container, '记忆注入 (P95)', `${metricsData.rag_stages.injection.p95.toFixed(1)} ms`, '提示词拼接');
     if (metricsData.db_operation) addMetricItem(container, '数据库操作 (P95)', `${metricsData.db_operation.p95.toFixed(1)} ms`, '95百分位延迟');
     if (metricsData.api_success_rate) {
         addMetricItem(container, 'Embedding API', `${metricsData.api_success_rate.embedding.toFixed(1)}%`, '成功率');
-        addMetricItem(container, 'Milvus API', `${metricsData.api_success_rate.milvus.toFixed(1)}%`, '成功率');
+        addMetricItem(container, '向量库 API', `${metricsData.api_success_rate.milvus.toFixed(1)}%`, '成功率');
     }
     if (metricsData.requests) addMetricItem(container, '请求总数', formatNumber(metricsData.requests.total), `成功率: ${metricsData.requests.success_rate.toFixed(1)}%`);
 }

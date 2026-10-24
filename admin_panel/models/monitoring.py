@@ -71,6 +71,17 @@ class PerformanceMetrics:
     db_operation_p95: float = 0.0
     db_operation_p99: float = 0.0
 
+    # RAG 分阶段性能
+    rag_embedding_p50: float = 0.0
+    rag_embedding_p95: float = 0.0
+    rag_embedding_p99: float = 0.0
+    rag_postprocess_p50: float = 0.0
+    rag_postprocess_p95: float = 0.0
+    rag_postprocess_p99: float = 0.0
+    rag_injection_p50: float = 0.0
+    rag_injection_p95: float = 0.0
+    rag_injection_p99: float = 0.0
+
     # API 调用成功率
     embedding_api_success_rate: float = 100.0  # 百分比
     milvus_api_success_rate: float = 100.0
@@ -98,6 +109,23 @@ class PerformanceMetrics:
                 "p50": self.db_operation_p50,
                 "p95": self.db_operation_p95,
                 "p99": self.db_operation_p99,
+            },
+            "rag_stages": {
+                "embedding": {
+                    "p50": self.rag_embedding_p50,
+                    "p95": self.rag_embedding_p95,
+                    "p99": self.rag_embedding_p99,
+                },
+                "postprocess": {
+                    "p50": self.rag_postprocess_p50,
+                    "p95": self.rag_postprocess_p95,
+                    "p99": self.rag_postprocess_p99,
+                },
+                "injection": {
+                    "p50": self.rag_injection_p50,
+                    "p95": self.rag_injection_p95,
+                    "p99": self.rag_injection_p99,
+                },
             },
             "api_success_rate": {
                 "embedding": self.embedding_api_success_rate,

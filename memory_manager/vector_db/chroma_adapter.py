@@ -264,7 +264,7 @@ class ChromaVectorDB(VectorDatabase):
 
                 formatted_results.append(result)
 
-            logger.info(
+            logger.debug(
                 f"从集合 '{collection_name}' 查询到 {len(formatted_results)} 条结果"
             )
             return formatted_results
@@ -386,7 +386,7 @@ class ChromaVectorDB(VectorDatabase):
 
                     formatted_results.append(result)
 
-            logger.info(
+            logger.debug(
                 f"从集合 '{collection_name}' 搜索到 {len(formatted_results)} 条结果"
             )
             return formatted_results

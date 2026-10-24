@@ -12,6 +12,7 @@
 
 [![License](https://img.shields.io/badge/license-Custom-blue.svg)](./LICENSE)
 [![Version](https://img.shields.io/badge/version-v2.4.0-green.svg)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
+[![Docs](https://img.shields.io/badge/docs-online-2f6f68.svg)](https://lxfight.github.io/astrbot_plugin_mnemosyne/)
 [![QQ Group](https://img.shields.io/badge/QQ群-953245617-blue?style=flat-square&logo=tencent-qq)](https://qm.qq.com/cgi-bin/qm/qr?k=WdyqoP-AOEXqGAN08lOFfVSguF2EmBeO&jump_from=webapi&authKey=tPyfv90TVYSGVhbAhsAZCcSBotJuTTLf03wnn7/lQZPUkWfoQ/J8e9nkAipkOzwh)
 
 </div>
@@ -21,6 +22,8 @@
 ## 概述
 
 **Mnemosyne** 是一个为 AstrBot 设计的长期记忆管理插件，基于 RAG (检索增强生成) 技术和向量数据库实现，默认使用 Chroma 本地持久化，并可切换到 Milvus、Qdrant 或 Weaviate。该插件能够自动总结对话内容，将其转换为向量存储，并在后续对话中智能检索相关记忆，使 AI 具备真正的长期记忆能力。
+
+> 在线文档：[中文](https://lxfight.github.io/astrbot_plugin_mnemosyne/) · [English](https://lxfight.github.io/astrbot_plugin_mnemosyne/en/)
 
 <table>
 <tr>
@@ -343,6 +346,7 @@ uv pip install -r requirements.txt
 - ⚠️ 迁移过程可能需要一些时间，取决于记忆数量
 
 详细的部署指南请参阅：
+- **[在线文档](https://lxfight.github.io/astrbot_plugin_mnemosyne/)** - 安装、配置、管理面板、架构与调优
 - **[快速启动指南 (QUICKSTART.md)](./QUICKSTART.md)** - 5分钟快速部署
 - **[Windows 新手完整教程 (WINDOWS_TUTORIAL.md)](./WINDOWS_TUTORIAL.md)** - Windows 用户详细教程（新手友好）
 - **Wiki：[如何正确且快速地食用本插件](https://github.com/lxfight/astrbot_plugin_mnemosyne/wiki/%E5%A6%82%E4%BD%95%E6%AD%A3%E7%A1%AE%E4%B8%94%E5%BF%AB%E9%80%9F%E7%9A%84%E9%A3%9F%E7%94%A8%E6%9C%AC%E6%8F%92%E4%BB%B6)**
