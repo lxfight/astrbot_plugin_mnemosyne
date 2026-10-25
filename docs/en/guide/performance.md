@@ -47,11 +47,17 @@ You can override `index_params` and `search_params`. The metric type in `search_
 
 ## Admin Panel
 
-Statistics, session lists, and resource statistics use a 10-second cache so dashboard refreshes do not repeatedly fetch up to 10,000 records. Deleting or updating a memory invalidates the relevant cache immediately.
+Statistics, session lists, and resource statistics use a 10-second cache so dashboard refreshes do not repeat the same queries. Deleting or updating a memory invalidates the relevant cache immediately.
+
+Statistics and session lists aggregate records in 2,000-row batches and no longer stop at 10,000 records. Chroma, Qdrant, and Milvus use native counts for totals instead of fetching the full table just to count it.
+
+Memory search uses a native count when no keyword is supplied, then scans pages and keeps only the `offset + limit` window in a min-heap instead of loading every record into memory. Keyword search still scans the filtered range, but it now reads records in batches.
+
+Session-deletion counts and the resource dashboard's record total also prefer native counts. Custom backends without native counting fall back to a bounded query.
 
 Batch deletion merges IDs into expressions of up to 200 records and flushes once after all delete requests complete.
 
-Exports and global keyword searches keep a 10,000-record safety limit. That limit is not a page size. For large collections, filter by session or date instead of exporting everything repeatedly.
+Exports keep a 10,000-record safety limit. That limit is not a page size. For large collections, filter by session or date instead of exporting everything repeatedly.
 
 ## Operational Notes
 

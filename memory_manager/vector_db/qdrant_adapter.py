@@ -401,6 +401,16 @@ class QdrantVectorDB(VectorDatabase):
             logger.error(f"获取最新记忆失败: {e}", exc_info=True)
             raise
 
+    def count(self, collection_name: str, filters: str | None = None) -> int:
+        """使用 Qdrant 原生 count 获取匹配记录数。"""
+        self._ensure_connected()
+        result = self._client.count(
+            collection_name=collection_name,
+            count_filter=self._parse_filters(filters),
+            exact=True,
+        )
+        return int(result.count)
+
     def delete(self, collection_name: str, expr: str) -> VectorDeleteResult:
         """根据条件删除数据"""
         self._ensure_connected()

@@ -203,6 +203,37 @@ class TestChromaVectorDB:
             name="test_collection"
         )
 
+    def test_count_uses_native_count_without_filters(self, chroma_db):
+        mock_collection = MagicMock()
+        mock_collection.count.return_value = 42
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = mock_collection
+        chroma_db._client = mock_client
+        chroma_db._is_connected = True
+
+        assert chroma_db.count("test_collection") == 42
+
+        mock_collection.count.assert_called_once_with()
+        mock_collection.get.assert_not_called()
+
+    def test_count_only_fetches_matching_ids_with_filters(self, chroma_db):
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {"ids": ["id1", "id2", "id3"]}
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = mock_collection
+        chroma_db._client = mock_client
+        chroma_db._is_connected = True
+
+        count = chroma_db.count(
+            "test_collection", "session_id == 'test_session'"
+        )
+
+        assert count == 3
+        mock_collection.get.assert_called_once_with(
+            include=[],
+            where={"session_id": {"$eq": "test_session"}},
+        )
+
     def test_parse_filters_simple(self, chroma_db):
         """测试简单过滤条件解析"""
         filters = "session_id == 'test_session'"

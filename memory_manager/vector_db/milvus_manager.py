@@ -1434,7 +1434,13 @@ class MilvusManager:
             pk_field_name = None
             if collection.schema.primary_field:
                 pk_field_name = collection.schema.primary_field.name
-            if (
+            is_count_query = bool(output_fields) and any(
+                str(field).strip().lower().startswith("count(")
+                for field in output_fields
+            )
+            if is_count_query:
+                query_output_fields = output_fields
+            elif (
                 pk_field_name
                 and output_fields
                 and pk_field_name not in output_fields

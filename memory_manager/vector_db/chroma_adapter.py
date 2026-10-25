@@ -323,6 +323,18 @@ class ChromaVectorDB(VectorDatabase):
         record.update(metadata)
         return record
 
+    def count(self, collection_name: str, filters: str | None = None) -> int:
+        """使用 Chroma 原生总数，或仅拉取 ID 统计筛选结果。"""
+        self._ensure_connected()
+        collection = self._client.get_collection(name=collection_name)
+        if not filters:
+            return int(collection.count())
+        get_kwargs = {"include": []}
+        where = self._parse_filters(filters)
+        if where is not None:
+            get_kwargs["where"] = where
+        return len(collection.get(**get_kwargs).get("ids", []))
+
     def search(
         self,
         collection_name: str,

@@ -403,14 +403,21 @@ class MonitoringService:
                 if await asyncio.to_thread(
                     vector_db.has_collection, self.plugin.collection_name
                 ):
-                    records = await asyncio.to_thread(
-                        vector_db.query,
+                    record_count = await asyncio.to_thread(
+                        vector_db.count,
                         self.plugin.collection_name,
-                        filters=None,
-                        output_fields=["memory_id"],
-                        limit=10000,
+                        None,
                     )
-                    usage.vector_db_total_records = len(records)
+                    if record_count is None:
+                        records = await asyncio.to_thread(
+                            vector_db.query,
+                            self.plugin.collection_name,
+                            filters=None,
+                            output_fields=["memory_id"],
+                            limit=10000,
+                        )
+                        record_count = len(records)
+                    usage.vector_db_total_records = record_count
         except Exception as e:
             self.logger.error(f"获取向量数据库统计失败: {e}")
 

@@ -214,7 +214,10 @@ async def test_update_memory_rolls_back_milvus_when_insert_fails():
 
 class _QueryVectorDB:
     def __init__(self):
+        self.count_calls = 0
+        self.deleted_expr = None
         self.query_calls = 0
+        self.count_thread_ids = []
         self.query_thread_ids = []
 
     def is_connected(self):
@@ -222,6 +225,11 @@ class _QueryVectorDB:
 
     def has_collection(self, _collection_name):
         return True
+
+    def count(self, _collection_name, _filters=None):
+        self.count_calls += 1
+        self.count_thread_ids.append(threading.get_ident())
+        return 2
 
     def query(self, **_kwargs):
         self.query_calls += 1
@@ -244,11 +252,50 @@ class _QueryVectorDB:
             },
         ]
 
-    def delete(self, _collection_name, _expr):
+    def delete(self, collection_name, expr):
+        self.deleted_expr = (collection_name, expr)
         return VectorDeleteResult(delete_count=1)
 
     def flush(self, _collection_names):
         return True
+
+
+class _PagedVectorDB:
+    def __init__(self, total, supports_count=True):
+        self.total = total
+        self.supports_count = supports_count
+        self.count_calls = 0
+        self.query_calls = 0
+        self.query_limits = []
+        self.query_offsets = []
+
+    def is_connected(self):
+        return True
+
+    def has_collection(self, _collection_name):
+        return True
+
+    def count(self, _collection_name, _filters=None):
+        self.count_calls += 1
+        return self.total if self.supports_count else None
+
+    def query(self, **kwargs):
+        self.query_calls += 1
+        limit = kwargs.get("limit")
+        offset = kwargs.get("offset") or 0
+        self.query_limits.append(limit)
+        self.query_offsets.append(offset)
+        end = min(offset + limit, self.total)
+        return [
+            {
+                "id": str(index),
+                "memory_id": str(index),
+                "session_id": f"session-{index % 10}",
+                "content": "memory",
+                "create_time": 1_700_000_000 + index,
+            }
+            for index in range(offset, end)
+        ]
 
 
 class _QueryPlugin:
@@ -339,6 +386,77 @@ async def test_session_list_uses_short_ttl_cache():
 
 
 @pytest.mark.asyncio
+async def test_search_latest_page_across_query_batches():
+    plugin = _QueryPlugin()
+    plugin.vector_db = _PagedVectorDB(total=2500)
+    service = MemoryService(plugin)
+
+    response = await service.search_memories(
+        MemorySearchRequest(limit=1, sort_order="desc")
+    )
+
+    assert response.total_count == 2500
+    assert response.records[0].memory_id == "2499"
+    assert plugin.vector_db.count_calls == 1
+    assert plugin.vector_db.query_limits == [2000, 500]
+
+
+@pytest.mark.asyncio
+async def test_memory_statistics_scans_all_query_batches():
+    plugin = _QueryPlugin()
+    plugin.vector_db = _PagedVectorDB(total=10050)
+    service = MemoryService(plugin)
+
+    stats = await service.get_memory_statistics()
+
+    assert stats.total_memories == 10050
+    assert stats.total_sessions == 10
+    assert sum(stats.memories_by_session.values()) == 10050
+    assert plugin.vector_db.count_calls == 1
+    assert plugin.vector_db.query_limits == [2000, 2000, 2000, 2000, 2000, 50]
+
+
+@pytest.mark.asyncio
+async def test_memory_statistics_falls_back_without_native_count():
+    plugin = _QueryPlugin()
+    plugin.vector_db = _PagedVectorDB(total=3, supports_count=False)
+    service = MemoryService(plugin)
+
+    stats = await service.get_memory_statistics()
+
+    assert stats.total_memories == 3
+    assert plugin.vector_db.count_calls == 1
+    assert plugin.vector_db.query_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_session_list_aggregates_all_query_batches():
+    plugin = _QueryPlugin()
+    plugin.vector_db = _PagedVectorDB(total=10050)
+    service = MemoryService(plugin)
+
+    sessions = await service.get_session_list(limit=10)
+
+    assert sum(session["memory_count"] for session in sessions) == 10050
+    assert plugin.vector_db.query_limits == [2000, 2000, 2000, 2000, 2000, 2000]
+
+
+@pytest.mark.asyncio
+async def test_delete_session_uses_native_count():
+    plugin = _QueryPlugin()
+    service = MemoryService(plugin)
+
+    deleted_count = await service.delete_session_memories("session-1")
+
+    assert deleted_count == 2
+    assert plugin.vector_db.query_calls == 0
+    assert plugin.vector_db.deleted_expr == (
+        "memory_collection",
+        'session_id == "session-1"',
+    )
+
+
+@pytest.mark.asyncio
 async def test_search_memories_runs_query_off_event_loop_thread():
     plugin = _QueryPlugin()
     service = MemoryService(plugin)
@@ -347,6 +465,11 @@ async def test_search_memories_runs_query_off_event_loop_thread():
     response = await service.search_memories(MemorySearchRequest(limit=1))
 
     assert response.total_count == 2
+    assert plugin.vector_db.count_thread_ids
+    assert all(
+        thread_id != event_loop_thread
+        for thread_id in plugin.vector_db.count_thread_ids
+    )
     assert plugin.vector_db.query_thread_ids
     assert all(
         thread_id != event_loop_thread

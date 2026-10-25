@@ -9,7 +9,9 @@ from admin_panel.services.monitoring_service import MonitoringService
 
 
 class _CountVectorDB:
-    def __init__(self):
+    def __init__(self, supports_count=True):
+        self.supports_count = supports_count
+        self.count_calls = 0
         self.query_calls = 0
         self.operation_thread_ids = []
 
@@ -22,6 +24,11 @@ class _CountVectorDB:
 
     def has_collection(self, _collection_name):
         return True
+
+    def count(self, _collection_name, _filters=None):
+        self.count_calls += 1
+        self.operation_thread_ids.append(threading.get_ident())
+        return 2 if self.supports_count else None
 
     def query(self, _collection_name, **_kwargs):
         self.query_calls += 1
@@ -45,9 +52,27 @@ async def test_resource_usage_reuses_short_ttl_cache():
 
     assert first.vector_db_total_records == 2
     assert second is first
-    assert plugin.vector_db.query_calls == 1
+    assert plugin.vector_db.count_calls == 1
+    assert plugin.vector_db.query_calls == 0
     assert plugin.vector_db.operation_thread_ids
     assert all(
         thread_id != event_loop_thread
         for thread_id in plugin.vector_db.operation_thread_ids
     )
+
+
+@pytest.mark.asyncio
+async def test_resource_usage_falls_back_without_native_count():
+    plugin = SimpleNamespace(
+        vector_db=_CountVectorDB(supports_count=False),
+        collection_name="memory_collection",
+        msg_counter=None,
+        context_manager=None,
+    )
+    service = MonitoringService(plugin)
+
+    usage = await service.get_resource_usage()
+
+    assert usage.vector_db_total_records == 2
+    assert plugin.vector_db.count_calls == 1
+    assert plugin.vector_db.query_calls == 1
