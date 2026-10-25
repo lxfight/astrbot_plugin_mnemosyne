@@ -18,14 +18,9 @@
    - 对比上一次提交的版本号
    - 判断版本是否发生变化
 
-2. **生成变更日志**
-   - 如果版本已更新，自动生成变更日志
-   - 根据提交信息的前缀自动分类：
-     - `feat:` / `feature:` → ✨ Feature（新功能）
-     - `fix:` → 🐛 Fix（修复）
-     - `docs:` → 📚 Docs（文档）
-     - `refactor:` / `style:` / `perf:` / `test:` / `chore:` → 🔧 其他改进
-     - 其他 → 📌 普通提交
+2. **准备发布说明**
+   - 优先读取 `.github/release-notes/<version>.md` 中的人工精选中英双语说明
+   - 文件不存在时，根据语义化提交信息自动生成分类变更日志
 
 3. **创建 Release**
    - 使用新版本号作为标签名
@@ -41,14 +36,23 @@
    version: v0.5.3  # 从 v0.5.2 更新到 v0.5.3
    ```
 
-2. **提交并推送**
+2. **编写发布说明（推荐）**
+
+   创建 `.github/release-notes/v2.5.0.md`，至少包含：
+   - 中文概览、主要变更、升级说明、验证结果
+   - English overview, highlights, upgrade notes, verification
+   - 版本对比链接
+
+   未提供精选说明时，工作流会回退到自动生成的 commit 列表。
+
+3. **提交并推送**
    ```bash
-   git add metadata.yaml
-   git commit -m "chore: bump version to v0.5.3"
+   git add metadata.yaml README.md .github/release-notes/
+   git commit -m "chore(release): prepare v2.5.0"
    git push origin main
    ```
 
-3. **自动发布**
+4. **自动发布**
    
    工作流会自动触发并创建 Release，无需手动操作。
 
@@ -114,7 +118,7 @@ git commit -m "docs: 更新 API 文档"
 
 在 GitHub 仓库页面：
 1. 点击 "Actions" 标签
-2. 查看 "Auto Release on Version Update" 工作流
+2. 查看 "Auto Release" 工作流
 3. 点击具体的运行记录查看详细日志
 
 ### 手动触发（可选）
