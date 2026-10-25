@@ -1,48 +1,140 @@
-"""
-Mnemosyne 插件的数据迁移工具
-用于运行时自动迁移旧格式的 session_id 到 unified_msg_origin 格式
-"""
+"""Runtime migration for legacy Milvus session identifiers."""
 
+import asyncio
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from astrbot.core.log import LogManager
+
+from .security_utils import safe_build_milvus_expression
 
 if TYPE_CHECKING:
     from ..main import Mnemosyne
 
 logger = LogManager.GetLogger(__name__)
 
+MIGRATION_CHECKED_LIMIT = 4096
+MIGRATION_QUERY_LIMIT = 16384
+MIGRATION_UPSERT_BATCH_SIZE = 200
 
-def _extract_session_uuid(session_id: str | None) -> str | None:
-    """
-    从 session_id 中提取最后的 UUID 部分
 
-    支持多种格式：
-    - 完整 UMO: "platform:type:session_id" → 返回 session_id
-    - 带感叹号: "platform!bot!uuid" → 返回 uuid
-    - 纯 UUID: "uuid" → 返回 uuid
+def _get_migrated_sessions(plugin: "Mnemosyne") -> OrderedDict[str, None]:
+    sessions = getattr(plugin, "_migrated_sessions", None)
+    if sessions is None:
+        sessions = OrderedDict()
+        plugin._migrated_sessions = sessions
+    return sessions
 
-    Args:
-        session_id: session_id 字符串
 
-    Returns:
-        提取出的最后部分，如果无法提取则返回原值
-    """
-    if not session_id:
+def _get_inflight_sessions(plugin: "Mnemosyne") -> set[str]:
+    sessions = getattr(plugin, "_migration_inflight", None)
+    if sessions is None:
+        sessions = set()
+        plugin._migration_inflight = sessions
+    return sessions
+
+
+def _mark_migration_checked(plugin: "Mnemosyne", migration_key: str) -> None:
+    sessions = _get_migrated_sessions(plugin)
+    sessions[migration_key] = None
+    sessions.move_to_end(migration_key)
+    while len(sessions) > MIGRATION_CHECKED_LIMIT:
+        sessions.popitem(last=False)
+
+
+def _build_session_candidates(unified_msg_origin: str) -> list[str] | None:
+    parts = unified_msg_origin.split(":", 2)
+    if len(parts) != 3:
+        logger.warning(f"[迁移] unified_msg_origin 格式不正确: {unified_msg_origin}")
         return None
 
-    # 按冒号分割（UMO格式）
-    if ":" in session_id:
-        parts = session_id.split(":")
-        session_id = parts[-1]  # 取最后部分
+    full_session_id = parts[2]
+    candidates = [full_session_id]
+    if "!" in full_session_id:
+        parts_by_bang = full_session_id.split("!")
+        for index in range(1, len(parts_by_bang)):
+            candidates.append("!".join(parts_by_bang[index:]))
+    return candidates
 
-    # 按感叹号分割
-    if "!" in session_id:
-        parts = session_id.split("!")
-        return parts[-1]  # 返回最后部分（UUID）
 
-    # 已经是最简格式
-    return session_id
+def _migrate_session_data_sync(
+    plugin: "Mnemosyne",
+    unified_msg_origin: str,
+    collection_name: str,
+) -> bool:
+    """Run the blocking Milvus migration outside the event loop."""
+    candidates = _build_session_candidates(unified_msg_origin)
+    if candidates is None:
+        return True
+
+    manager = getattr(plugin, "milvus_manager", None)
+    if not manager or not manager.is_connected():
+        logger.warning("[迁移] Milvus 不可用，跳过迁移")
+        return False
+
+    try:
+        expressions = [
+            safe_build_milvus_expression("session_id", candidate, "==")
+            for candidate in candidates
+        ]
+        expression = " or ".join(f"({item})" for item in expressions)
+        results = manager.query(
+            collection_name=collection_name,
+            expression=expression,
+            # Milvus upsert replaces the full entity, so all fields are required.
+            output_fields=["*"],
+            limit=MIGRATION_QUERY_LIMIT,
+        )
+    except Exception as exc:
+        logger.error(f"[迁移] 查询旧会话数据失败: {exc}", exc_info=True)
+        return False
+
+    if results is None:
+        return False
+
+    records = [
+        record
+        for record in results
+        if ":" not in record.get("session_id", "")
+        and record.get("session_id") != unified_msg_origin
+    ]
+    if not records:
+        logger.info("[迁移] 未找到需要迁移的旧数据")
+        return True
+
+    collection = manager.get_collection(collection_name)
+    if not collection:
+        logger.error(f"[迁移] 无法获取集合 '{collection_name}'")
+        return False
+    if not hasattr(collection, "upsert"):
+        logger.error("[迁移] 当前 pymilvus 版本不支持 upsert，请升级到 2.3.0+")
+        return False
+
+    for record in records:
+        record["session_id"] = unified_msg_origin
+
+    migrated_count = 0
+    try:
+        for start in range(0, len(records), MIGRATION_UPSERT_BATCH_SIZE):
+            batch = records[start : start + MIGRATION_UPSERT_BATCH_SIZE]
+            result = collection.upsert(data=batch)
+            if not result:
+                logger.error("[迁移] Upsert 操作未返回结果，迁移失败")
+                return False
+            migrated_count += getattr(result, "upsert_count", len(batch)) or 0
+
+        manager.flush([collection_name])
+    except Exception as exc:
+        logger.error(f"[迁移] 批量更新失败: {exc}", exc_info=True)
+        return False
+
+    truncated = len(results) >= MIGRATION_QUERY_LIMIT
+    logger.info(
+        f"[迁移] 已更新 {migrated_count} 条记录 -> {unified_msg_origin}"
+        + ("（达到单次查询上限，稍后继续）" if truncated else "")
+    )
+    # A truncated query must stay eligible so the next request can migrate the rest.
+    return not truncated
 
 
 async def migrate_session_data_if_needed(
@@ -50,165 +142,27 @@ async def migrate_session_data_if_needed(
     unified_msg_origin: str,
     collection_name: str,
 ) -> None:
-    """
-    运行时自动迁移：将旧格式的 session_id 更新为 unified_msg_origin 格式
+    """Migrate one session once, without blocking the event loop."""
+    migration_key = unified_msg_origin
+    if migration_key in _get_migrated_sessions(plugin):
+        return
 
-    使用 Milvus 的 upsert 功能进行高效更新
+    inflight = _get_inflight_sessions(plugin)
+    if migration_key in inflight:
+        logger.debug(f"[迁移] 会话 {migration_key} 已有迁移任务运行，跳过重复提交")
+        return
 
-    策略：
-    1. 从 unified_msg_origin 解析出各个组成部分
-    2. 生成所有可能的旧格式匹配候选（递归拆分）
-    3. 在 Milvus 中查询匹配任一候选且不含冒号的旧记录
-    4. 使用 upsert 更新记录的 session_id
-    5. 标记该会话为已迁移
-
-    Args:
-        plugin: Mnemosyne 插件实例
-        unified_msg_origin: 完整的统一消息来源（格式：platform:type:session_id）
-        collection_name: Milvus 集合名称
-    """
+    inflight.add(migration_key)
     try:
-        # 解析 unified_msg_origin
-        parts = unified_msg_origin.split(":", 2)
-        if len(parts) != 3:
-            logger.warning(
-                f"[迁移] unified_msg_origin 格式不正确: {unified_msg_origin}"
-            )
-            return
-
-        platform_id, message_type, full_session_id = parts
-
-        # 生成所有可能的旧格式匹配候选
-        candidates = [full_session_id]
-
-        # 按感叹号递归拆分
-        if "!" in full_session_id:
-            parts_by_bang = full_session_id.split("!")
-            for i in range(1, len(parts_by_bang)):
-                candidates.append("!".join(parts_by_bang[i:]))
-
-        logger.info(
-            f"[迁移] 开始检查会话，候选匹配: {candidates[:3]}..."
-        )  # 只显示前3个
-
-        # 检查是否已迁移（使用内存标记）
-        if not hasattr(plugin, "_migrated_sessions"):
-            plugin._migrated_sessions = set()
-
-        migration_key = unified_msg_origin
-        if migration_key in plugin._migrated_sessions:
-            # 已迁移过，跳过
-            return
-
-        # 确保 Milvus 可用
-        if not plugin.milvus_manager or not plugin.milvus_manager.is_connected():
-            logger.warning("[迁移] Milvus 不可用，跳过迁移")
-            return
-
-        # 查询所有需要迁移的记录
-        records_to_migrate = []
-
-        for candidate in candidates:
-            try:
-                # 【诊断日志】记录候选值
-                logger.debug(f"[迁移] 检查候选值: {candidate}")
-
-                # 构建查询表达式：session_id 等于候选值（不转义）
-                expression = f'session_id == "{candidate}"'
-                logger.debug(f"[迁移] 查询表达式: {expression}")
-
-                # 查询记录
-                results = plugin.milvus_manager.query(
-                    collection_name=collection_name,
-                    expression=expression,
-                    output_fields=["*"],
-                    limit=16384,  # Milvus query 的最大限制
-                )
-
-                if results:
-                    # 过滤出需要迁移的旧格式记录：
-                    # 1. session_id 不包含冒号（旧格式标志）
-                    # 2. session_id 与 unified_msg_origin 不同（确实需要更新）
-                    old_records = [
-                        r
-                        for r in results
-                        if ":" not in r.get("session_id", "")
-                        and r.get("session_id") != unified_msg_origin
-                    ]
-                    if old_records:
-                        records_to_migrate.extend(old_records)
-                        logger.info(
-                            f"[迁移] 找到 {len(old_records)} 条旧格式记录 (session_id={candidate})"
-                        )
-
-            except Exception as e:
-                logger.error(f"[迁移] 查询候选 {candidate} 时出错: {e}")
-                continue
-
-        if not records_to_migrate:
-            logger.info("[迁移] 未找到需要迁移的旧数据")
-            # 标记为已检查
-            plugin._migrated_sessions.add(migration_key)
-            return
-
-        logger.info(f"[迁移] 共找到 {len(records_to_migrate)} 条旧数据需要迁移")
-
-        # 批量准备更新数据
-        records_for_upsert = []
-        for record in records_to_migrate:
-            # 更新 session_id 字段为新的 unified_msg_origin 格式
-            record["session_id"] = unified_msg_origin
-            # 注意：不添加 migrated_at 字段，因为 schema 中可能没有定义
-            # 如果需要迁移标记，应该在 schema 中先添加该字段
-            records_for_upsert.append(record)
-
-        # 使用 upsert 批量更新（Milvus 2.3+）
-        try:
-            collection = plugin.milvus_manager.get_collection(collection_name)
-            if not collection:
-                logger.error(f"[迁移] 无法获取集合 '{collection_name}'")
-                return
-
-            # 使用 upsert 批量更新
-            logger.info(
-                f"[迁移] 使用 upsert 批量更新 {len(records_for_upsert)} 条记录..."
-            )
-
-            # 检查是否支持 upsert
-            if not hasattr(collection, "upsert"):
-                error_msg = (
-                    "[迁移] 当前 pymilvus 版本不支持 upsert 方法！\n"
-                    "请升级 pymilvus 到 2.3.0 或更高版本以支持数据迁移。\n"
-                    "升级命令: pip install --upgrade pymilvus>=2.3.0\n"
-                    "为保护数据安全，插件将停止运行。"
-                )
-                logger.error(error_msg)
-                raise RuntimeError(error_msg)
-
-            # 执行 upsert
-            upsert_result = collection.upsert(data=records_for_upsert)
-
-            if not upsert_result:
-                error_msg = "[迁移] Upsert 操作未返回结果，迁移失败"
-                logger.error(error_msg)
-                raise RuntimeError(error_msg)
-
-            migrated_count = upsert_result.upsert_count
-            logger.info(f"[迁移] Upsert 成功，更新了 {migrated_count} 条记录")
-
-            # 刷新集合确保数据持久化
-            plugin.milvus_manager.flush([collection_name])
-            logger.info(f"[迁移] 已刷新集合 '{collection_name}'")
-
-            # 标记为已迁移
-            plugin._migrated_sessions.add(migration_key)
-
-            logger.info(
-                f"[迁移] 完成！成功更新 {migrated_count} 条记录 -> {unified_msg_origin}"
-            )
-
-        except Exception as e:
-            logger.error(f"[迁移] 批量更新失败: {e}", exc_info=True)
-
-    except Exception as e:
-        logger.error(f"[迁移] 迁移过程失败: {e}", exc_info=True)
+        checked = await asyncio.to_thread(
+            _migrate_session_data_sync,
+            plugin,
+            unified_msg_origin,
+            collection_name,
+        )
+        if checked:
+            _mark_migration_checked(plugin, migration_key)
+    except Exception as exc:
+        logger.error(f"[迁移] 迁移过程失败: {exc}", exc_info=True)
+    finally:
+        inflight.discard(migration_key)
