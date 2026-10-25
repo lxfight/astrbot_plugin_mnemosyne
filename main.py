@@ -90,6 +90,8 @@ class Mnemosyne(Star):
         self._mnemosyne_last_user_turn_by_session: OrderedDict[str, str] = OrderedDict()
         self._post_load_tasks_started = False
         self._summary_check_task: asyncio.Task | None = None
+        self._summary_tasks: dict[str, asyncio.Task] = {}
+        self._summary_semaphore: asyncio.Semaphore | None = None
         self._ensure_vector_db_connection_task: asyncio.Task | None = None
         self._vector_db_ready = asyncio.Event()
         # 旧属性名保留给外部代码/旧逻辑兼容。
@@ -968,6 +970,10 @@ class Mnemosyne(Star):
         ):
             self._summary_check_task.cancel()
             logger.debug("已取消后台总结任务")
+        for task in self._summary_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._summary_tasks.clear()
 
         # 清理消息计数器
         if hasattr(self, "msg_counter") and self.msg_counter:
@@ -1059,6 +1065,23 @@ class Mnemosyne(Star):
             except Exception as e:
                 logger.error(f"等待后台任务取消时发生错误: {e}", exc_info=True)
         self._summary_check_task = None
+
+        # --- 停止仍在运行的记忆总结任务 ---
+        summary_tasks = [
+            task for task in self._summary_tasks.values() if not task.done()
+        ]
+        if summary_tasks:
+            logger.info(f"正在取消 {len(summary_tasks)} 个记忆总结任务...")
+            for task in summary_tasks:
+                task.cancel()
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*summary_tasks, return_exceptions=True),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("等待记忆总结任务取消超时。")
+        self._summary_tasks.clear()
 
         # --- 清理消息计数器数据库连接 ---
         if self.msg_counter:

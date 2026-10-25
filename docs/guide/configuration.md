@@ -42,6 +42,7 @@ Embedding Provider 的向量维度决定集合结构。更换 Embedding 模型�
 | `memory_injection_interval` | 每隔 N 轮对话触发一次记忆检索与注入。 | `1` |
 | `memory_injection_position` | 注入位置，可选前置或后置。 | `prepend` |
 | `max_prompt_chars_for_embedding` | 向量化前允许的最大输入字符数，超出部分会截断。 | `4000` |
+| `summary_max_concurrency` | 同时运行的记忆总结任务上限。 | `2` |
 | `summary_fallback_provider_id` | 主总结模型失败或返回空内容时重试的备用模型。 | 空 |
 | `summary_speaker_mapping_prompt` | 约束 `user`、`assistant` 和第一人称归属，支持会话与说话人变量。 | 内置通用映射 |
 | `enable_llm_memory_tool` | 允许支持工具调用的模型通过 `mnemosyne_remember_memory` 写入当前会话记忆。关闭后模型仍可调用工具，但不会写入。 | `true` |

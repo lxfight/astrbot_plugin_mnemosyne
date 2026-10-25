@@ -13,6 +13,14 @@
         "_special":"select_provider",
         "default":""
     },
+    "summary_max_concurrency":{
+        "description":"记忆总结最大并发数",
+        "type":"int",
+        "hint":"限制同时运行的总结任务数量，避免多个会话同时总结时放大 LLM 与 Embedding 压力",
+        "default":2,
+        "minimum":1,
+        "maximum":16
+    },
     "embedding_provider_id":{
         "description":"Embedding 服务提供商",
         "type":"string",
