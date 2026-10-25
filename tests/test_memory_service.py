@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -37,6 +38,7 @@ if "astrbot.api" not in sys.modules:
 
 
 from admin_panel.services.memory_service import MemoryService  # noqa: E402
+from admin_panel.models.memory import MemorySearchRequest  # noqa: E402
 from memory_manager.vector_db_base import (  # noqa: E402
     VectorDeleteResult,
     VectorInsertResult,
@@ -47,6 +49,7 @@ class _FakeVectorDB:
     def __init__(self):
         self.deleted_expr = None
         self.flushed = False
+        self.operation_thread_ids = []
 
     def is_connected(self):
         return True
@@ -55,10 +58,12 @@ class _FakeVectorDB:
         return True
 
     def delete(self, collection_name, expr):
+        self.operation_thread_ids.append(threading.get_ident())
         self.deleted_expr = (collection_name, expr)
         return VectorDeleteResult(delete_count=1)
 
     def flush(self, _collection_names):
+        self.operation_thread_ids.append(threading.get_ident())
         self.flushed = True
 
 
@@ -73,6 +78,7 @@ class _Plugin:
 async def test_delete_memory_uses_native_id_for_non_milvus():
     plugin = _Plugin("chroma")
     service = MemoryService(plugin)
+    event_loop_thread = threading.get_ident()
 
     assert await service.delete_memory("native-id_1")
     assert plugin.vector_db.deleted_expr == (
@@ -80,6 +86,10 @@ async def test_delete_memory_uses_native_id_for_non_milvus():
         'id == "native-id_1"',
     )
     assert plugin.vector_db.flushed
+    assert all(
+        thread_id != event_loop_thread
+        for thread_id in plugin.vector_db.operation_thread_ids
+    )
 
 
 @pytest.mark.asyncio
@@ -205,6 +215,7 @@ async def test_update_memory_rolls_back_milvus_when_insert_fails():
 class _QueryVectorDB:
     def __init__(self):
         self.query_calls = 0
+        self.query_thread_ids = []
 
     def is_connected(self):
         return True
@@ -214,6 +225,7 @@ class _QueryVectorDB:
 
     def query(self, **_kwargs):
         self.query_calls += 1
+        self.query_thread_ids.append(threading.get_ident())
         now = time.time()
         return [
             {
@@ -275,3 +287,19 @@ async def test_session_list_uses_short_ttl_cache():
     assert len(first) == 1
     assert len(second) == 2
     assert plugin.vector_db.query_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_search_memories_runs_query_off_event_loop_thread():
+    plugin = _QueryPlugin()
+    service = MemoryService(plugin)
+    event_loop_thread = threading.get_ident()
+
+    response = await service.search_memories(MemorySearchRequest(limit=1))
+
+    assert response.total_count == 2
+    assert plugin.vector_db.query_thread_ids
+    assert all(
+        thread_id != event_loop_thread
+        for thread_id in plugin.vector_db.query_thread_ids
+    )

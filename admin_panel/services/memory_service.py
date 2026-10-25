@@ -2,6 +2,7 @@
 记忆管理服务 - 提供记忆查询、统计、导出等功能
 """
 
+import asyncio
 import csv
 import io
 import json
@@ -103,7 +104,9 @@ class MemoryService:
                 )
 
             collection_name = self.plugin.collection_name
-            if not vector_db.has_collection(collection_name):
+            if not await asyncio.to_thread(
+                vector_db.has_collection, collection_name
+            ):
                 return MemorySearchResponse(
                     records=[],
                     total_count=0,
@@ -190,7 +193,8 @@ class MemoryService:
                     and request.sort_by == "create_time"
                     and request.sort_order == "desc"
                 ):
-                    all_results = vector_db.query(
+                    all_results = await asyncio.to_thread(
+                        vector_db.query,
                         collection_name=collection_name,
                         filters=query_expr,
                         output_fields=output_fields,
@@ -239,7 +243,8 @@ class MemoryService:
                 current_offset = 0
                 while len(fetched) < max_fetch:
                     batch_limit = min(batch_size, max_fetch - len(fetched))
-                    batch = vector_db.query(
+                    batch = await asyncio.to_thread(
+                        vector_db.query,
                         collection_name=collection_name,
                         filters=query_expr,
                         output_fields=output_fields,
@@ -329,12 +334,15 @@ class MemoryService:
                 return stats
 
             collection_name = self.plugin.collection_name
-            if not vector_db.has_collection(collection_name):
+            if not await asyncio.to_thread(
+                vector_db.has_collection, collection_name
+            ):
                 return stats
 
             # 查询所有记忆（限制数量以避免性能问题）
             max_query = 10000
-            results = vector_db.query(
+            results = await asyncio.to_thread(
+                vector_db.query,
                 collection_name=collection_name,
                 filters=self._all_records_expr(),
                 output_fields=["session_id", "content", "create_time"],
@@ -421,7 +429,9 @@ class MemoryService:
                 return False
 
             collection_name = self.plugin.collection_name
-            if not vector_db.has_collection(collection_name):
+            if not await asyncio.to_thread(
+                vector_db.has_collection, collection_name
+            ):
                 return False
 
             if self._vector_db_type() == "milvus":
@@ -435,8 +445,10 @@ class MemoryService:
                 # 非 Milvus 后端管理面板展示的是数据库原生 ID。
                 expr = self._native_id_expr(memory_id)
 
-            mutation_result = vector_db.delete(collection_name, expr)
-            vector_db.flush([collection_name])
+            mutation_result = await asyncio.to_thread(
+                vector_db.delete, collection_name, expr
+            )
+            await asyncio.to_thread(vector_db.flush, [collection_name])
 
             delete_count = getattr(mutation_result, "delete_count", None)
             self.logger.info(f"已删除记忆: {memory_id}, 删除计数: {delete_count}")
@@ -460,7 +472,9 @@ class MemoryService:
             raise RuntimeError("向量数据库未连接")
 
         collection_name = self.plugin.collection_name
-        if not vector_db.has_collection(collection_name):
+        if not await asyncio.to_thread(
+            vector_db.has_collection, collection_name
+        ):
             raise RuntimeError("记忆集合不存在")
 
         if not getattr(self.plugin, "embedding_provider", None):
@@ -471,7 +485,8 @@ class MemoryService:
         if backend == "milvus":
             output_fields.append("memory_id")
         try:
-            original = vector_db.get_by_id(
+            original = await asyncio.to_thread(
+                vector_db.get_by_id,
                 collection_name=collection_name,
                 record_id=memory_id,
                 output_fields=output_fields,
@@ -508,10 +523,15 @@ class MemoryService:
 
         if backend != "milvus":
             try:
-                result = vector_db.update(collection_name, memory_id, updated_payload)
+                result = await asyncio.to_thread(
+                    vector_db.update,
+                    collection_name,
+                    memory_id,
+                    updated_payload,
+                )
             except NotImplementedError as e:
                 raise RuntimeError("当前向量数据库不支持原地更新记忆") from e
-            vector_db.flush([collection_name])
+            await asyncio.to_thread(vector_db.flush, [collection_name])
             if result.insert_count != 1:
                 raise RuntimeError("向量数据库未确认更新操作")
             updated_id = (
@@ -532,14 +552,18 @@ class MemoryService:
         except ValueError:
             filters = f'memory_id == "{memory_id}"'
 
-        delete_result = vector_db.delete(collection_name, filters)
-        vector_db.flush([collection_name])
+        delete_result = await asyncio.to_thread(
+            vector_db.delete, collection_name, filters
+        )
+        await asyncio.to_thread(vector_db.flush, [collection_name])
         if delete_result.delete_count is not None and delete_result.delete_count < 1:
             raise RuntimeError("原记忆删除失败，更新已取消")
 
         try:
-            insert_result = vector_db.insert(collection_name, [updated_payload])
-            vector_db.flush([collection_name])
+            insert_result = await asyncio.to_thread(
+                vector_db.insert, collection_name, [updated_payload]
+            )
+            await asyncio.to_thread(vector_db.flush, [collection_name])
             if insert_result.insert_count != 1:
                 raise RuntimeError("更新后的记忆插入失败")
         except Exception as update_error:
@@ -549,8 +573,10 @@ class MemoryService:
                 "embedding": original_embedding,
             }
             try:
-                rollback_result = vector_db.insert(collection_name, [rollback_payload])
-                vector_db.flush([collection_name])
+                rollback_result = await asyncio.to_thread(
+                    vector_db.insert, collection_name, [rollback_payload]
+                )
+                await asyncio.to_thread(vector_db.flush, [collection_name])
                 if rollback_result.insert_count != 1:
                     raise RuntimeError("回滚插入未成功")
             except Exception as rollback_error:
@@ -600,7 +626,9 @@ class MemoryService:
                 return 0
 
             collection_name = self.plugin.collection_name
-            if not vector_db.has_collection(collection_name):
+            if not await asyncio.to_thread(
+                vector_db.has_collection, collection_name
+            ):
                 return 0
 
             # 使用安全的表达式构建方法，避免注入
@@ -613,7 +641,8 @@ class MemoryService:
                 return 0
 
             # 先查询记忆数量
-            results = vector_db.query(
+            results = await asyncio.to_thread(
+                vector_db.query,
                 collection_name=collection_name,
                 filters=expr,
                 output_fields=["memory_id"],
@@ -623,8 +652,8 @@ class MemoryService:
 
             # 删除记忆
             if count > 0:
-                vector_db.delete(collection_name, expr)
-                vector_db.flush([collection_name])
+                await asyncio.to_thread(vector_db.delete, collection_name, expr)
+                await asyncio.to_thread(vector_db.flush, [collection_name])
                 self._invalidate_caches()
 
                 self.logger.info(f"已删除会话 {session_id} 的 {count} 条记忆")
@@ -734,11 +763,14 @@ class MemoryService:
                 return []
 
             collection_name = self.plugin.collection_name
-            if not vector_db.has_collection(collection_name):
+            if not await asyncio.to_thread(
+                vector_db.has_collection, collection_name
+            ):
                 return []
 
             # 查询所有记忆（无需手动加载，query会自动处理）
-            results = vector_db.query(
+            results = await asyncio.to_thread(
+                vector_db.query,
                 collection_name=collection_name,
                 filters=self._all_records_expr(),  # 查询所有记录
                 output_fields=["session_id", "create_time"],
@@ -837,7 +869,9 @@ class MemoryService:
                 return []
 
             collection_name = self.plugin.collection_name
-            if not vector_db.has_collection(collection_name):
+            if not await asyncio.to_thread(
+                vector_db.has_collection, collection_name
+            ):
                 return []
 
             # 使用embedding模型生成查询向量
@@ -850,7 +884,8 @@ class MemoryService:
             if not query_vector:
                 return []
 
-            results = vector_db.search(
+            results = await asyncio.to_thread(
+                vector_db.search,
                 collection_name=collection_name,
                 query_vector=query_vector,
                 top_k=limit,
