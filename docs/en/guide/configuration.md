@@ -42,6 +42,7 @@ See [Database Options](/en/guide/database) for backend guidance.
 | `memory_injection_interval` | Retrieve and inject memories once every N conversation turns. | `1` |
 | `memory_injection_position` | Inject before or after the active prompt. | `prepend` |
 | `max_prompt_chars_for_embedding` | Maximum input characters before embedding; longer text is truncated. | `4000` |
+| `summary_max_concurrency` | Maximum number of summarization tasks running at the same time. | `2` |
 | `summary_fallback_provider_id` | Retry with this provider when the primary summarizer fails or returns empty text. | Empty |
 | `summary_speaker_mapping_prompt` | Constrain `user`, `assistant`, and first-person ownership with session and speaker variables. | Built-in mapping |
 | `enable_llm_memory_tool` | Let tool-capable models write to the current session through `mnemosyne_remember_memory`. When disabled, calls return without writing. | `true` |

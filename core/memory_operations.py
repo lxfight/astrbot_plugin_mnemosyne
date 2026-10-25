@@ -1326,6 +1326,61 @@ async def _get_persona_id(plugin: "Mnemosyne", event: AstrMessageEvent) -> str |
     return persona_id
 
 
+DEFAULT_SUMMARY_MAX_CONCURRENCY = 2
+
+
+def _get_summary_tasks(plugin: "Mnemosyne") -> dict[str, asyncio.Task]:
+    tasks = getattr(plugin, "_summary_tasks", None)
+    if tasks is None:
+        tasks = {}
+        plugin._summary_tasks = tasks
+    return tasks
+
+
+def _get_summary_semaphore(plugin: "Mnemosyne") -> asyncio.Semaphore:
+    semaphore = getattr(plugin, "_summary_semaphore", None)
+    if semaphore is None:
+        limit = plugin.config.get(
+            "summary_max_concurrency", DEFAULT_SUMMARY_MAX_CONCURRENCY
+        )
+        semaphore = asyncio.Semaphore(max(1, limit))
+        plugin._summary_semaphore = semaphore
+    return semaphore
+
+
+def _submit_summary_task(
+    plugin: "Mnemosyne",
+    session_id: str,
+    persona_id: str | None,
+    memory_text: str,
+    context_history: list[dict],
+    tool_context_markers: set[str],
+    pre_summary_count: int | None,
+) -> bool:
+    tasks = _get_summary_tasks(plugin)
+    running = tasks.get(session_id)
+    if running and not running.done():
+        logger.info(f"会话 {session_id} 已有总结任务运行，跳过重复提交。")
+        return False
+
+    async def run_summary():
+        async with _get_summary_semaphore(plugin):
+            return await handle_summary_long_memory(
+                plugin,
+                persona_id,
+                session_id,
+                memory_text,
+                context_history=context_history,
+            )
+
+    task = asyncio.create_task(run_summary())
+    tasks[session_id] = task
+    _attach_summary_task_callback(
+        task, plugin, session_id, tool_context_markers, pre_summary_count
+    )
+    return True
+
+
 def _attach_summary_task_callback(
     task: asyncio.Task,
     plugin: "Mnemosyne",
@@ -1358,8 +1413,14 @@ def _attach_summary_task_callback(
             )
         finally:
             _clear_recorded_tool_context(plugin, session_id, tool_context_markers)
+            tasks = getattr(plugin, "_summary_tasks", None)
+            if tasks and tasks.get(session_id) is t:
+                tasks.pop(session_id, None)
 
         if succeeded:
+            context_manager = getattr(plugin, "context_manager", None)
+            if context_manager:
+                context_manager.update_summary_time(session_id)
             return
 
         # 总结失败时回滚计数器，让下一轮对话重新触发总结，
@@ -1370,10 +1431,12 @@ def _attach_summary_task_callback(
 
         try:
             if plugin.msg_counter:
-                plugin.msg_counter.restore_counter(session_id, pre_summary_count)
+                current_count = plugin.msg_counter.get_counter(session_id)
+                restored_count = current_count + pre_summary_count
+                plugin.msg_counter.restore_counter(session_id, restored_count)
                 logger.warning(
                     f"总结任务未成功 (session: {session_id})，"
-                    f"已恢复计数器至 {pre_summary_count}，将在下一轮对话重新触发总结。"
+                    f"已恢复计数器至 {restored_count}，将在下一轮对话重新触发总结。"
                 )
         except Exception as e:
             logger.error(f"回滚会话 {session_id} 的消息计数器失败: {e}", exc_info=True)
@@ -1414,20 +1477,19 @@ async def _check_and_trigger_summary(
         )
         tool_context_markers = _collect_tool_context_markers(context)
 
-        task = asyncio.create_task(
-            handle_summary_long_memory(
-                plugin,
-                persona_id,
-                session_id,
-                history_contents,
-                context_history=context,
-            )
-        )
         # 记录提交总结任务前的计数值，供失败回滚使用（issue #150）
         pre_summary_count = plugin.msg_counter.get_counter(session_id)
-        _attach_summary_task_callback(
-            task, plugin, session_id, tool_context_markers, pre_summary_count
+        submitted = _submit_summary_task(
+            plugin,
+            session_id,
+            persona_id,
+            history_contents,
+            context,
+            tool_context_markers,
+            pre_summary_count,
         )
+        if not submitted:
+            return
         logger.info("总结历史对话任务已提交到后台执行。")
         # M24 修复: 添加类型检查
         if plugin.msg_counter:
@@ -2447,24 +2509,22 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                             session_context["history"]
                         )
                         persona_id = session_context.get("persona_id")
-                        task = asyncio.create_task(
-                            handle_summary_long_memory(
-                                plugin,
-                                persona_id,
-                                session_id,
-                                history_contents,
-                                context_history=session_context["history"],
-                            )
+                        submitted = _submit_summary_task(
+                            plugin,
+                            session_id,
+                            persona_id,
+                            history_contents,
+                            session_context["history"],
+                            tool_context_markers,
+                            counter,
                         )
-                        _attach_summary_task_callback(
-                            task, plugin, session_id, tool_context_markers
-                        )
+                        if not submitted:
+                            continue
                         logger.info("总结历史对话任务已提交到后台执行。")
 
                         # M24 修复: 添加 msg_counter 的类型检查
                         if plugin.msg_counter:
                             plugin.msg_counter.reset_counter(session_id)
-                        plugin.context_manager.update_summary_time(session_id)
 
                 except KeyError:
                     # 会话在获取 keys 后、处理前被删除，是正常情况
