@@ -39,6 +39,7 @@ if "astrbot.api" not in sys.modules:
 
 from admin_panel.services.memory_service import MemoryService  # noqa: E402
 from admin_panel.models.memory import MemorySearchRequest  # noqa: E402
+from core.tools import pack_memory_content  # noqa: E402
 from memory_manager.vector_db_base import (  # noqa: E402
     VectorDeleteResult,
     VectorInsertResult,
@@ -110,9 +111,10 @@ class _EmbeddingProvider:
 
 
 class _UpdateVectorDB:
-    def __init__(self, backend="chroma", fail_first_insert=False):
+    def __init__(self, backend="chroma", fail_first_insert=False, metadata=None):
         self.backend = backend
         self.fail_first_insert = fail_first_insert
+        self.metadata = metadata
         self.updated = None
         self.deleted_expr = None
         self.inserted = []
@@ -127,7 +129,7 @@ class _UpdateVectorDB:
     def get_by_id(self, **kwargs):
         record = {
             "session_id": "session-1",
-            "content": "原始记忆",
+            "content": pack_memory_content("原始记忆", self.metadata),
             "create_time": 1700000000,
             "personality_id": "persona-1",
         }
@@ -159,10 +161,10 @@ class _UpdateVectorDB:
 
 
 class _UpdatePlugin:
-    def __init__(self, backend="chroma", fail_first_insert=False):
+    def __init__(self, backend="chroma", fail_first_insert=False, metadata=None):
         self.config = {"vector_db_type": backend}
         self.collection_name = "memory_collection"
-        self.vector_db = _UpdateVectorDB(backend, fail_first_insert)
+        self.vector_db = _UpdateVectorDB(backend, fail_first_insert, metadata)
         self.embedding_provider = _EmbeddingProvider()
 
 
@@ -183,8 +185,24 @@ async def test_update_memory_preserves_native_id_and_regenerates_embedding():
 
 
 @pytest.mark.asyncio
+async def test_update_memory_preserves_hidden_metadata_and_embeds_visible_content():
+    metadata = {"participants": ["user-1"], "relations": [["alice", "bob"]]}
+    plugin = _UpdatePlugin("chroma", metadata=metadata)
+    service = MemoryService(plugin)
+
+    result = await service.update_memory("native-42", "更新后的记忆")
+
+    assert plugin.vector_db.updated[2]["content"] == pack_memory_content(
+        "更新后的记忆", metadata
+    )
+    assert plugin.vector_db.updated[2]["embedding"] == [6.0, 0.5]
+    assert result["content"] == "更新后的记忆"
+
+
+@pytest.mark.asyncio
 async def test_update_memory_replaces_milvus_auto_id():
-    plugin = _UpdatePlugin("milvus")
+    metadata = {"source": "summary"}
+    plugin = _UpdatePlugin("milvus", metadata=metadata)
     service = MemoryService(plugin)
 
     result = await service.update_memory("42", "新的 Milvus 记忆")
@@ -196,11 +214,15 @@ async def test_update_memory_replaces_milvus_auto_id():
     assert result["memory_id"] == "101"
     assert result["previous_memory_id"] == "42"
     assert result["id_changed"] is True
+    assert plugin.vector_db.inserted[0][1]["content"] == pack_memory_content(
+        "新的 Milvus 记忆", metadata
+    )
 
 
 @pytest.mark.asyncio
 async def test_update_memory_rolls_back_milvus_when_insert_fails():
-    plugin = _UpdatePlugin("milvus", fail_first_insert=True)
+    metadata = {"participants": ["user-1"]}
+    plugin = _UpdatePlugin("milvus", fail_first_insert=True, metadata=metadata)
     service = MemoryService(plugin)
 
     with pytest.raises(RuntimeError, match="原内容已恢复"):
@@ -208,8 +230,66 @@ async def test_update_memory_rolls_back_milvus_when_insert_fails():
 
     assert len(plugin.vector_db.inserted) == 2
     rollback_payload = plugin.vector_db.inserted[1][1]
-    assert rollback_payload["content"] == "原始记忆"
+    assert rollback_payload["content"] == pack_memory_content("原始记忆", metadata)
     assert rollback_payload["embedding"] == [4.0, 0.5]
+
+
+class _MetadataQueryVectorDB:
+    def is_connected(self):
+        return True
+
+    def has_collection(self, _collection_name):
+        return True
+
+    def count(self, _collection_name, _filters=None):
+        return 1
+
+    def query(self, **_kwargs):
+        return [
+            {
+                "id": "1",
+                "memory_id": "1",
+                "session_id": "session-1",
+                "content": pack_memory_content(
+                    "visible memory", {"participants": ["user-secret"]}
+                ),
+                "create_time": 1700000000,
+            }
+        ]
+
+    def search(self, **_kwargs):
+        return [
+            {
+                "id": "1",
+                "memory_id": "1",
+                "session_id": "session-1",
+                "content": pack_memory_content(
+                    "visible memory", {"participants": ["user-secret"]}
+                ),
+                "create_time": 1700000000,
+                "_score": 0.9,
+            }
+        ]
+
+
+@pytest.mark.asyncio
+async def test_search_memories_hides_metadata_from_content_and_keyword_matching():
+    plugin = _QueryPlugin()
+    plugin.vector_db = _MetadataQueryVectorDB()
+    plugin.embedding_provider = _EmbeddingProvider()
+    service = MemoryService(plugin)
+
+    response = await service.search_memories(MemorySearchRequest(limit=10))
+    hidden_keyword = await service.search_memories(
+        MemorySearchRequest(keyword="user-secret", limit=10)
+    )
+    vector_results = await service.vector_search("visible")
+    stats = await service.get_memory_statistics()
+
+    assert response.records[0].content == "visible memory"
+    assert hidden_keyword.total_count == 0
+    assert vector_results[0]["content"] == "visible memory"
+    assert stats.average_memory_length == len("visible memory")
 
 
 class _QueryVectorDB:
