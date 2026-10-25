@@ -72,7 +72,7 @@ class MessageCounter:
     优化说明 (Phase 1 - P0):
     - 实现持久数据库连接，避免每次操作创建新连接
     - 添加线程锁确保线程安全
-    - 实现连接健康检查和自动重连
+    - 使用单条原子 upsert 更新会话计数
     - 支持上下文管理器和资源清理
     """
 
@@ -138,9 +138,6 @@ class MessageCounter:
         """
         获取或创建持久数据库连接。
 
-        P0 优化: 使用持久连接替代每次操作创建新连接
-        包含连接健康检查和自动重连机制
-
         Returns:
             sqlite3.Connection: 数据库连接对象
         """
@@ -148,30 +145,14 @@ class MessageCounter:
             raise RuntimeError("MessageCounter 已关闭，无法获取连接")
 
         if self._connection is None:
-            try:
-                self._connection = sqlite3.connect(
-                    self.db_file,
-                    check_same_thread=False,  # 允许多线程使用
-                    timeout=10.0,  # 设置超时避免死锁
-                )
-                # 启用 WAL 模式以提升并发性能
-                self._connection.execute("PRAGMA journal_mode=WAL")
-                logging.debug(f"创建新的持久数据库连接: {self.db_file}")
-            except sqlite3.Error as e:
-                logging.error(f"创建数据库连接失败: {e}")
-                raise
-        else:
-            # 健康检查：验证连接是否仍然有效
-            try:
-                self._connection.execute("SELECT 1")
-            except sqlite3.Error:
-                logging.warning("检测到数据库连接失效，正在重新连接...")
-                try:
-                    self._connection.close()
-                except Exception:
-                    pass
-                self._connection = None
-                return self._get_connection()  # 递归重连
+            self._connection = sqlite3.connect(
+                self.db_file,
+                check_same_thread=False,  # 允许多线程使用
+                timeout=10.0,  # 设置超时避免死锁
+            )
+            # 启用 WAL 模式以提升并发性能
+            self._connection.execute("PRAGMA journal_mode=WAL")
+            logging.debug(f"创建新的持久数据库连接: {self.db_file}")
 
         return self._connection
 
@@ -256,31 +237,36 @@ class MessageCounter:
                 conn.rollback()
                 raise
 
-    def increment_counter(self, session_id: str):
+    def increment_counter(self, session_id: str) -> int | None:
         """
         为指定会话 ID 的消息计数器加 1。
 
         Args:
             session_id (str): 会话 ID。
+
+        Returns:
+            int | None: 更新后的计数；空会话 ID 返回 None。
         """
         if not session_id:
             logging.warning("尝试增加空 session_id 的计数器，已忽略")
-            return
+            return None
 
         with self._lock:
+            conn = self._get_connection()
             try:
-                conn = self._get_connection()
                 cursor = conn.cursor()
                 cursor.execute(
-                    "INSERT OR IGNORE INTO message_counts (session_id, count) VALUES (?, 0)",
-                    (session_id,),
-                )  # 如果不存在则插入，初始值为0
-                cursor.execute(
-                    "UPDATE message_counts SET count = count + 1 WHERE session_id = ?",
+                    """
+                    INSERT INTO message_counts (session_id, count) VALUES (?, 1)
+                    ON CONFLICT(session_id) DO UPDATE SET count = count + 1
+                    RETURNING count
+                    """,
                     (session_id,),
                 )
+                count = cursor.fetchone()[0]
                 conn.commit()
                 logging.debug(f"会话 {session_id} 的计数器已加 1。")
+                return count
             except sqlite3.Error as e:
                 logging.error(f"增加会话 {session_id} 计数器时发生数据库错误: {e}")
                 conn.rollback()
