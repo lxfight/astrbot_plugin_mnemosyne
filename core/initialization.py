@@ -670,7 +670,15 @@ def initialize_components(plugin: "Mnemosyne", plugin_data_dir=None):
     init_logger.debug("开始初始化其他核心组件...")
     # 1. 初始化消息计数器和上下文管理器
     try:
-        plugin.context_manager = ConversationContextManager()
+        plugin.context_manager = ConversationContextManager(
+            max_sessions=plugin.config.get("context_cache_max_sessions", 2048),
+            idle_ttl_seconds=plugin.config.get(
+                "context_cache_idle_ttl_seconds", 7 * 24 * 60 * 60
+            ),
+            max_history_messages=plugin.config.get(
+                "context_cache_max_messages", 200
+            ),
+        )
 
         # 使用传入的 plugin_data_dir，或回退到 StarTools.get_data_dir()
         try:

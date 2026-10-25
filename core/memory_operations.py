@@ -955,8 +955,7 @@ async def handle_query_memory(
         clean_contexts(plugin, req)
 
         # 判断是否在历史会话管理器中，如果不在，则进行初始化
-        if session_id not in plugin.context_manager.conversations:
-            plugin.context_manager.init_conv(session_id, req.contexts, event)
+        plugin.context_manager.init_conv(session_id, req.contexts, persona_id)
 
         # 生成供“插件内部记忆/向量化”使用的安全用户文本：
         # - AstrBot 可能在纯图片消息时令 prompt=None，此处用占位符避免报错
@@ -2402,6 +2401,7 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                 continue
 
             current_time = time.time()
+            plugin.context_manager.prune()
             session_ids_to_check = list(plugin.context_manager.conversations.keys())
 
             # logger.debug(f"开始检查 {len(session_ids_to_check)} 个会话的总结超时...")
@@ -2446,9 +2446,7 @@ async def _periodic_summarization_check(plugin: "Mnemosyne"):
                         tool_context_markers = _collect_tool_context_markers(
                             session_context["history"]
                         )
-                        persona_id = await _get_persona_id(
-                            plugin, session_context["event"]
-                        )
+                        persona_id = session_context.get("persona_id")
                         task = asyncio.create_task(
                             handle_summary_long_memory(
                                 plugin,

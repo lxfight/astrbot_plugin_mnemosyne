@@ -33,6 +33,9 @@ Embedding Provider 的向量维度决定集合结构。更换 Embedding 模型�
 | 配置项 | 说明 | 默认值 |
 | --- | --- | --- |
 | `num_pairs` | 触发自动总结的对话轮数。 | `5` |
+| `context_cache_max_sessions` | 内存中最多保留的活跃会话数，超出后淘汰最久未使用的会话。 | `2048` |
+| `context_cache_idle_ttl_seconds` | 会话空闲多久后释放；`0` 表示不按时间淘汰。 | `604800` |
+| `context_cache_max_messages` | 单个会话最多保留的消息条数，超出后保留最新消息。 | `200` |
 | `top_k` | 检索时返回的记忆数量。 | `3` |
 | `contexts_memory_len` | 历史上下文保留的长期记忆标签数量；小于 0 表示全部保留，0 表示清理全部。 | `0` |
 | `memory_injection_method` | `user_prompt` 注入用户提示；`system_prompt` 注入 LLM 系统提示；`insert_system_prompt` 新增独立系统消息。 | `user_prompt` |

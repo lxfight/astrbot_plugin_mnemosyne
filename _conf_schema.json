@@ -255,6 +255,29 @@
         "minimum":1,
         "maximum":25
     },
+    "context_cache_max_sessions":{
+        "description":"上下文缓存最大会话数",
+        "type":"int",
+        "hint":"按最近活跃时间保留会话，超出后淘汰最久未使用的会话，避免长期运行内存持续增长",
+        "default":2048,
+        "minimum":1,
+        "maximum":100000
+    },
+    "context_cache_idle_ttl_seconds":{
+        "description":"上下文缓存空闲过期时间（秒）",
+        "type":"int",
+        "hint":"超过该时间未活动的会话会被释放；0 表示不按时间淘汰，仅受最大会话数限制",
+        "default":604800,
+        "minimum":0
+    },
+    "context_cache_max_messages":{
+        "description":"单会话最多保留的消息数",
+        "type":"int",
+        "hint":"超出后仅保留最新消息。应大于等于 num_pairs * 2，避免总结前丢失近期对话",
+        "default":200,
+        "minimum":2,
+        "maximum":5000
+    },
     "top_k":{
         "description":"返回的长期记忆的数量",
         "type":"int",

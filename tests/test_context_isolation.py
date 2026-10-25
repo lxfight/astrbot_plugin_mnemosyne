@@ -10,7 +10,7 @@ def test_init_conv_isolates_history_from_request_contexts() -> None:
     ]
     manager = ConversationContextManager()
 
-    manager.init_conv("session-1", request_contexts, event=object())
+    manager.init_conv("session-1", request_contexts)
     manager.add_message(
         "session-1",
         "user",
