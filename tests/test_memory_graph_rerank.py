@@ -893,6 +893,31 @@ class TestSummaryFormatting(unittest.TestCase):
 
 
 class TestMessageCounter(unittest.TestCase):
+    def test_increment_counter_uses_single_atomic_upsert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            counter = MessageCounter(plugin_data_dir=tmp_dir)
+            try:
+                session_id = "test-session"
+                trace: list[str] = []
+                counter._get_connection().set_trace_callback(trace.append)
+
+                self.assertEqual(counter.increment_counter(session_id), 1)
+                self.assertEqual(counter.increment_counter(session_id), 2)
+                self.assertEqual(counter.get_counter(session_id), 2)
+
+                upserts = [
+                    statement
+                    for statement in trace
+                    if "INSERT INTO message_counts" in statement
+                ]
+                self.assertEqual(len(upserts), 2)
+                self.assertTrue(
+                    all("ON CONFLICT" in statement for statement in upserts)
+                )
+                self.assertFalse(any("SELECT 1" in statement for statement in trace))
+            finally:
+                counter.close()
+
     def test_adjust_counter_ignores_tool_context_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             counter = MessageCounter(plugin_data_dir=tmp_dir)
