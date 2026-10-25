@@ -14,13 +14,17 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME, VECTOR_FIELD_NAME
-from .provider_utils import request_embedding
+from .provider_utils import request_embeddings
 from .security_utils import (
     safe_build_milvus_expression,
     validate_safe_path,
     validate_session_id,
 )
-from .tools import resolve_max_prompt_chars, truncate_for_embedding
+from .tools import (
+    resolve_max_prompt_chars,
+    split_memory_content_meta,
+    truncate_for_embedding,
+)
 
 if TYPE_CHECKING:
     from ..main import Mnemosyne
@@ -659,13 +663,21 @@ async def import_memory_cmd_impl(
         if not getattr(self, "embedding_provider", None):
             yield event.plain_result("⚠️ Embedding Provider 不可用，无法导入记忆。")
             return
-        data_to_insert = []
-        for record in normalized_records:
-            embedding = await request_embedding(self, record["content"])
-            if not embedding:
-                yield event.plain_result("⚠️ 生成 Embedding 失败，未写入任何记录。")
-                return
-            data_to_insert.append({**record, VECTOR_FIELD_NAME: embedding})
+        embedding_inputs = [
+            split_memory_content_meta(record["content"])[0]
+            for record in normalized_records
+        ]
+        try:
+            embeddings = await request_embeddings(self, embedding_inputs)
+        except Exception as exc:
+            yield event.plain_result(
+                f"⚠️ 生成 Embedding 失败，未写入任何记录：{exc}"
+            )
+            return
+        data_to_insert = [
+            {**record, VECTOR_FIELD_NAME: embedding}
+            for record, embedding in zip(normalized_records, embeddings)
+        ]
 
         vector_db = _get_vector_db(self)
         if not vector_db or not vector_db.is_connected():
@@ -1377,27 +1389,40 @@ async def init_memory_system_cmd_impl(
                     yield event.plain_result(
                         f"🔄 正在重新生成 {record_count} 条记录的向量..."
                     )
+                    records_to_migrate = []
+                    embedding_inputs = []
+                    for record in old_records:
+                        stored_content = str(record.get("content", ""))
+                        visible_content, _ = split_memory_content_meta(stored_content)
+                        if not visible_content:
+                            continue
+                        records_to_migrate.append(record)
+                        embedding_inputs.append(visible_content)
+
+                    try:
+                        embeddings = await request_embeddings(self, embedding_inputs)
+                    except Exception as exc:
+                        logger.error(f"重新生成迁移向量失败: {exc}", exc_info=True)
+                        yield event.plain_result(
+                            f"⚠️ 重新生成向量失败，迁移中止：{exc}\n"
+                            f"备份文件: {backup_file.name}"
+                        )
+                        return
+
                     success_count = 0
                     fail_count = 0
+                    migration_count = len(records_to_migrate)
 
-                    for i, record in enumerate(old_records):
+                    for i, (record, embedding) in enumerate(
+                        zip(records_to_migrate, embeddings)
+                    ):
                         try:
-                            content = record.get("content", "")
-                            if not content:
-                                continue
-
-                            # 生成新向量
-                            embedding = await request_embedding(self, content)
-                            if not embedding:
-                                fail_count += 1
-                                continue
-
                             # 插入新记录 - 使用类型标注避免 Pylance 错误
                             insert_data: list = [
                                 {
                                     "personality_id": record.get("personality_id", ""),
                                     "session_id": record.get("session_id", ""),
-                                    "content": content,
+                                    "content": record.get("content", ""),
                                     "embedding": embedding,
                                     "create_time": record.get(
                                         "create_time", int(datetime.now().timestamp())
@@ -1416,7 +1441,7 @@ async def init_memory_system_cmd_impl(
                             # 每10条记录报告一次进度
                             if (i + 1) % 10 == 0:
                                 yield event.plain_result(
-                                    f"进度: {i + 1}/{record_count} "
+                                    f"进度: {i + 1}/{migration_count} "
                                     f"(成功: {success_count}, 失败: {fail_count})"
                                 )
 

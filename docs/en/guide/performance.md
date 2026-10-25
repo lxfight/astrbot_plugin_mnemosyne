@@ -55,6 +55,8 @@ Memory search uses a native count when no keyword is supplied, then scans pages 
 
 Session-deletion counts and the resource dashboard's record total also prefer native counts. Custom backends without native counting fall back to a bounded query.
 
+Memory imports and Milvus dimension migrations request embeddings in batches of 16, with a single-request fallback for providers that do not expose a batch API.
+
 Batch deletion merges IDs into expressions of up to 200 records and flushes once after all delete requests complete.
 
 Exports keep a 10,000-record safety limit. That limit is not a page size. For large collections, filter by session or date instead of exporting everything repeatedly.

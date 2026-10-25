@@ -77,8 +77,17 @@ class _SyntheticVectorDB:
 
 
 class _SyntheticEmbeddingProvider:
+    def __init__(self):
+        self.batch_calls = []
+        self.single_calls = 0
+
     async def get_embedding(self, content: str):
+        self.single_calls += 1
         return [float(len(content)), 1.0]
+
+    async def get_embeddings(self, contents: list[str]):
+        self.batch_calls.append(contents)
+        return [await self.get_embedding(content) for content in contents]
 
 
 class _SyntheticPlugin:
@@ -220,6 +229,8 @@ async def test_export_then_import_uses_an_export_directory_and_requires_confirma
     )
     assert len(plugin.vector_db.inserted) == 2
     assert all("embedding" in record for record in plugin.vector_db.inserted)
+    assert [len(call) for call in plugin.embedding_provider.batch_calls] == [2]
+    assert plugin.embedding_provider.single_calls == 2
     assert "导入完成" in imported[0]
 
 
