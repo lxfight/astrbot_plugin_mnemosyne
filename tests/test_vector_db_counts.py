@@ -11,6 +11,8 @@ def test_qdrant_count_uses_exact_native_count():
     adapter._is_connected = True
     adapter._client = MagicMock()
     adapter._client.count.return_value = SimpleNamespace(count=17)
+    expected_filter = object()
+    adapter._parse_filters = MagicMock(return_value=expected_filter)
 
     count = adapter.count(
         "memory_collection", "session_id == 'session-1'"
@@ -20,7 +22,8 @@ def test_qdrant_count_uses_exact_native_count():
     call = adapter._client.count.call_args.kwargs
     assert call["collection_name"] == "memory_collection"
     assert call["exact"] is True
-    assert call["count_filter"] is not None
+    assert call["count_filter"] is expected_filter
+    adapter._parse_filters.assert_called_once_with("session_id == 'session-1'")
 
 
 def test_qdrant_count_without_filters_passes_empty_filter():
