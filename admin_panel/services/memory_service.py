@@ -28,9 +28,19 @@ from ..models.memory import (
 try:
     from ...core.provider_utils import request_embedding
     from ...core.security_utils import safe_build_milvus_expression
+    from ...core.tools import (
+        pack_memory_content,
+        split_memory_content_meta,
+        strip_memory_meta,
+    )
 except ImportError:
     from core.provider_utils import request_embedding
     from core.security_utils import safe_build_milvus_expression
+    from core.tools import (
+        pack_memory_content,
+        split_memory_content_meta,
+        strip_memory_meta,
+    )
 
 
 MEMORY_SERVICE_CACHE_TTL_SECONDS = 10.0
@@ -220,7 +230,7 @@ class MemoryService:
                         record = MemoryRecord(
                             memory_id=self._record_id(result),
                             session_id=result.get("session_id", ""),
-                            content=result.get("content", ""),
+                            content=strip_memory_meta(result.get("content", "")),
                             create_time=create_time_dt,
                             persona_id=persona_id_value,
                         )
@@ -374,7 +384,9 @@ class MemoryService:
                     scanned_count += 1
                     session_id = result.get("session_id", "unknown")
                     session_counts[session_id] += 1
-                    total_length += len(result.get("content", ""))
+                    total_length += len(
+                        strip_memory_meta(result.get("content", ""))
+                    )
 
                     create_time = result.get("create_time")
                     if isinstance(create_time, (int, float)):
@@ -486,7 +498,7 @@ class MemoryService:
 
     async def update_memory(self, memory_id: str, content: str) -> dict[str, Any]:
         """更新记忆内容并重新生成 embedding。"""
-        normalized_content = str(content or "").strip()
+        normalized_content = split_memory_content_meta(str(content or ""))[0].strip()
         if not normalized_content:
             raise ValueError("记忆内容不能为空")
         if len(normalized_content) > 4096:
@@ -522,7 +534,8 @@ class MemoryService:
         if not original:
             raise ValueError("记忆记录不存在")
 
-        original_content = str(original.get("content", ""))
+        original_stored_content = str(original.get("content", ""))
+        original_content, metadata = split_memory_content_meta(original_stored_content)
         create_time = original.get("create_time")
         if isinstance(create_time, datetime):
             create_time = create_time.timestamp()
@@ -539,7 +552,7 @@ class MemoryService:
             raise RuntimeError("无法为更新后的记忆生成 embedding")
 
         updated_payload = {
-            "content": normalized_content,
+            "content": pack_memory_content(normalized_content, metadata),
             "embedding": new_embedding,
             "personality_id": original.get("personality_id", ""),
             "session_id": original.get("session_id", ""),
@@ -594,7 +607,7 @@ class MemoryService:
         except Exception as update_error:
             rollback_payload = {
                 **updated_payload,
-                "content": original_content,
+                "content": original_stored_content,
                 "embedding": original_embedding,
             }
             try:
@@ -628,7 +641,7 @@ class MemoryService:
             "memory_id": updated_id,
             "previous_memory_id": previous_id,
             "id_changed": updated_id != previous_id,
-            "content": payload["content"],
+            "content": strip_memory_meta(payload["content"]),
             "session_id": payload.get("session_id", ""),
             "persona_id": payload.get("personality_id", ""),
             "create_time": datetime.fromtimestamp(payload["create_time"]).isoformat(),
@@ -929,7 +942,9 @@ class MemoryService:
                         memory = {
                             "memory_id": self._record_id(entity),
                             "session_id": entity.get("session_id", ""),
-                            "content": entity.get("content", ""),
+                            "content": strip_memory_meta(
+                                entity.get("content", "")
+                            ),
                             "create_time": create_time.isoformat(),
                             "persona_id": persona_id_value,
                             "similarity_score": entity.get(
