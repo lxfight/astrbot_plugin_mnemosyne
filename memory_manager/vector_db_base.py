@@ -100,6 +100,26 @@ class VectorDatabase(ABC):
         """
         pass
 
+    def query_page(
+        self,
+        collection_name: str,
+        filters: str | None,
+        output_fields: list[str] | None,
+        limit: int,
+        cursor: Any = None,
+    ) -> tuple[list[dict[str, Any]], Any]:
+        """查询一页记录并返回下一页游标；默认将游标解释为整数 offset。"""
+        offset = int(cursor or 0)
+        records = self.query(
+            collection_name=collection_name,
+            filters=filters,
+            output_fields=output_fields,
+            limit=limit,
+            offset=offset,
+        )
+        next_cursor = offset + len(records) if len(records) == limit else None
+        return records, next_cursor
+
     @abstractmethod
     def search(
         self,

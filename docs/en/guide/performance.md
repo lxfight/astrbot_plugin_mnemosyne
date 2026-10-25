@@ -51,6 +51,8 @@ Statistics, session lists, and resource statistics use a 10-second cache so dash
 
 Statistics and session lists aggregate records in 2,000-row batches and no longer stop at 10,000 records. Chroma, Qdrant, and Milvus use native counts for totals instead of fetching the full table just to count it.
 
+Qdrant admin scans use native scroll cursors instead of repeatedly reading a growing integer-offset prefix; other backends keep their native offset pagination.
+
 Memory search uses a native count when no keyword is supplied, then scans pages and keeps only the `offset + limit` window in a min-heap instead of loading every record into memory. Keyword search still scans the filtered range, but it now reads records in batches.
 
 Session-deletion counts and the resource dashboard's record total also prefer native counts. Custom backends without native counting fall back to a bounded query.
