@@ -52,12 +52,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate bilingual release notes
+      - name: Prepare bilingual release notes
+        env:
+          VERSION: ${{ needs.check-version.outputs.new_version }}
+          OLD_VERSION: ${{ needs.check-version.outputs.old_version }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          python .github/scripts/generate_release_notes.py \
-            "${{ needs.check-version.outputs.new_version }}" \
-            "${{ needs.check-version.outputs.old_version }}" \
-            "${{ github.repository }}" > changelog.md
+          set -euo pipefail
+          NOTES_FILE=".github/release-notes/${VERSION}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            cp "$NOTES_FILE" changelog.md
+            echo "Using curated release notes: $NOTES_FILE"
+          else
+            python .github/scripts/generate_release_notes.py \
+              "$VERSION" "$OLD_VERSION" "$REPOSITORY" > changelog.md
+            echo "Generated release notes from conventional commits"
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
