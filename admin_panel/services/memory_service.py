@@ -121,24 +121,25 @@ class MemoryService:
         output_fields: list[str],
         expected_total: int | None = None,
     ):
-        offset = 0
-        while expected_total is None or offset < expected_total:
+        cursor = None
+        scanned_count = 0
+        while expected_total is None or scanned_count < expected_total:
             page_size = ADMIN_QUERY_PAGE_SIZE
             if expected_total is not None:
-                page_size = min(page_size, expected_total - offset)
-            batch = await asyncio.to_thread(
-                vector_db.query,
+                page_size = min(page_size, expected_total - scanned_count)
+            batch, cursor = await asyncio.to_thread(
+                vector_db.query_page,
                 collection_name=collection_name,
                 filters=filters,
                 output_fields=output_fields,
                 limit=page_size,
-                offset=offset,
+                cursor=cursor,
             )
             if not batch:
                 break
             yield batch
-            offset += len(batch)
-            if len(batch) < page_size:
+            scanned_count += len(batch)
+            if cursor is None or len(batch) < page_size:
                 break
 
     async def search_memories(

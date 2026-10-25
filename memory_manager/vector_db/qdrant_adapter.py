@@ -251,6 +251,30 @@ class QdrantVectorDB(VectorDatabase):
             logger.error(f"查询集合 '{collection_name}' 失败: {e}", exc_info=True)
             raise
 
+    def query_page(
+        self,
+        collection_name: str,
+        filters: str | None,
+        output_fields: list[str] | None,
+        limit: int,
+        cursor: Any = None,
+    ) -> tuple[list[dict[str, Any]], Any]:
+        """使用 Qdrant scroll 游标查询一页记录。"""
+        self._ensure_connected()
+        points, next_cursor = self._client.scroll(
+            collection_name=collection_name,
+            scroll_filter=self._parse_filters(filters),
+            limit=limit,
+            offset=cursor,
+            with_payload=True,
+            with_vectors=False,
+        )
+        records = [
+            {"id": point.id, **(point.payload or {})}
+            for point in points
+        ]
+        return records, next_cursor
+
     def update(
         self,
         collection_name: str,

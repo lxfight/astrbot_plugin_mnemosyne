@@ -257,6 +257,9 @@ class _MetadataQueryVectorDB:
             }
         ]
 
+    def query_page(self, collection_name, filters, output_fields, limit, cursor=None):
+        return self.query(limit=limit, offset=cursor or 0), None
+
     def search(self, **_kwargs):
         return [
             {
@@ -332,6 +335,9 @@ class _QueryVectorDB:
             },
         ]
 
+    def query_page(self, collection_name, filters, output_fields, limit, cursor=None):
+        return self.query(limit=limit, offset=cursor or 0), None
+
     def delete(self, collection_name, expr):
         self.deleted_expr = (collection_name, expr)
         return VectorDeleteResult(delete_count=1)
@@ -348,6 +354,7 @@ class _PagedVectorDB:
         self.query_calls = 0
         self.query_limits = []
         self.query_offsets = []
+        self.query_cursors = []
 
     def is_connected(self):
         return True
@@ -376,6 +383,13 @@ class _PagedVectorDB:
             }
             for index in range(offset, end)
         ]
+
+    def query_page(self, collection_name, filters, output_fields, limit, cursor=None):
+        self.query_cursors.append(cursor)
+        offset = cursor or 0
+        records = self.query(limit=limit, offset=offset)
+        next_cursor = offset + len(records) if len(records) == limit else None
+        return records, next_cursor
 
 
 class _QueryPlugin:
@@ -479,6 +493,7 @@ async def test_search_latest_page_across_query_batches():
     assert response.records[0].memory_id == "2499"
     assert plugin.vector_db.count_calls == 1
     assert plugin.vector_db.query_limits == [2000, 500]
+    assert plugin.vector_db.query_cursors == [None, 2000]
 
 
 @pytest.mark.asyncio
@@ -494,6 +509,7 @@ async def test_memory_statistics_scans_all_query_batches():
     assert sum(stats.memories_by_session.values()) == 10050
     assert plugin.vector_db.count_calls == 1
     assert plugin.vector_db.query_limits == [2000, 2000, 2000, 2000, 2000, 50]
+    assert plugin.vector_db.query_cursors == [None, 2000, 4000, 6000, 8000, 10000]
 
 
 @pytest.mark.asyncio
@@ -507,6 +523,7 @@ async def test_memory_statistics_falls_back_without_native_count():
     assert stats.total_memories == 3
     assert plugin.vector_db.count_calls == 1
     assert plugin.vector_db.query_calls == 1
+    assert plugin.vector_db.query_cursors == [None]
 
 
 @pytest.mark.asyncio
@@ -519,6 +536,7 @@ async def test_session_list_aggregates_all_query_batches():
 
     assert sum(session["memory_count"] for session in sessions) == 10050
     assert plugin.vector_db.query_limits == [2000, 2000, 2000, 2000, 2000, 2000]
+    assert plugin.vector_db.query_cursors == [None, 2000, 4000, 6000, 8000, 10000]
 
 
 @pytest.mark.asyncio
