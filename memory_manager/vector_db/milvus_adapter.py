@@ -222,6 +222,18 @@ class MilvusVectorDB(VectorDatabase):
         )
         return records[0] if records else None
 
+    def count(self, collection_name: str, filters: str | None = None) -> int:
+        """使用 Milvus 聚合查询获取匹配记录数。"""
+        results = self._manager.query(
+            collection_name=collection_name,
+            expression=filters or "memory_id >= 0",
+            output_fields=["count(*)"],
+        )
+        if not results:
+            return 0
+        row = results[0]
+        return int(row.get("count(*)", row.get("count", 0)))
+
     def search(
         self,
         collection_name: str,

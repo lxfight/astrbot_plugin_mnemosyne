@@ -4,6 +4,7 @@
 
 import asyncio
 import csv
+import heapq
 import io
 import json
 import time
@@ -34,6 +35,7 @@ except ImportError:
 
 MEMORY_SERVICE_CACHE_TTL_SECONDS = 10.0
 BATCH_DELETE_CHUNK_SIZE = 200
+ADMIN_QUERY_PAGE_SIZE = 2000
 
 
 class MemoryService:
@@ -88,6 +90,46 @@ class MemoryService:
         if not native_id and isinstance(additional, dict):
             native_id = additional.get("id")
         return str(result.get("memory_id") or native_id or "")
+
+    async def _count_records(
+        self,
+        vector_db,
+        collection_name: str,
+        filters: str | None,
+    ) -> int | None:
+        return await asyncio.to_thread(
+            vector_db.count,
+            collection_name,
+            filters,
+        )
+
+    async def _iter_query_batches(
+        self,
+        vector_db,
+        collection_name: str,
+        filters: str | None,
+        output_fields: list[str],
+        expected_total: int | None = None,
+    ):
+        offset = 0
+        while expected_total is None or offset < expected_total:
+            page_size = ADMIN_QUERY_PAGE_SIZE
+            if expected_total is not None:
+                page_size = min(page_size, expected_total - offset)
+            batch = await asyncio.to_thread(
+                vector_db.query,
+                collection_name=collection_name,
+                filters=filters,
+                output_fields=output_fields,
+                limit=page_size,
+                offset=offset,
+            )
+            if not batch:
+                break
+            yield batch
+            offset += len(batch)
+            if len(batch) < page_size:
+                break
 
     async def search_memories(
         self, request: MemorySearchRequest
@@ -155,13 +197,6 @@ class MemoryService:
             output_fields.append("personality_id")
 
             try:
-                # Milvus 的 query 不保证按 create_time 排序。
-                # 旧实现是：先分页取一页（默认顺序通常是最旧→最新），再在内存里排序/keyword 过滤。
-                # 这会导致：第一页永远是最旧；keyword 只能搜到“这一页”。
-                # 新实现：
-                # - 无额外过滤（expr 为空且无 keyword）时，用“反向 offset”快速取最新页。
-                # - 其它情况（有 keyword/有筛选）则做受控全量拉取 → 全局过滤/排序 → 再分页。
-
                 query_expr = expr if expr else self._all_records_expr()
                 page = request.offset // request.limit + 1
 
@@ -195,103 +230,70 @@ class MemoryService:
                         self.logger.error(f"转换记忆记录失败: {exc}")
                         return None
 
-                # 快路径：全量列表（不带任何筛选/keyword）默认展示最新
-                if (
-                    not expr
-                    and not request.keyword
-                    and request.sort_by == "create_time"
-                    and request.sort_order == "desc"
+                native_total = None
+                if not request.keyword:
+                    native_total = await self._count_records(
+                        vector_db, collection_name, query_expr
+                    )
+                if native_total == 0 or (
+                    native_total is not None and request.offset >= native_total
                 ):
-                    all_results = await asyncio.to_thread(
-                        vector_db.query,
-                        collection_name=collection_name,
-                        filters=query_expr,
-                        output_fields=output_fields,
-                        limit=10000,
-                    )
-                    total_count = len(all_results)
-                    if request.offset >= total_count:
-                        return MemorySearchResponse(
-                            records=[],
-                            total_count=total_count,
-                            page=page,
-                            page_size=request.limit,
-                            has_more=False,
-                        )
-
-                    records: list[MemoryRecord] = []
-                    all_results.sort(
-                        key=lambda item: item.get("create_time", 0) or 0,
-                        reverse=True,
-                    )
-                    results = all_results[
-                        request.offset : request.offset + request.limit
-                    ]
-                    for result in results:
-                        record = _to_record(result)
-                        if record is not None:
-                            records.append(record)
-
-                    # 仅对本页做排序（已是最新窗口，排序保证时间倒序展示）
-                    records.sort(key=lambda x: x.create_time, reverse=True)
-                    has_more = request.offset + request.limit < total_count
-
                     return MemorySearchResponse(
-                        records=records,
-                        total_count=total_count,
+                        records=[],
+                        total_count=native_total or 0,
                         page=page,
                         page_size=request.limit,
-                        has_more=has_more,
+                        has_more=False,
                     )
 
-                # 慢路径：有 keyword 或其它筛选时，为保证“全局搜索/全局排序”，做受控全量拉取
-                max_fetch = 10000
-                batch_size = 1000
-                fetched: list[MemoryRecord] = []
+                window = request.offset + request.limit
+                is_desc = request.sort_order == "desc"
+                keyword_lower = request.keyword.lower() if request.keyword else None
+                heap: list[tuple[float, int, MemoryRecord]] = []
+                unordered: list[MemoryRecord] = []
+                matched_count = 0
 
-                current_offset = 0
-                while len(fetched) < max_fetch:
-                    batch_limit = min(batch_size, max_fetch - len(fetched))
-                    batch = await asyncio.to_thread(
-                        vector_db.query,
-                        collection_name=collection_name,
-                        filters=query_expr,
-                        output_fields=output_fields,
-                        limit=batch_limit,
-                        offset=current_offset,
-                    )
-                    if not batch:
-                        break
-
+                async for batch in self._iter_query_batches(
+                    vector_db,
+                    collection_name,
+                    query_expr,
+                    output_fields,
+                    expected_total=native_total,
+                ):
                     for result in batch:
                         record = _to_record(result)
-                        if record is not None:
-                            fetched.append(record)
+                        if record is None:
+                            continue
+                        if keyword_lower and keyword_lower not in (
+                            record.content or ""
+                        ).lower():
+                            continue
 
-                    current_offset += len(batch)
-                    if len(batch) < batch_limit:
-                        break
+                        matched_count += 1
+                        if request.sort_by != "create_time":
+                            unordered.append(record)
+                            continue
 
-                # keyword 过滤（全局）
-                filtered = fetched
-                if request.keyword:
-                    keyword_lower = request.keyword.lower()
-                    filtered = [
-                        r
-                        for r in filtered
-                        if keyword_lower in (r.content or "").lower()
-                    ]
+                        timestamp = record.create_time.timestamp()
+                        heap_key = timestamp if is_desc else -timestamp
+                        heapq.heappush(
+                            heap, (heap_key, matched_count, record)
+                        )
+                        if len(heap) > window:
+                            heapq.heappop(heap)
 
-                # 排序（全局）
+                total_count = (
+                    native_total if native_total is not None else matched_count
+                )
                 if request.sort_by == "create_time":
-                    reverse = request.sort_order == "desc"
-                    filtered.sort(key=lambda x: x.create_time, reverse=reverse)
-
-                total_count = len(filtered)
-                start = min(request.offset, total_count)
-                end = min(request.offset + request.limit, total_count)
-                page_records = filtered[start:end]
-                has_more = end < total_count
+                    ordered = [entry[2] for entry in heap]
+                    ordered.sort(key=lambda item: item.create_time, reverse=is_desc)
+                else:
+                    ordered = unordered
+                start = min(request.offset, len(ordered))
+                end = min(request.offset + request.limit, len(ordered))
+                page_records = ordered[start:end]
+                has_more = request.offset + request.limit < total_count
 
                 return MemorySearchResponse(
                     records=page_records,
@@ -348,41 +350,32 @@ class MemoryService:
             ):
                 return stats
 
-            # 查询所有记忆（限制数量以避免性能问题）
-            max_query = 10000
-            results = await asyncio.to_thread(
-                vector_db.query,
-                collection_name=collection_name,
-                filters=self._all_records_expr(),
-                output_fields=["session_id", "content", "create_time"],
-                limit=max_query,
-            )
-            stats.total_memories = len(results)
-            if max_query > 0:
-                # 检查查询结果
-                if not results:
-                    self.logger.warning("统计查询返回空结果")
-                    self._stats_cache = stats
-                    self._stats_cache_at = time.monotonic()
-                    return stats
+            native_total = await self._count_records(vector_db, collection_name, None)
+            if native_total == 0:
+                self._stats_cache = stats
+                self._stats_cache_at = time.monotonic()
+                return stats
 
-                # 统计各会话的记忆数
-                session_counts = defaultdict(int)
-                date_counts = defaultdict(int)
-                total_length = 0
-                recent_count = 0
-                now = datetime.now()
-                recent_threshold = now - timedelta(days=7)
+            session_counts = defaultdict(int)
+            date_counts = defaultdict(int)
+            total_length = 0
+            recent_count = 0
+            scanned_count = 0
+            recent_threshold = datetime.now() - timedelta(days=7)
 
+            async for results in self._iter_query_batches(
+                vector_db,
+                collection_name,
+                self._all_records_expr(),
+                ["session_id", "content", "create_time"],
+                expected_total=native_total,
+            ):
                 for result in results:
+                    scanned_count += 1
                     session_id = result.get("session_id", "unknown")
                     session_counts[session_id] += 1
+                    total_length += len(result.get("content", ""))
 
-                    # 内容长度统计
-                    content = result.get("content", "")
-                    total_length += len(content)
-
-                    # 日期统计
                     create_time = result.get("create_time")
                     if isinstance(create_time, (int, float)):
                         create_time = datetime.fromtimestamp(create_time)
@@ -393,26 +386,23 @@ class MemoryService:
                             create_time = None
 
                     if create_time:
-                        date_key = create_time.strftime("%Y-%m-%d")
-                        date_counts[date_key] += 1
-
-                        # 最近记忆统计
+                        date_counts[create_time.strftime("%Y-%m-%d")] += 1
                         if create_time >= recent_threshold:
                             recent_count += 1
 
-                stats.total_sessions = len(session_counts)
-                stats.memories_by_session = dict(session_counts)
-                stats.memories_by_date = dict(date_counts)
-
-                # 最活跃的会话（Top 10）
-                stats.most_active_sessions = sorted(
-                    session_counts.items(), key=lambda x: x[1], reverse=True
-                )[:10]
-
-                stats.recent_memories_count = recent_count
-                stats.average_memory_length = (
-                    total_length / len(results) if results else 0.0
-                )
+            stats.total_memories = (
+                native_total if native_total is not None else scanned_count
+            )
+            stats.total_sessions = len(session_counts)
+            stats.memories_by_session = dict(session_counts)
+            stats.memories_by_date = dict(date_counts)
+            stats.most_active_sessions = sorted(
+                session_counts.items(), key=lambda x: x[1], reverse=True
+            )[:10]
+            stats.recent_memories_count = recent_count
+            stats.average_memory_length = (
+                total_length / scanned_count if scanned_count else 0.0
+            )
 
         except Exception as e:
             self.logger.error(f"获取记忆统计失败: {e}", exc_info=True)
@@ -675,15 +665,16 @@ class MemoryService:
                 )
                 return 0
 
-            # 先查询记忆数量
-            results = await asyncio.to_thread(
-                vector_db.query,
-                collection_name=collection_name,
-                filters=expr,
-                output_fields=["memory_id"],
-                limit=10000,
-            )
-            count = len(results) if results else 0
+            count = await self._count_records(vector_db, collection_name, expr)
+            if count is None:
+                count = 0
+                async for batch in self._iter_query_batches(
+                    vector_db,
+                    collection_name,
+                    expr,
+                    ["memory_id"],
+                ):
+                    count += len(batch)
 
             # 删除记忆
             if count > 0:
@@ -803,23 +794,6 @@ class MemoryService:
             ):
                 return []
 
-            # 查询所有记忆（无需手动加载，query会自动处理）
-            results = await asyncio.to_thread(
-                vector_db.query,
-                collection_name=collection_name,
-                filters=self._all_records_expr(),  # 查询所有记录
-                output_fields=["session_id", "create_time"],
-                limit=10000,
-            )
-
-            # 检查查询结果
-            if not results:
-                self.logger.warning("会话列表查询返回空结果")
-                self._sessions_cache = []
-                self._sessions_cache_at = time.monotonic()
-                return []
-
-            # 统计每个会话
             session_data: dict[str, dict[str, Any]] = defaultdict(
                 lambda: {
                     "session_id": "",
@@ -829,36 +803,42 @@ class MemoryService:
                 }
             )
 
-            for result in results:
-                session_id = result.get("session_id", "unknown")
-                create_time_raw = result.get("create_time")
+            async for results in self._iter_query_batches(
+                vector_db,
+                collection_name,
+                self._all_records_expr(),
+                ["session_id", "create_time"],
+            ):
+                for result in results:
+                    session_id = result.get("session_id", "unknown")
+                    create_time_raw = result.get("create_time")
 
-                create_time: datetime
-                if isinstance(create_time_raw, (int, float)):
-                    create_time = datetime.fromtimestamp(create_time_raw)
-                elif isinstance(create_time_raw, str):
-                    try:
-                        create_time = datetime.fromisoformat(create_time_raw)
-                    except (ValueError, TypeError):
+                    create_time: datetime
+                    if isinstance(create_time_raw, (int, float)):
+                        create_time = datetime.fromtimestamp(create_time_raw)
+                    elif isinstance(create_time_raw, str):
+                        try:
+                            create_time = datetime.fromisoformat(create_time_raw)
+                        except (ValueError, TypeError):
+                            create_time = datetime.now()
+                    else:
                         create_time = datetime.now()
-                else:
-                    create_time = datetime.now()
 
-                session_info = session_data[session_id]
-                session_info["session_id"] = session_id
-                session_info["memory_count"] = session_info["memory_count"] + 1
+                    session_info = session_data[session_id]
+                    session_info["session_id"] = session_id
+                    session_info["memory_count"] = session_info["memory_count"] + 1
 
-                last_time = session_info["last_memory_time"]
-                if last_time is None or (
-                    isinstance(last_time, datetime) and create_time > last_time
-                ):
-                    session_info["last_memory_time"] = create_time
+                    last_time = session_info["last_memory_time"]
+                    if last_time is None or (
+                        isinstance(last_time, datetime) and create_time > last_time
+                    ):
+                        session_info["last_memory_time"] = create_time
 
-                first_time = session_info["first_memory_time"]
-                if first_time is None or (
-                    isinstance(first_time, datetime) and create_time < first_time
-                ):
-                    session_info["first_memory_time"] = create_time
+                    first_time = session_info["first_memory_time"]
+                    if first_time is None or (
+                        isinstance(first_time, datetime) and create_time < first_time
+                    ):
+                        session_info["first_memory_time"] = create_time
 
             # 转换为列表并排序
             sessions = list(session_data.values())

@@ -78,6 +78,10 @@ class VectorDatabase(ABC):
             f"{self.__class__.__name__} does not support direct ID lookup"
         )
 
+    def count(self, collection_name: str, filters: str | None = None) -> int | None:
+        """返回匹配记录数；后端不支持原生计数时返回 None。"""
+        return None
+
     @abstractmethod
     def query(
         self,
