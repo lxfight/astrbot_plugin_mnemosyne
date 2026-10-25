@@ -2,6 +2,7 @@
 监控服务 - 提供系统健康检查、性能指标收集等功能
 """
 
+import asyncio
 import os
 import time
 from collections import deque
@@ -241,7 +242,7 @@ class MonitoringService:
                 )
 
             # 获取集合数量
-            collections = vector_db.list_collections()
+            collections = await asyncio.to_thread(vector_db.list_collections)
 
             return ComponentHealth(
                 name="vector_db",
@@ -395,12 +396,15 @@ class MonitoringService:
             # 获取向量数据库统计
             vector_db = getattr(self.plugin, "vector_db", None)
             if vector_db and vector_db.is_connected():
-                collections = vector_db.list_collections()
+                collections = await asyncio.to_thread(vector_db.list_collections)
                 usage.vector_db_collections = len(collections)
 
                 # 获取当前集合的记录数
-                if vector_db.has_collection(self.plugin.collection_name):
-                    records = vector_db.query(
+                if await asyncio.to_thread(
+                    vector_db.has_collection, self.plugin.collection_name
+                ):
+                    records = await asyncio.to_thread(
+                        vector_db.query,
                         self.plugin.collection_name,
                         filters=None,
                         output_fields=["memory_id"],
