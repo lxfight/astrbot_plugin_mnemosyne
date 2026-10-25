@@ -12,6 +12,7 @@ logger = LogManager.GetLogger(__name__)
 
 DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 15
 DEFAULT_SUMMARY_TIMEOUT_SECONDS = 60
+EMBEDDING_BATCH_SIZE = 16
 
 
 async def request_embedding(
@@ -28,6 +29,47 @@ async def request_embedding(
     except asyncio.TimeoutError:
         logger.error(f"Embedding 请求超时（{timeout} 秒），已取消。")
         raise
+
+
+async def request_embeddings(
+    plugin: "Mnemosyne", texts: list[str]
+) -> list[list[float]]:
+    """按批次获取文本向量，并在 Provider 不支持批量接口时回退到单条请求。"""
+    if not texts:
+        return []
+
+    provider = plugin.embedding_provider
+    timeout = plugin.config.get(
+        "embedding_request_timeout_seconds", DEFAULT_EMBEDDING_TIMEOUT_SECONDS
+    )
+    batch_embed = getattr(provider, "get_embeddings", None)
+    if not callable(batch_embed):
+        batch_embed = getattr(provider, "embed_texts", None)
+
+    embeddings: list[list[float]] = []
+    for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+        batch_texts = texts[start : start + EMBEDDING_BATCH_SIZE]
+        try:
+            if callable(batch_embed):
+                batch_embeddings = await asyncio.wait_for(
+                    batch_embed(batch_texts),
+                    timeout=timeout,
+                )
+            else:
+                batch_embeddings = [
+                    await request_embedding(plugin, text) for text in batch_texts
+                ]
+        except asyncio.TimeoutError:
+            logger.error(f"Embedding 批量请求超时（{timeout} 秒），已取消。")
+            raise
+
+        if len(batch_embeddings) != len(batch_texts) or any(
+            not embedding for embedding in batch_embeddings
+        ):
+            raise RuntimeError("Embedding Provider 返回的向量数量或内容无效")
+        embeddings.extend(batch_embeddings)
+
+    return embeddings
 
 
 async def request_summary_completion(
