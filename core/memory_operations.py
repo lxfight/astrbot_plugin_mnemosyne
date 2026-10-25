@@ -36,6 +36,7 @@ from .constants import (
     SLOW_VECTOR_SEARCH_THRESHOLD_MS,
     VECTOR_FIELD_NAME,
 )
+from .provider_utils import request_embedding, request_summary_completion
 from .security_utils import (
     safe_build_milvus_expression,
     validate_personality_id,
@@ -1080,10 +1081,10 @@ async def handle_query_memory(
             embedding_started = time.perf_counter()
             embedding_succeeded = False
             try:
-                query_vector = await plugin.embedding_provider.get_embedding(
-                    actual_query
-                )
+                query_vector = await request_embedding(plugin, actual_query)
                 embedding_succeeded = bool(query_vector)
+            except asyncio.TimeoutError:
+                return
             except ConnectionError as e:
                 logger.error(f"网络连接错误，无法获取 Embedding: {e}", exc_info=True)
                 return
@@ -2060,7 +2061,10 @@ async def _get_summary_llm_response(
 
         for provider_kind, llm_provider in providers:
             try:
-                llm_response = await llm_provider.text_chat(  # type: ignore
+                llm_response = await request_summary_completion(
+                    plugin,
+                    llm_provider,
+                    provider_label=provider_kind,
                     prompt=memory_text,
                     contexts=summary_contexts,
                     **summary_llm_config,
@@ -2289,9 +2293,7 @@ async def handle_summary_long_memory(
                 return False
 
             # 使用 AstrBot EmbeddingProvider 的 get_embedding 方法
-            embedding_vector = await plugin.embedding_provider.get_embedding(
-                summary_text
-            )
+            embedding_vector = await request_embedding(plugin, summary_text)
 
             if not embedding_vector:
                 logger.error(f"无法获取总结文本的 Embedding: '{summary_text[:100]}...'")
@@ -2361,9 +2363,7 @@ async def store_manual_memory(
         return False
 
     try:
-        embedding_vector = await plugin.embedding_provider.get_embedding(
-            normalized_content
-        )
+        embedding_vector = await request_embedding(plugin, normalized_content)
     except Exception as e:
         logger.error(f"手动记忆写入失败：获取 Embedding 异常: {e}", exc_info=True)
         return False

@@ -21,12 +21,28 @@
         "minimum":1,
         "maximum":16
     },
+    "summary_request_timeout_seconds":{
+        "description":"记忆总结请求超时（秒）",
+        "type":"int",
+        "hint":"单次总结 LLM 请求超过该时间会取消并尝试备用 Provider",
+        "default":60,
+        "minimum":1,
+        "maximum":600
+    },
     "embedding_provider_id":{
         "description":"Embedding 服务提供商",
         "type":"string",
         "hint":"选择用于向量嵌入的 Embedding Provider。留空则使用 AstrBot 中配置的第一个 Embedding Provider",
         "_special":"select_embedding_provider",
         "default":""
+    },
+    "embedding_request_timeout_seconds":{
+        "description":"Embedding 请求超时（秒）",
+        "type":"int",
+        "hint":"单次 Embedding 请求超过该时间会取消，避免聊天或后台任务被阻塞",
+        "default":15,
+        "minimum":1,
+        "maximum":300
     },
     "vector_db_type":{
         "description":"向量数据库类型",

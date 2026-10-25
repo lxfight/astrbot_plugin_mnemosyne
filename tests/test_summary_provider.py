@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,15 @@ class _Provider:
         if self.error:
             raise self.error
         return self.response
+
+
+class _HangingProvider:
+    def __init__(self):
+        self.calls = 0
+
+    async def text_chat(self, **_kwargs):
+        self.calls += 1
+        await asyncio.sleep(60)
 
 
 class _Context:
@@ -79,6 +89,32 @@ async def test_summary_retries_fallback_provider_after_primary_error():
 
     assert response == {"completion_text": "fallback summary"}
     assert len(primary.calls) == 1
+    assert len(fallback.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_retries_fallback_provider_after_primary_timeout():
+    primary = _HangingProvider()
+    fallback = _Provider({"completion_text": "fallback summary"})
+    plugin = SimpleNamespace(
+        provider=primary,
+        context=_Context(fallback),
+        config={
+            "summary_fallback_provider_id": "fallback-provider",
+            "summary_request_timeout_seconds": 0.01,
+            "use_summary_time_anchor": False,
+            "summary_speaker_mapping_prompt": "",
+        },
+    )
+
+    response = await _get_summary_llm_response(
+        plugin,
+        "conversation",
+        session_id="session-1",
+    )
+
+    assert response == {"completion_text": "fallback summary"}
+    assert primary.calls == 1
     assert len(fallback.calls) == 1
 
 

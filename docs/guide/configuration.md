@@ -8,6 +8,8 @@ Mnemosyne 的配置分为模型服务、向量数据库、记忆策略和管理�
 | --- | --- | --- |
 | `LLM_providers` | 用于总结对话的 LLM Provider。留空时使用当前会话默认 Provider。 | 空 |
 | `embedding_provider_id` | 用于生成文本向量的 Embedding Provider。留空时使用 AstrBot 中第一个可用 Provider。 | 空 |
+| `summary_request_timeout_seconds` | 单次总结 LLM 请求超时；超时后取消当前请求并尝试备用 Provider。 | `60` |
+| `embedding_request_timeout_seconds` | 单次 Embedding 请求超时；超时后取消请求。 | `15` |
 
 Embedding Provider 的向量维度决定集合结构。更换 Embedding 模型后，建议执行 `/memory init --force` 检查或重建集合。
 

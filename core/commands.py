@@ -14,6 +14,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from .constants import MAX_TOTAL_FETCH_RECORDS, PRIMARY_FIELD_NAME, VECTOR_FIELD_NAME
+from .provider_utils import request_embedding
 from .security_utils import (
     safe_build_milvus_expression,
     validate_safe_path,
@@ -655,13 +656,12 @@ async def import_memory_cmd_impl(
             )
             return
 
-        embedding_provider = getattr(self, "embedding_provider", None)
-        if not embedding_provider:
+        if not getattr(self, "embedding_provider", None):
             yield event.plain_result("⚠️ Embedding Provider 不可用，无法导入记忆。")
             return
         data_to_insert = []
         for record in normalized_records:
-            embedding = await embedding_provider.get_embedding(record["content"])
+            embedding = await request_embedding(self, record["content"])
             if not embedding:
                 yield event.plain_result("⚠️ 生成 Embedding 失败，未写入任何记录。")
                 return
@@ -1387,9 +1387,7 @@ async def init_memory_system_cmd_impl(
                                 continue
 
                             # 生成新向量
-                            embedding = await self.embedding_provider.get_embedding(
-                                content
-                            )
+                            embedding = await request_embedding(self, content)
                             if not embedding:
                                 fail_count += 1
                                 continue
