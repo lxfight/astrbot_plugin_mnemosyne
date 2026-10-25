@@ -33,6 +33,7 @@ except ImportError:
 
 
 MEMORY_SERVICE_CACHE_TTL_SECONDS = 10.0
+BATCH_DELETE_CHUNK_SIZE = 200
 
 
 class MemoryService:
@@ -71,6 +72,14 @@ class MemoryService:
     def _native_id_expr(memory_id: str) -> str:
         normalized = str(memory_id).strip().strip('"`')
         return f'id == "{normalized}"'
+
+    def _delete_identity_expr(self, memory_id: str) -> str:
+        if self._vector_db_type() == "milvus":
+            try:
+                return f"memory_id == {int(memory_id)}"
+            except ValueError:
+                return f'memory_id == "{memory_id}"'
+        return self._native_id_expr(memory_id)
 
     @staticmethod
     def _record_id(result: dict[str, Any]) -> str:
@@ -413,6 +422,41 @@ class MemoryService:
         self._stats_cache_at = time.monotonic()
         return stats
 
+    async def batch_delete_memories(self, memory_ids: list[str]) -> int:
+        """删除多条记忆，按块合并表达式并只 flush 一次。"""
+        unique_ids = list(dict.fromkeys(memory_ids))
+        if not unique_ids:
+            return 0
+
+        vector_db = self._get_vector_db()
+        if not vector_db or not vector_db.is_connected():
+            return 0
+
+        collection_name = self.plugin.collection_name
+        if not await asyncio.to_thread(
+            vector_db.has_collection, collection_name
+        ):
+            return 0
+
+        deleted_count = 0
+        for start in range(0, len(unique_ids), BATCH_DELETE_CHUNK_SIZE):
+            chunk = unique_ids[start : start + BATCH_DELETE_CHUNK_SIZE]
+            expr = " or ".join(
+                self._delete_identity_expr(memory_id) for memory_id in chunk
+            )
+            mutation_result = await asyncio.to_thread(
+                vector_db.delete, collection_name, expr
+            )
+            result_count = getattr(mutation_result, "delete_count", None)
+            deleted_count += len(chunk) if result_count is None else result_count
+
+        await asyncio.to_thread(vector_db.flush, [collection_name])
+        self._invalidate_caches()
+        self.logger.info(
+            f"批量删除 {len(unique_ids)} 条记忆，实际删除 {deleted_count} 条"
+        )
+        return deleted_count
+
     async def delete_memory(self, memory_id: str) -> bool:
         """
         删除单条记忆
@@ -434,16 +478,7 @@ class MemoryService:
             ):
                 return False
 
-            if self._vector_db_type() == "milvus":
-                # Milvus 的 memory_id 是主键字段；非数字时保留字符串兼容旧记录。
-                try:
-                    memory_id_int = int(memory_id)
-                    expr = f"memory_id == {memory_id_int}"
-                except ValueError:
-                    expr = f'memory_id == "{memory_id}"'
-            else:
-                # 非 Milvus 后端管理面板展示的是数据库原生 ID。
-                expr = self._native_id_expr(memory_id)
+            expr = self._delete_identity_expr(memory_id)
 
             mutation_result = await asyncio.to_thread(
                 vector_db.delete, collection_name, expr

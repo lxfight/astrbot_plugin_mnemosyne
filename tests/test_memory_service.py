@@ -258,6 +258,55 @@ class _QueryPlugin:
         self.vector_db = _QueryVectorDB()
 
 
+class _BatchDeleteVectorDB:
+    def __init__(self):
+        self.expressions = []
+        self.flush_count = 0
+
+    def is_connected(self):
+        return True
+
+    def has_collection(self, _collection_name):
+        return True
+
+    def delete(self, _collection_name, expr):
+        self.expressions.append(expr)
+        return VectorDeleteResult()
+
+    def flush(self, _collection_names):
+        self.flush_count += 1
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_chunks_expressions_and_flushes_once():
+    plugin = _QueryPlugin()
+    plugin.vector_db = _BatchDeleteVectorDB()
+    service = MemoryService(plugin)
+    memory_ids = [f"memory-{index}" for index in range(401)]
+
+    deleted_count = await service.batch_delete_memories(memory_ids)
+
+    assert deleted_count == 401
+    assert len(plugin.vector_db.expressions) == 3
+    assert plugin.vector_db.expressions[0].count(" or ") == 199
+    assert plugin.vector_db.expressions[1].count(" or ") == 199
+    assert plugin.vector_db.expressions[2].count(" or ") == 0
+    assert plugin.vector_db.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_deduplicates_memory_ids():
+    plugin = _QueryPlugin()
+    plugin.vector_db = _BatchDeleteVectorDB()
+    service = MemoryService(plugin)
+
+    deleted_count = await service.batch_delete_memories(["1", "1", "2"])
+
+    assert deleted_count == 2
+    assert plugin.vector_db.expressions == ['id == "1" or id == "2"']
+    assert plugin.vector_db.flush_count == 1
+
+
 @pytest.mark.asyncio
 async def test_memory_statistics_uses_short_ttl_cache_and_invalidates_on_delete():
     plugin = _QueryPlugin()
