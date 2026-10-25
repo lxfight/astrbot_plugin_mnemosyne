@@ -8,6 +8,8 @@ Mnemosyne configuration is grouped around model providers, vector databases, mem
 | --- | --- | --- |
 | `LLM_providers` | LLM Provider used to summarize conversations. Empty means the current session default provider is used. | Empty |
 | `embedding_provider_id` | Embedding Provider used to generate vectors. Empty means the first available AstrBot Embedding Provider is used. | Empty |
+| `summary_request_timeout_seconds` | Timeout for a summarization request. A timeout cancels the request and tries the fallback provider. | `60` |
+| `embedding_request_timeout_seconds` | Timeout for an Embedding request. A timeout cancels the request. | `15` |
 
 The Embedding Provider dimension defines the collection schema. After changing embedding models, run `/memory init --force` to check or rebuild the collection.
 

@@ -24,8 +24,10 @@ from ..models.memory import (
 # - 测试时：admin_panel 作为顶层包，`...core` 会超出顶层包，回退到绝对导入
 #   （测试已将插件根加入 sys.path，core 作为顶层包可用）。
 try:
+    from ...core.provider_utils import request_embedding
     from ...core.security_utils import safe_build_milvus_expression
 except ImportError:
+    from core.provider_utils import request_embedding
     from core.security_utils import safe_build_milvus_expression
 
 
@@ -461,8 +463,7 @@ class MemoryService:
         if not vector_db.has_collection(collection_name):
             raise RuntimeError("记忆集合不存在")
 
-        provider = getattr(self.plugin, "embedding_provider", None)
-        if not provider:
+        if not getattr(self.plugin, "embedding_provider", None):
             raise RuntimeError("Embedding Provider 未初始化")
 
         backend = self._vector_db_type()
@@ -493,7 +494,7 @@ class MemoryService:
         elif not isinstance(create_time, (int, float)):
             create_time = datetime.now().timestamp()
 
-        new_embedding = await provider.get_embedding(normalized_content)
+        new_embedding = await request_embedding(self.plugin, normalized_content)
         if not new_embedding:
             raise RuntimeError("无法为更新后的记忆生成 embedding")
 
@@ -521,7 +522,7 @@ class MemoryService:
 
         # Milvus 集合使用 AutoID，无法原地保留主键。删除前同时生成旧向量，
         # 这样新记录插入失败时仍可恢复原内容。
-        original_embedding = await provider.get_embedding(original_content)
+        original_embedding = await request_embedding(self.plugin, original_content)
         if not original_embedding:
             raise RuntimeError("无法生成回滚所需的原记忆 embedding")
 
@@ -845,7 +846,7 @@ class MemoryService:
                 return []
 
             # 生成查询向量
-            query_vector = await self.plugin.embedding_provider.get_embedding(query)
+            query_vector = await request_embedding(self.plugin, query)
             if not query_vector:
                 return []
 
