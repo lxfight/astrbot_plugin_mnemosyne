@@ -37,6 +37,7 @@ candidate_limit = min(top_k * 4, 60)
 
 ## 向量数据库
 
+- 插件会在启动时为 Milvus 的 `session_id`、`personality_id`、`create_time` 自动补齐 `INVERTED` 标量索引，并为 Qdrant 创建对应的 `keyword`/`integer` payload index。
 - Milvus `AUTOINDEX` 不需要 `nprobe`，插件默认不会再注入该参数。
 - `IVF_FLAT`、`IVF_SQ8`、`IVF_PQ` 默认使用 `nprobe=10`。
 - `HNSW` 默认使用 `ef=64`。

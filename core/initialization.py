@@ -497,6 +497,8 @@ def setup_vector_db_collection_and_index(
                 "请升级 PyMilvus/Milvus 后重载插件，或按故障排查文档迁移集合。"
             )
         ensure_milvus_index(plugin, collection_name)
+    elif db_type == "qdrant":
+        vector_db.ensure_payload_indexes(collection_name)
 
     init_logger.info(
         f"集合 '{collection_name}' 已准备就绪。"
@@ -515,6 +517,9 @@ def setup_milvus_collection_and_index(
         skip_if_not_ready: 如果为 True，当 embedding_provider 未就绪时跳过集合创建
     """
     setup_vector_db_collection_and_index(plugin, skip_if_not_ready)
+
+
+MILVUS_SCALAR_INDEX_FIELDS = ("session_id", "personality_id", "create_time")
 
 
 def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
@@ -590,6 +595,18 @@ def ensure_milvus_index(plugin: "Mnemosyne", collection_name: str):
                 )
                 # 创建索引后，可能需要等待其构建完成才能获得最佳性能，但通常可以继续运行
                 # 可以考虑添加一个检查索引状态的步骤，或者在首次搜索前强制 load
+
+        for field_name in MILVUS_SCALAR_INDEX_FIELDS:
+            index_success = manager.create_index(
+                collection_name=collection_name,
+                field_name=field_name,
+                index_params={"index_type": "INVERTED"},
+                timeout=plugin.config.get("create_index_timeout", 600),
+            )
+            if not index_success:
+                init_logger.error(
+                    f"为字段 '{field_name}' 创建标量索引失败，过滤与统计查询可能变慢。"
+                )
 
     except Exception as e:
         init_logger.error(f"检查或创建集合 '{collection_name}' 的索引时发生错误: {e}")

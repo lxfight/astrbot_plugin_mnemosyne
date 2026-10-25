@@ -16,6 +16,12 @@ from ..vector_db_base import VectorDatabase, VectorDeleteResult, VectorInsertRes
 
 logger = LogManager.GetLogger(log_name="Mnemosyne QdrantAdapter")
 
+QDRANT_PAYLOAD_INDEX_SCHEMAS = {
+    "session_id": "keyword",
+    "personality_id": "keyword",
+    "create_time": "integer",
+}
+
 
 class QdrantVectorDB(VectorDatabase):
     """
@@ -184,6 +190,18 @@ class QdrantVectorDB(VectorDatabase):
         except Exception as e:
             logger.error(f"插入数据到集合 '{collection_name}' 失败: {e}", exc_info=True)
             raise
+
+    def ensure_payload_indexes(self, collection_name: str) -> None:
+        """为常用过滤字段创建 payload 索引。"""
+        self._ensure_connected()
+        for field_name, field_schema in QDRANT_PAYLOAD_INDEX_SCHEMAS.items():
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field_name,
+                field_schema=field_schema,
+                wait=True,
+            )
+        logger.info(f"集合 '{collection_name}' 的 payload 索引已就绪")
 
     def query(
         self,

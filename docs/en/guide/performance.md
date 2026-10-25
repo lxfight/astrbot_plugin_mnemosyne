@@ -37,6 +37,7 @@ Without keywords or participant filtering, `candidate_limit` is simply `top_k`, 
 
 ## Vector Database
 
+- At startup, Mnemosyne adds `INVERTED` scalar indexes for Milvus `session_id`, `personality_id`, and `create_time`, and creates matching `keyword`/`integer` payload indexes for Qdrant.
 - Milvus `AUTOINDEX` does not use `nprobe`; Mnemosyne no longer sends it by default.
 - `IVF_FLAT`, `IVF_SQ8`, and `IVF_PQ` default to `nprobe=10`.
 - `HNSW` defaults to `ef=64`.
