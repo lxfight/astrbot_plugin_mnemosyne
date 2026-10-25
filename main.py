@@ -73,7 +73,8 @@ class Mnemosyne(Star):
         self._initialization_successful = False
         self._initialized_components = []
         self._embedding_provider_ready = False
-        self._migrated_sessions: set[str] = set()  # 用于记录已迁移的会话
+        self._migrated_sessions: OrderedDict[str, None] = OrderedDict()
+        self._migration_inflight: set[str] = set()
         self._warned_missing_provider_ids: set[str] = set()
         # 间隔注入计数器：session_id -> 已处理轮次，用于“每隔 N 轮注入一次记忆”
         self._injection_round_counter: dict[str, int] = {}
