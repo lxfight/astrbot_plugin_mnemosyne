@@ -49,6 +49,8 @@ You can override `index_params` and `search_params`. The metric type in `search_
 
 Statistics, session lists, and resource statistics use a 10-second cache so dashboard refreshes do not repeatedly fetch up to 10,000 records. Deleting or updating a memory invalidates the relevant cache immediately.
 
+Batch deletion merges IDs into expressions of up to 200 records and flushes once after all delete requests complete.
+
 Exports and global keyword searches keep a 10,000-record safety limit. That limit is not a page size. For large collections, filter by session or date instead of exporting everything repeatedly.
 
 ## Operational Notes

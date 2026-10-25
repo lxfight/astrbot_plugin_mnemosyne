@@ -235,10 +235,9 @@ class MnemosyneWebApi:
                 if not isinstance(mid, str) or not MEMORY_ID_PATTERN.fullmatch(mid):
                     return jsonify(self._error(f"memory_id 格式无效: {mid}"))
 
-            deleted_count = 0
-            for mid in memory_ids:
-                if await self.memory_service.delete_memory(mid):
-                    deleted_count += 1
+            deleted_count = await self.memory_service.batch_delete_memories(
+                memory_ids
+            )
 
             return jsonify({"deleted_count": deleted_count})
         except Exception as e:
