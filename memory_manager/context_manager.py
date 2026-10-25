@@ -3,7 +3,9 @@ import threading
 import time
 from datetime import datetime
 
-from astrbot.api.event import AstrMessageEvent
+DEFAULT_MAX_CACHED_SESSIONS = 2048
+DEFAULT_CONTEXT_IDLE_TTL_SECONDS = 7 * 24 * 60 * 60
+DEFAULT_MAX_HISTORY_MESSAGES = 200
 
 
 class ConversationContextManager:
@@ -16,32 +18,86 @@ class ConversationContextManager:
     - 添加注释说明并发安全策略
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        max_sessions: int = DEFAULT_MAX_CACHED_SESSIONS,
+        idle_ttl_seconds: int = DEFAULT_CONTEXT_IDLE_TTL_SECONDS,
+        max_history_messages: int = DEFAULT_MAX_HISTORY_MESSAGES,
+    ):
         self.conversations: dict[str, dict] = {}
+        self._max_sessions = max(1, max_sessions)
+        self._idle_ttl_seconds = max(0, idle_ttl_seconds)
+        self._max_history_messages = max(1, max_history_messages)
         # 使用 RLock 保证线程安全
         # 注意: 这个类的方法主要在 asyncio 事件循环中调用
         # RLock 可以保护同步代码路径，对于异步代码，Python 的 GIL 和单线程事件循环提供了基本保护
         # 如果未来需要真正的异步锁，应该使用 asyncio.Lock
         self._lock = threading.RLock()
 
-    def init_conv(self, session_id: str, contexts: list[dict], event: AstrMessageEvent):
+    def _trim_history_locked(self, conversation: dict) -> None:
+        history = conversation["history"]
+        overflow = len(history) - self._max_history_messages
+        if overflow > 0:
+            del history[:overflow]
+
+    def _prune_locked(self, now: float) -> None:
+        if self._idle_ttl_seconds > 0:
+            expired = [
+                session_id
+                for session_id, conversation in self.conversations.items()
+                if now - conversation.get("last_activity_time", now)
+                > self._idle_ttl_seconds
+            ]
+            for session_id in expired:
+                del self.conversations[session_id]
+
+        overflow = len(self.conversations) - self._max_sessions
+        if overflow <= 0:
+            return
+        oldest = sorted(
+            self.conversations,
+            key=lambda session_id: self.conversations[session_id].get(
+                "last_activity_time", 0
+            ),
+        )[:overflow]
+        for session_id in oldest:
+            del self.conversations[session_id]
+
+    def prune(self) -> None:
+        """释放空闲或超出容量上限的会话缓存。"""
+        with self._lock:
+            self._prune_locked(time.time())
+
+    def init_conv(
+        self,
+        session_id: str,
+        contexts: list[dict],
+        persona_id: str | None = None,
+    ):
         """
         从AstrBot获取历史消息
         """
+        now = time.time()
         with self._lock:
-            if session_id in self.conversations:
+            self._prune_locked(now)
+            conversation = self.conversations.get(session_id)
+            if conversation is None:
+                conversation = {
+                    # AstrBot passes req.contexts here. Keep an isolated snapshot so
+                    # add_message() cannot append plugin-only entries to the live LLM
+                    # request through a shared mutable list reference.
+                    "history": copy.deepcopy(contexts),
+                    "last_summary_time": now,
+                    "last_activity_time": now,
+                    "persona_id": persona_id,
+                }
+                self.conversations[session_id] = conversation
+                self._trim_history_locked(conversation)
+                self._prune_locked(now)
                 return
-            self.conversations[session_id] = {}
-            # AstrBot passes req.contexts here. Keep an isolated snapshot so
-            # add_message() cannot append plugin-only entries to the live LLM
-            # request through a shared mutable list reference.
-            self.conversations[session_id]["history"] = copy.deepcopy(contexts)
-            self.conversations[session_id]["event"] = event
-            # 初始化最后一次总结的时间，这里在重启的时候会丢失，但是先不管了
-            # 重启了计时器就重启，用户再一次对话再重启计时器，emmmm，之后再改了，加个TODO
-            # TODO 考虑是否需要保存到数据库中，或者保存到文件
-            self.conversations[session_id]["last_summary_time"] = time.time()
-            return
+
+            conversation["last_activity_time"] = now
+            conversation["persona_id"] = persona_id
 
     def add_message(
         self,
@@ -57,15 +113,21 @@ class ConversationContextManager:
         :param content: 对话内容
         :return: 达到阈值时返回需要总结的内容字符串，否则返回 None
         """
+        now = time.time()
         with self._lock:
-            if session_id not in self.conversations:
-                self.conversations[session_id] = {
+            self._prune_locked(now)
+            conversation = self.conversations.get(session_id)
+            if conversation is None:
+                conversation = {
                     "history": [],
-                    "last_summary_time": time.time(),
+                    "last_summary_time": now,
+                    "last_activity_time": now,
                 }
+                self.conversations[session_id] = conversation
+                self._prune_locked(now)
 
-            conversation = self.conversations[session_id]
-            now_epoch = int(time.time())
+            conversation["last_activity_time"] = now
+            now_epoch = int(now)
             item = {
                 "role": role,
                 "content": content,
@@ -77,6 +139,7 @@ class ConversationContextManager:
                 item["metadata"] = metadata
 
             conversation["history"].append(item)
+            self._trim_history_locked(conversation)
 
     def get_summary_time(self, session_id: str) -> float:
         """
@@ -95,6 +158,11 @@ class ConversationContextManager:
         with self._lock:
             if session_id in self.conversations:
                 self.conversations[session_id]["last_summary_time"] = time.time()
+
+    def get_persona_id(self, session_id: str) -> str | None:
+        with self._lock:
+            conversation = self.conversations.get(session_id)
+            return conversation.get("persona_id") if conversation else None
 
     def get_history(self, session_id: str) -> list[dict]:
         """

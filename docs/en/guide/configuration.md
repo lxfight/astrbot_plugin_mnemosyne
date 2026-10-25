@@ -33,6 +33,9 @@ See [Database Options](/en/guide/database) for backend guidance.
 | Option | Description | Default |
 | --- | --- | --- |
 | `num_pairs` | Conversation rounds required before automatic summarization. | `5` |
+| `context_cache_max_sessions` | Maximum active sessions kept in memory; the least recently used session is evicted first. | `2048` |
+| `context_cache_idle_ttl_seconds` | Idle time before a session is released; `0` disables time-based eviction. | `604800` |
+| `context_cache_max_messages` | Maximum messages kept per session; older messages are dropped first. | `200` |
 | `top_k` | Number of memories returned by retrieval. | `3` |
 | `contexts_memory_len` | Number of long-term memory tag blocks retained in context. Values below 0 keep all blocks; 0 removes all. | `0` |
 | `memory_injection_method` | Use the user prompt, the LLM system prompt, or a separate system message. | `user_prompt` |
