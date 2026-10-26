@@ -1,10 +1,10 @@
 """
-Mnemosyne 插件 AstrBot Pages Web API handlers。
+Mnemosyne 插件 AstrBot Views Web API handlers。
 
 响应格式说明：
 - 成功: 直接返回数据体（Dashboard 会自动提取 .data 字段）
 - 失败: 返回 {"status": "error", "message": "错误信息"}
-- 文件下载: 返回 Quart Response 对象（Content-Disposition: attachment）
+- 文件下载: 使用 AstrBot Web API 的流式响应返回附件
 """
 
 from __future__ import annotations
@@ -13,9 +13,8 @@ import re
 from datetime import datetime
 from typing import Any
 
-from quart import Response, jsonify, request
-
 from astrbot.api import logger
+from astrbot.api.web import json_response, request, stream_response
 
 from .admin_panel.models.memory import MemorySearchRequest
 from .admin_panel.services.memory_service import MemoryService
@@ -30,7 +29,7 @@ MEMORY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.:-]+$")
 
 
 class MnemosyneWebApi:
-    """Mnemosyne 插件 Pages Web API 处理器"""
+    """Mnemosyne 插件 Views Web API 处理器"""
 
     def __init__(self, plugin) -> None:
         self.plugin = plugin
@@ -113,7 +112,7 @@ class MnemosyneWebApi:
             status = await self.monitoring_service.get_system_status()
             metrics = self.monitoring_service.get_performance_metrics()
             resources = await self.monitoring_service.get_resource_usage()
-            return jsonify(
+            return json_response(
                 {
                     "status": status.to_dict(),
                     "metrics": metrics.to_dict(),
@@ -122,66 +121,68 @@ class MnemosyneWebApi:
             )
         except Exception as e:
             logger.error(f"获取仪表板数据失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def get_system_status(self) -> Any:
         try:
-            force_refresh = request.args.get("force_refresh", "false").lower() == "true"
+            force_refresh = (
+                request.query.get("force_refresh", "false").lower() == "true"
+            )
             status = await self.monitoring_service.get_system_status(
                 force_refresh=force_refresh
             )
-            return jsonify(status.to_dict())
+            return json_response(status.to_dict())
         except Exception as e:
             logger.error(f"获取系统状态失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def get_performance_metrics(self) -> Any:
         try:
             metrics = self.monitoring_service.get_performance_metrics()
-            return jsonify(metrics.to_dict())
+            return json_response(metrics.to_dict())
         except Exception as e:
             logger.error(f"获取性能指标失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def get_resource_usage(self) -> Any:
         try:
             usage = await self.monitoring_service.get_resource_usage()
-            return jsonify(usage.to_dict())
+            return json_response(usage.to_dict())
         except Exception as e:
             logger.error(f"获取资源使用情况失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     # ==================== 记忆管理 API ====================
 
     async def search_memories(self) -> Any:
         try:
-            session_id = request.args.get("session_id") or None
-            keyword = request.args.get("keyword") or None
-            persona_id = request.args.get("persona_id") or None
-            start_date = request.args.get("start_date") or None
-            end_date = request.args.get("end_date") or None
+            session_id = request.query.get("session_id") or None
+            keyword = request.query.get("keyword") or None
+            persona_id = request.query.get("persona_id") or None
+            start_date = request.query.get("start_date") or None
+            end_date = request.query.get("end_date") or None
 
             # 校验 session_id/persona_id 格式，避免注入到向量库过滤表达式。
             # persona_id 与 session_id 格式可能不同，分别用各自的校验器。
             if session_id and not validate_session_id(session_id):
-                return jsonify(self._error("session_id 格式无效"))
+                return json_response(self._error("session_id 格式无效"))
             if persona_id and not validate_personality_id(persona_id):
-                return jsonify(self._error("persona_id 格式无效"))
+                return json_response(self._error("persona_id 格式无效"))
 
             try:
-                limit = int(request.args.get("limit", "10"))
+                limit = int(request.query.get("limit", "10"))
                 limit = max(1, min(limit, 100))
             except (ValueError, TypeError):
                 limit = 10
 
             try:
-                offset = int(request.args.get("offset", "0"))
+                offset = int(request.query.get("offset", "0"))
                 offset = max(0, offset)
             except (ValueError, TypeError):
                 offset = 0
 
-            sort_by = request.args.get("sort_by", "create_time")
-            sort_order = request.args.get("sort_order", "desc")
+            sort_by = request.query.get("sort_by", "create_time")
+            sort_order = request.query.get("sort_order", "desc")
 
             start_datetime = datetime.fromisoformat(start_date) if start_date else None
             end_datetime = datetime.fromisoformat(end_date) if end_date else None
@@ -198,107 +199,107 @@ class MnemosyneWebApi:
                 sort_order=sort_order,
             )
             response = await self.memory_service.search_memories(search_req)
-            return jsonify(response.to_dict())
+            return json_response(response.to_dict())
         except Exception as e:
             logger.error(f"搜索记忆失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def get_memory_statistics(self) -> Any:
         try:
             stats = await self.memory_service.get_memory_statistics()
-            return jsonify(stats.to_dict())
+            return json_response(stats.to_dict())
         except Exception as e:
             logger.error(f"获取记忆统计失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def get_session_list(self) -> Any:
         try:
             try:
-                limit = int(request.args.get("limit", "100"))
+                limit = int(request.query.get("limit", "100"))
                 limit = max(1, min(limit, 1000))
             except (ValueError, TypeError):
                 limit = 100
             sessions = await self.memory_service.get_session_list(limit=limit)
-            return jsonify(sessions)
+            return json_response(sessions)
         except Exception as e:
             logger.error(f"获取会话列表失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def batch_delete_memories(self) -> Any:
         try:
-            body = await request.get_json(silent=True) or {}
+            body = await request.json(default={}) or {}
             memory_ids = body.get("memory_ids", [])
             if not memory_ids or not isinstance(memory_ids, list):
-                return jsonify(self._error("memory_ids 参数无效"))
+                return json_response(self._error("memory_ids 参数无效"))
 
             for mid in memory_ids:
                 if not isinstance(mid, str) or not MEMORY_ID_PATTERN.fullmatch(mid):
-                    return jsonify(self._error(f"memory_id 格式无效: {mid}"))
+                    return json_response(self._error(f"memory_id 格式无效: {mid}"))
 
             deleted_count = await self.memory_service.batch_delete_memories(
                 memory_ids
             )
 
-            return jsonify({"deleted_count": deleted_count})
+            return json_response({"deleted_count": deleted_count})
         except Exception as e:
             logger.error(f"批量删除记忆失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def delete_single_memory(self, memory_id: str) -> Any:
         try:
             if not memory_id:
-                return jsonify(self._error("缺少 memory_id 参数"))
+                return json_response(self._error("缺少 memory_id 参数"))
             mid = str(memory_id).strip()
             if not mid:
-                return jsonify(self._error("memory_id 不能为空"))
+                return json_response(self._error("memory_id 不能为空"))
             if not MEMORY_ID_PATTERN.fullmatch(mid):
-                return jsonify(self._error("memory_id 格式无效"))
+                return json_response(self._error("memory_id 格式无效"))
             success = await self.memory_service.delete_memory(mid)
             if not success:
-                return jsonify(self._error("删除失败"))
-            return jsonify({"deleted": True})
+                return json_response(self._error("删除失败"))
+            return json_response({"deleted": True})
         except Exception as e:
             logger.error(f"删除记忆失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def update_single_memory(self, memory_id: str) -> Any:
         try:
             mid = str(memory_id or "").strip()
             if not mid or not MEMORY_ID_PATTERN.fullmatch(mid):
-                return jsonify(self._error("memory_id 格式无效"))
+                return json_response(self._error("memory_id 格式无效"))
 
-            body = await request.get_json(silent=True) or {}
+            body = await request.json(default={}) or {}
             content = body.get("content")
             if not isinstance(content, str):
-                return jsonify(self._error("content 参数无效"))
+                return json_response(self._error("content 参数无效"))
 
             record = await self.memory_service.update_memory(mid, content)
-            return jsonify({"updated": True, "record": record})
+            return json_response({"updated": True, "record": record})
         except (ValueError, RuntimeError) as e:
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
         except Exception as e:
             logger.error(f"更新记忆失败: {e}", exc_info=True)
-            return jsonify(self._error("更新记忆时发生内部错误"))
+            return json_response(self._error("更新记忆时发生内部错误"))
 
     async def delete_session_memories(self, session_id: str) -> Any:
         try:
             if not session_id:
-                return jsonify(self._error("缺少 session_id 参数"))
+                return json_response(self._error("缺少 session_id 参数"))
             normalized_sid = str(session_id).strip()
             if not validate_session_id(normalized_sid):
-                return jsonify(self._error("session_id 格式无效"))
+                return json_response(self._error("session_id 格式无效"))
             count = await self.memory_service.delete_session_memories(normalized_sid)
-            return jsonify({"deleted_count": count})
+            return json_response({"deleted_count": count})
         except Exception as e:
             logger.error(f"删除会话记忆失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def export_memories(self) -> Any:
         try:
-            fmt = request.args.get("format", "json")
-            session_id = request.args.get("session_id") or None
-            start_date = request.args.get("start_date") or None
-            end_date = request.args.get("end_date") or None
+            fmt = request.query.get("format", "json")
+            session_id = request.query.get("session_id") or None
+            start_date = request.query.get("start_date") or None
+            end_date = request.query.get("end_date") or None
 
             start_datetime = datetime.fromisoformat(start_date) if start_date else None
             end_datetime = datetime.fromisoformat(end_date) if end_date else None
@@ -310,22 +311,29 @@ class MnemosyneWebApi:
                 end_date=end_datetime,
             )
             if content is None:
-                return jsonify(self._error("导出失败"))
+                return json_response(self._error("导出失败"))
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"memories_export_{timestamp}.{fmt}"
             media_type = "application/json" if fmt == "json" else "text/csv"
 
-            resp = Response(content, content_type=media_type)
-            resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-            return resp
+            async def content_stream():
+                yield content
+
+            return stream_response(
+                content_stream(),
+                content_type=media_type,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"'
+                },
+            )
         except Exception as e:
             logger.error(f"导出记忆失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def vector_search_memories(self) -> Any:
         try:
-            body = await request.get_json(silent=True) or {}
+            body = await request.json(default={}) or {}
             query = body.get("query", "")
             try:
                 limit = int(body.get("limit", 50))
@@ -333,12 +341,12 @@ class MnemosyneWebApi:
             except (ValueError, TypeError):
                 limit = 50
             if not query:
-                return jsonify(self._error("查询内容不能为空"))
+                return json_response(self._error("查询内容不能为空"))
             results = await self.memory_service.vector_search(query, limit)
-            return jsonify({"records": results, "total_count": len(results)})
+            return json_response({"records": results, "total_count": len(results)})
         except Exception as e:
             logger.error(f"向量检索失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     # ==================== 配置 API ====================
 
@@ -350,21 +358,21 @@ class MnemosyneWebApi:
             # 排除敏感配置项，避免密码等泄露到前端
             for key in self._SENSITIVE_KEYS:
                 config.pop(key, None)
-            return jsonify(config)
+            return json_response(config)
         except Exception as e:
             logger.error(f"获取配置失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))
 
     async def update_config(self) -> Any:
         try:
-            data = await request.get_json(silent=True) or {}
+            data = await request.json(default={}) or {}
             for key, value in data.items():
                 # 禁止通过全量保存覆盖敏感配置项
                 if key in self._SENSITIVE_KEYS:
                     continue
                 self.plugin.config[key] = value
             self.plugin.save_config()
-            return jsonify({"saved": True})
+            return json_response({"saved": True})
         except Exception as e:
             logger.error(f"更新配置失败: {e}", exc_info=True)
-            return jsonify(self._error(str(e)))
+            return json_response(self._error(str(e)))

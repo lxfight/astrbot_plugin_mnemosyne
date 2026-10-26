@@ -1,6 +1,6 @@
 # Admin Panel
 
-Mnemosyne exposes its long-term memory management pages through AstrBot Dashboard. The panel uses the same vector database adapters as the plugin, so Chroma, Milvus, Qdrant, and Weaviate share one management entry point.
+Mnemosyne exposes its long-term memory management views through AstrBot Dashboard. The views use the same vector database adapters as the plugin, so Chroma, Milvus, Qdrant, and Weaviate share one management entry point.
 
 ## Open the Panel
 
@@ -8,9 +8,9 @@ Mnemosyne exposes its long-term memory management pages through AstrBot Dashboar
 2. Open **Alkaid**.
 3. Select **Long-term Memory**.
 
-Menu labels can differ slightly between AstrBot releases, but the pages stay inside the plugin management area. The panel does not listen on a separate port or maintain its own account system.
+Menu labels can differ slightly between AstrBot releases, but the views stay inside the plugin management area. They do not listen on a separate port or maintain their own account system.
 
-## Pages
+## Views
 
 | Page | Purpose |
 | --- | --- |

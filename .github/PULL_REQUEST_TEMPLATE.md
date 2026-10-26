@@ -49,7 +49,7 @@
 
 - [ ] 代码遵循仓库现有风格（命名、注释密度、错误处理）
 - [ ] 未引入未声明的外部依赖（如新增，已更新 `requirements.txt`）
-- [ ] `metadata.yaml` 与 `@register` 版本号一致（若涉及版本变更）
+- [ ] `metadata.yaml` 版本号遵循语义化版本（发布标签由工作流添加 `v` 前缀）
 - [ ] 未提交运行时产物（`data/`、`*.db`、缓存等）
 - [ ] 提交信息符合 Conventional Commits（`fix:` / `feat:` / `refactor:` 等）
 - [ ] 已自查对现有功能的影响，无回归风险

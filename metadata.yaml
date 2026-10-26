@@ -1,6 +1,35 @@
 name: astrbot_plugin_mnemosyne
+display_name: Mnemosyne 长期记忆
+short_desc: 多向量库 RAG 长期记忆与记忆管理面板
 desc: 支持多种向量数据库的 AstrBot 长期记忆存储与查询插件
 help: 输入 /memory 查看指令帮助
-version: v2.5.0
+version: 2.6.0
 author: lxfight
 repo: https://github.com/lxfight/astrbot_plugin_mnemosyne
+astrbot_version: ">=4.29.0,<5"
+support_platforms:
+  - aiocqhttp
+  - qq_official
+  - qq_official_webhook
+  - telegram
+  - wecom
+  - wecom_ai_bot
+  - lark
+  - dingtalk
+  - discord
+  - slack
+  - kook
+  - vocechat
+  - weixin_official_account
+  - satori
+  - misskey
+  - line
+  - matrix
+  - weixin_oc
+  - mattermost
+  - webchat
+tags:
+  - long-term-memory
+  - rag
+  - vector-database
+  - memory

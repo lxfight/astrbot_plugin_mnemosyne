@@ -20,7 +20,7 @@
 检查以下配置：
 
 - `top_k` 是否过低。
-- `score_threshold` 是否过高。
+- `use_lightweight_memory_graph` 是否适合当前数据的实体分布。
 - `use_session_filtering` 是否导致只检索当前会话。
 - `use_personality_filtering` 是否过滤了当前人格之外的记忆。
 - 是否更换过 Embedding 模型但没有重新初始化集合。

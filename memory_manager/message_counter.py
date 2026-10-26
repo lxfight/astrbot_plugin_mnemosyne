@@ -4,9 +4,7 @@ import threading
 from pathlib import Path
 
 from astrbot.api.star import StarTools
-from astrbot.core.log import LogManager
-
-logging = LogManager.GetLogger(log_name="Message Counter")
+from astrbot.api import logger as logging
 
 # 导入安全工具
 

@@ -4,8 +4,8 @@
 
 ## 前置条件
 
-- AstrBot v4.0.0 或更高版本
-- Python 3.8 或更高版本
+- AstrBot v4.29.0 至 v4.x
+- Python 3.12 或更高版本
 - 已在 AstrBot 中配置至少一个 LLM Provider
 - 已在 AstrBot 中配置至少一个 Embedding Provider
 
@@ -29,7 +29,7 @@ uv pip install -r requirements.txt
 3. 保持 **向量数据库类型** 为 `chroma`。
 4. 选择用于记忆总结的 LLM Provider。
 5. 选择用于向量化的 Embedding Provider。
-6. 按需调整总结轮数、检索数量和相似度阈值。
+6. 按需调整总结轮数、检索数量和记忆注入方式。
 
 Chroma 的 `persist_directory` 可以留空。留空时，插件会在自身数据目录中创建默认持久化目录。
 
@@ -58,6 +58,14 @@ Chroma 的 `persist_directory` 可以留空。留空时，插件会在自身数�
 ```
 
 随后询问相关内容，观察机器人是否能检索并注入长期记忆。
+
+## 会话重置与长期记忆
+
+AstrBot 的 `/new` 和 `/reset` 只切换或清空短期会话历史，不会删除 Mnemosyne 已保存的长期记忆。需要清理当前会话的长期记忆时，请执行：
+
+```text
+/memory reset confirm
+```
 
 ## 管理面板
 

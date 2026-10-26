@@ -393,6 +393,9 @@ class TestConfigSchema(unittest.TestCase):
         self.assertEqual(interval_schema["minimum"], 1)
         self.assertEqual(interval_schema["maximum"], 50)
         self.assertIn("extra_user_parts", schema["memory_injection_method"]["options"])
+        self.assertEqual(
+            schema["memory_injection_method"]["default"], "extra_user_parts"
+        )
         self.assertFalse(schema["include_tool_context_in_summary"]["default"])
 
 
@@ -502,6 +505,25 @@ class TestHandleLlmResponse(unittest.IsolatedAsyncioTestCase):
 
 
 class TestMemoryInjectionFormatting(unittest.TestCase):
+    def test_default_injection_uses_temporary_extra_user_part(self) -> None:
+        plugin = _Plugin({})
+        req = types.SimpleNamespace(
+            prompt="current question",
+            extra_user_content_parts=[],
+        )
+
+        memory_operations._format_and_inject_memory(
+            plugin,
+            [{"content": "remembered fact", "create_time": 1700000000}],
+            req,
+        )
+
+        self.assertEqual(req.prompt, "current question")
+        self.assertEqual(len(req.extra_user_content_parts), 1)
+        injected = req.extra_user_content_parts[0]
+        self.assertIn("remembered fact", injected.text)
+        self.assertTrue(injected._no_save)
+
     def test_extra_user_parts_uses_temp_text_part(self) -> None:
         req = types.SimpleNamespace(
             prompt="prompt",

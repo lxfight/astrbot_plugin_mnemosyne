@@ -1,6 +1,6 @@
 (function enableDemoBridge() {
     const params = new URLSearchParams(window.location.search);
-    if (window.AstrBotPluginPage || params.get('demo') !== '1') return;
+    if (window.AstrBotPluginView || params.get('demo') !== '1') return;
 
     const now = Date.now();
     const day = 86400000;
@@ -67,7 +67,7 @@
         };
     }
 
-    window.AstrBotPluginPage = {
+    window.AstrBotPluginView = {
         ready: async () => ({ plugin: 'mnemosyne', mode: 'demo' }),
         apiGet: async (endpoint, query = {}) => {
             if (endpoint === 'monitoring/dashboard') {

@@ -4,22 +4,23 @@ This page is for contributors changing plugin code or documentation. Python test
 
 ## Requirements
 
-- Python 3.11 or the version required by the current AstrBot checkout
+- Python 3.12 or later, matching AstrBot 4.29
 - Node.js 20 or newer
 - An AstrBot development environment with usable LLM and Embedding providers
 
 ## Install Dependencies
 
 ```bash
-pip install -r requirements.txt pytest pytest-asyncio ruff
+uv venv --python 3.12
+uv pip install -r requirements.txt pytest pytest-asyncio ruff
 npm ci
 ```
 
 ## Run Tests
 
 ```bash
-pytest tests -q
-ruff check --select E,F --ignore E501 --exclude tests .
+uv run pytest tests -q
+uv run ruff check --select E,F --ignore E501 --exclude tests .
 ```
 
 Some historical diagnostic scripts under `tests/` are not part of the current Ruff scope. New tests should remain clean for the E/F rules.
@@ -67,4 +68,4 @@ When adding a user-facing page, update both language trees and the navigation en
 
 Before the first deployment, set **Settings → Pages → Source** to **GitHub Actions**. The public site is <https://lxfight.github.io/astrbot_plugin_mnemosyne/>.
 
-The documentation build also runs in CI, so broken navigation, links, or Markdown processing fail before a pull request is merged.
+CI creates a Python 3.12 environment with `uv`, installs test dependencies, and runs Ruff, pytest, and the VitePress build. Broken navigation, links, or Markdown processing fail before a pull request is merged.

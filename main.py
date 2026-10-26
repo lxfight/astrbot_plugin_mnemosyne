@@ -13,7 +13,7 @@ from astrbot.api import AstrBotConfig, logger  # 使用统一的 logger 和配�
 # --- AstrBot 核心导入 ---
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import LLMResponse, ProviderRequest
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star
 from astrbot.core.provider.provider import EmbeddingProvider
 
 # --- 插件内部模块导入 ---
@@ -38,14 +38,9 @@ if TYPE_CHECKING:
     from .memory_manager.vector_db.milvus_manager import MilvusManager
 
 
-@register(
-    "Mnemosyne",
-    "lxfight",
-    "一个AstrBot插件，实现基于RAG技术的长期记忆功能。",
-    "2.4.0",
-    "https://github.com/lxfight/astrbot_plugin_mnemosyne",
-)
 class Mnemosyne(Star):
+    """为 AstrBot 提供可检索、可管理的长期记忆。使用 /memory 查看命令。"""
+
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
@@ -66,7 +61,7 @@ class Mnemosyne(Star):
         self.embedding_provider: EmbeddingProvider | None = None
         self.provider = None
         self.metrics_collector = MetricsCollector()
-        self.web_api: MnemosyneWebApi | None = None  # Pages Web API
+        self.web_api: MnemosyneWebApi | None = None  # Views Web API
         self.plugin_data_dir: str | None = None  # 插件数据目录
 
         # --- 初始化状态标记 ---
@@ -76,6 +71,7 @@ class Mnemosyne(Star):
         self._migrated_sessions: OrderedDict[str, None] = OrderedDict()
         self._migration_inflight: set[str] = set()
         self._warned_missing_provider_ids: set[str] = set()
+        self._warned_missing_llm_provider_ids: set[str] = set()
         # 间隔注入计数器：session_id -> 已处理轮次，用于“每隔 N 轮注入一次记忆”
         self._injection_round_counter: dict[str, int] = {}
         self._injection_round_counter_updated_at: dict[str, float] = {}
@@ -509,14 +505,14 @@ class Mnemosyne(Star):
             else:
                 logger.warning("Context manager 未初始化，无法启动后台总结检查任务。")
 
-            # 4. 注册 AstrBot Pages Web API（官方插件 UI 接口）
+            # 4. 注册 AstrBot Views Web API（官方插件视图接口）
             if hasattr(self.context, "register_web_api"):
                 try:
                     self.web_api = MnemosyneWebApi(self)
                     self.web_api.register_routes()
-                    logger.info("Mnemosyne Pages Web API 已注册至 AstrBot 仪表盘")
+                    logger.info("Mnemosyne Views Web API 已注册至 AstrBot 仪表盘")
                 except Exception as e:
-                    logger.warning(f"注册 Pages Web API 失败: {e}")
+                    logger.warning(f"注册 Views Web API 失败: {e}")
 
             # 5. 标记初始化成功
             self._initialization_successful = True
@@ -599,47 +595,23 @@ class Mnemosyne(Star):
                     )
 
             if not self.provider:
-                provider_id = self.config.get("LLM_providers", "")
-
-                # 验证 provider_id 的有效性
-                if not provider_id:
-                    logger.warning(
-                        "LLM_providers 未配置，尝试使用当前正在使用的 provider"
-                    )
-                    try:
-                        # 支持会话隔离：传入umo参数
-                        self.provider = self.context.get_using_provider(
-                            umo=event.unified_msg_origin
-                        )
-                        if not self.provider:
-                            logger.error("无法获取任何可用的 LLM provider")
-                            return
-                    except Exception as e:
-                        logger.error(f"获取当前使用的 provider 失败: {e}")
-                        return
-                else:
-                    # 尝试获取指定的 provider
+                provider_id = str(self.config.get("LLM_providers", "")).strip()
+                if provider_id:
                     try:
                         self.provider = self.context.get_provider_by_id(provider_id)
-                        if not self.provider:
-                            logger.error(
-                                f"无法找到 provider_id '{provider_id}' 对应的 provider"
-                            )
-                            # 回退到使用当前 provider（支持会话隔离）
-                            logger.warning("回退到使用当前正在使用的 provider")
-                            self.provider = self.context.get_using_provider(
-                                umo=event.unified_msg_origin
-                            )
-                            if not self.provider:
-                                logger.error(
-                                    "回退失败，无法获取任何可用的 LLM provider"
-                                )
-                                return
                     except Exception as e:
                         logger.error(
                             f"获取 provider_id '{provider_id}' 时发生错误: {e}"
                         )
-                        return
+                    if (
+                        not self.provider
+                        and provider_id not in self._warned_missing_llm_provider_ids
+                    ):
+                        self._warned_missing_llm_provider_ids.add(provider_id)
+                        logger.warning(
+                            f"无法找到 provider_id '{provider_id}'，"
+                            "记忆总结将使用当前会话的默认 Provider。"
+                        )
 
             await memory_operations.handle_query_memory(self, event, req)
         except Exception as e:

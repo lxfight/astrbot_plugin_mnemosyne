@@ -22,8 +22,8 @@ except ImportError:
         BINARY_VECTOR = "BINARY_VECTOR"
 
 
+from astrbot.api import logger as init_logger
 from astrbot.api.star import StarTools
-from astrbot.core.log import LogManager
 
 from ..memory_manager.context_manager import ConversationContextManager
 from ..memory_manager.message_counter import MessageCounter
@@ -41,10 +41,6 @@ from .constants import (
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
     from ..main import Mnemosyne
-
-# 获取初始化专用的日志记录器
-init_logger = LogManager.GetLogger(log_name="MnemosyneInit")
-
 
 def _default_search_params(index_params: dict) -> dict:
     """按索引类型生成 Milvus 默认搜索参数。"""

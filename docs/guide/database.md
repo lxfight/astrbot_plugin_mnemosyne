@@ -49,6 +49,8 @@ uv pip install 'pymilvus[milvus_lite]>=2.6.0,<3.0.0'
 }
 ```
 
+Milvus Lite 不支持 Windows。Windows 用户需要 Milvus 时，请部署 Milvus Standalone 并改用 `address` 连接。
+
 标准 Milvus 示例：
 
 ```json

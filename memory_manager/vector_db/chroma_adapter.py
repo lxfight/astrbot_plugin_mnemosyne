@@ -11,11 +11,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from astrbot.core.log import LogManager
+from astrbot.api import logger
 
 from ..vector_db_base import VectorDatabase, VectorDeleteResult, VectorInsertResult
-
-logger = LogManager.GetLogger(log_name="Mnemosyne ChromaAdapter")
 
 chromadb = None
 

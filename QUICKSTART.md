@@ -1,137 +1,99 @@
 # 快速启动指南
 
-本指南帮助您快速上手 Mnemosyne 长期记忆插件。
+本指南用于在 AstrBot 中完成 Mnemosyne 的最小可用部署。默认使用 Chroma 本地持久化，不需要额外启动数据库服务。
 
-## 5 分钟快速部署
+## 前置条件
 
-### 步骤 1：安装插件依赖
+- AstrBot `v4.29.0` 至 `v4.x`
+- Python `3.12+`
+- 已在 AstrBot 中配置 LLM Provider 与 Embedding Provider
+
+## 1. 安装依赖
+
+在 AstrBot 使用的虚拟环境中执行：
 
 ```bash
 cd data/plugins/astrbot_plugin_mnemosyne
 uv pip install -r requirements.txt
 ```
 
-默认会使用 Chroma 本地持久化数据库，无需额外启动数据库服务。
+默认依赖包含 Chroma。Milvus、Qdrant 和 Weaviate 是可选后端，需要时再启用 `requirements.txt` 中对应依赖。
 
-### 步骤 2：配置插件
+## 2. 配置插件
 
-在 AstrBot WebUI 中配置插件：
+登录 AstrBot Dashboard，进入 **插件管理**，打开 **Mnemosyne**：
 
-1. 打开 **插件管理** → **Mnemosyne**
-2. 保持 **向量数据库类型** 为 `chroma`
-3. 可选设置 **集合名称**：`mnemosyne_default`（或自定义名称）
-4. 配置记忆总结参数：
-   - **对话轮数**：`5`（每 5 轮对话后自动总结）
-   - **检索数量**：`5`（返回最相关的 5 条记忆）
-   - **相似度阈值**：`0.7`（只返回相似度 ≥ 0.7 的记忆）
+1. 保持 **向量数据库类型** 为 `chroma`。
+2. 选择用于记忆总结的 LLM Provider。
+3. 选择用于生成向量的 Embedding Provider。
+4. 按需调整以下默认值：
+   - `num_pairs`: `5`，每 5 轮问答触发一次自动总结。
+   - `top_k`: `3`，每轮检索返回的记忆条数。
+   - `memory_injection_method`: `extra_user_parts`，把记忆作为临时内容块追加到当前用户消息。
 
-### 步骤 3：重启 AstrBot
+Embedding Provider 的向量维度决定集合结构。首次安装后必须先初始化集合，再开始积累记忆。
 
-```bash
-# 在 AstrBot 根目录
-python main.py
+## 3. 初始化
+
+重启或重载 AstrBot 后，使用管理员账号执行：
+
+```text
+/memory init
 ```
 
-### 步骤 4：验证功能
+更换 Embedding 模型、维度变化或需要重建集合时执行：
 
-**测试记忆存储**：
-1. 与机器人进行 5 轮以上对话
-2. 观察日志中的 `[Mnemosyne]` 信息
-3. 应该看到"开始总结历史对话"的日志
-
-**测试记忆检索**：
-1. 提出与之前对话相关的问题
-2. 机器人应该能够回忆起之前的内容
-
-**查看 WebUI**：
-1. 打开 AstrBot Dashboard
-2. 进入 **Alkaid** → **长期记忆**
-3. 查看已存储的记忆列表
-
-## 常见问题快速解决
-
-### Q1：无法连接向量数据库
-
-**检查清单**：
-```bash
-# 1. 如果使用 Milvus，验证 Milvus 是否运行
-docker ps | grep milvus
-
-# 2. 检查端口是否开放
-netstat -an | grep 19530
-
-# 3. 测试连接
-telnet 127.0.0.1 19530
+```text
+/memory init --force
 ```
 
-**解决方案**：
-- 确保 Docker 容器正在运行
-- 检查防火墙设置
-- 尝试使用 `localhost` 代替 `127.0.0.1`
+`--force` 会重建集合并重新生成历史记忆的向量。数据量大时应预留足够时间，并先备份数据库目录。
 
-### Q2：记忆没有被总结
+## 4. 验证
 
-**可能原因**：
-1. 对话轮数未达到阈值（默认 5 轮）
-2. LLM Provider 未正确配置
-3. Embedding Provider 未配置
+1. 与机器人持续对话，达到 `num_pairs` 后观察日志中的总结和写入记录。
+2. 手动写入一条记忆：
 
-**检查方法**：
-```bash
-# 查看日志中的消息计数
-
-# 检查 LLM 配置
-# 在 AstrBot WebUI → 服务商配置 中确认
+```text
+/memory remember 我喜欢在晚上整理项目文档。
 ```
 
-### Q3：Collection not loaded 错误
+3. 询问相关内容，确认检索结果被注入当前对话。
 
-**说明**：此问题已在 v2.0.0 中修复。
+## 管理面板
 
-**如果仍然出现**：
-1. 检查插件版本是否为 v2.0.0+
-2. 删除旧集合并重新创建：
-   ```python
-   # 在 Python 中执行
-   from pymilvus import connections, utility
-   connections.connect(host="127.0.0.1", port="19530")
-   utility.drop_collection("default")
-   # 重启 AstrBot
-   ```
+登录 AstrBot Dashboard，进入 **Alkaid → 长期记忆**。管理视图不单独监听端口，不维护独立 API Key，权限继承 Dashboard 管理员会话。
 
+## 常见问题
 
+### 找不到 Embedding Provider
 
-## 性能优化技巧
+在 AstrBot 的服务商配置中添加至少一个可用的 Embedding Provider，然后在插件配置中重新选择。
 
-### 1. 调整对话轮数
+### 记忆没有被总结
 
-**较小值（3-5 轮）**：
-- ✅ 记忆更新频繁，内容更细致
-- ❌ LLM 调用次数增加，成本上升
+检查对话是否达到 `num_pairs`、LLM Provider 是否可用、平台是否命中 `platform_blacklist`。
 
-**较大值（8-12 轮）**：
-- ✅ 减少 LLM 调用，降低成本
-- ❌ 记忆更新不及时，可能丢失细节
+### 检索不到相关记忆
 
-**建议**：根据对话密度调整，一般用户建议 5-8 轮
+- 适当提高 `top_k`。
+- 检查 `use_session_filtering` 与 `use_personality_filtering` 是否过滤了目标记忆。
+- 更换 Embedding 模型后执行 `/memory init --force`。
+- 检查 `use_lightweight_memory_graph` 是否适合当前数据。
 
-### 2. 优化检索参数
+### 如何清理长期记忆
 
-**提高检索精度**：
-```json
-{
-  "top_k": 3,           // 减少返回数量
-  "score_threshold": 0.8  // 提高相似度门槛
-}
+AstrBot 的 `/new` 和 `/reset` 只处理短期会话。清理当前会话的长期记忆请使用：
+
+```text
+/memory reset confirm
 ```
 
-**提高检索召回**：
-```json
-{
-  "top_k": 10,          // 增加返回数量
-  "score_threshold": 0.6  // 降低相似度门槛
-}
-```
+## 性能建议
 
+- 增大 `num_pairs` 可以减少总结调用，但会降低记忆更新频率。
+- 降低 `top_k` 可以减少嵌入和上下文开销，但可能降低召回率。
+- 增大 `memory_injection_interval` 可以降低注入频率。
+- `extra_user_parts` 不会写入会话历史，通常比修改系统提示词更适合缓存敏感场景。
 
-**祝您使用愉快！** 🎉
+完整配置、数据库选择与调优说明见[在线文档](https://lxfight.github.io/astrbot_plugin_mnemosyne/)。

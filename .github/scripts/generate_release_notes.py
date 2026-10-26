@@ -40,10 +40,30 @@ def _tag_exists(tag: str) -> bool:
     ).returncode == 0
 
 
+def _tag_candidates(version: str) -> tuple[str, ...]:
+    if not version or version == "none":
+        return ()
+    if version.startswith("v"):
+        return (version, version[1:])
+    return (f"v{version}", version)
+
+
+def _resolve_tag(version: str) -> str | None:
+    for candidate in _tag_candidates(version):
+        if _tag_exists(candidate):
+            return candidate
+    return None
+
+
+def _release_tag(version: str) -> str:
+    return version if version.startswith("v") else f"v{version}"
+
+
 def _commits(old_version: str) -> list[tuple[str, str]]:
     args = ["log", "--no-merges", "--pretty=format:%s%x09%h"]
-    if old_version and _tag_exists(old_version):
-        args.append(f"{old_version}..HEAD")
+    old_tag = _resolve_tag(old_version)
+    if old_tag:
+        args.append(f"{old_tag}..HEAD")
     else:
         args.extend(["-20", "HEAD"])
 
@@ -78,6 +98,7 @@ def main() -> None:
         )
 
     version, old_version, repository = sys.argv[1:]
+    new_tag = _release_tag(version)
     grouped: dict[str, list[tuple[str, str]]] = {}
     for subject, commit_hash in _commits(old_version):
         categorized = _category_for(subject)
@@ -87,9 +108,9 @@ def main() -> None:
         grouped.setdefault(title, []).append((description, commit_hash))
 
     lines = [
-        f"## Mnemosyne {version}",
+        f"## Mnemosyne {new_tag}",
         "",
-        f"_{datetime.now(timezone.utc).strftime('%Y-%m-%d')} / 发布说明_",
+        f"_Release date / 发布日期: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}_",
         "",
         "### 更新内容 / Changes",
         "",
@@ -111,15 +132,16 @@ def main() -> None:
     if not has_changes:
         lines.extend(["- No user-facing changes recorded. / 暂无记录的变更。", ""])
 
-    if old_version and _tag_exists(old_version):
+    old_tag = _resolve_tag(old_version)
+    if old_tag:
         compare_url = (
-            f"https://github.com/{repository}/compare/{old_version}...{version}"
+            f"https://github.com/{repository}/compare/{old_tag}...{new_tag}"
         )
         lines.extend(
             [
                 "### 完整变更 / Full Changelog",
                 "",
-                f"[{old_version}...{version}]({compare_url})",
+                f"[{old_tag}...{new_tag}]({compare_url})",
             ]
         )
 

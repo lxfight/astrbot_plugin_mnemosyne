@@ -13,9 +13,7 @@ from pymilvus.exceptions import (
     MilvusException,
 )
 
-from astrbot.core.log import LogManager
-
-logger = LogManager.GetLogger(log_name="Mnemosyne")
+from astrbot.api import logger
 
 # 导入安全工具
 current_dir = Path(__file__).resolve().parent

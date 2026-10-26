@@ -6,9 +6,7 @@ Mnemosyne 插件安全工具模块
 import re
 from pathlib import Path
 
-from astrbot.core.log import LogManager
-
-logger = LogManager.GetLogger(log_name="MnemosyneSecurity")
+from astrbot.api import logger
 
 
 # ==================== SQL注入防护 ====================

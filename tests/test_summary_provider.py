@@ -28,12 +28,18 @@ class _HangingProvider:
 
 
 class _Context:
-    def __init__(self, fallback=None):
+    def __init__(self, fallback=None, default_providers=None):
         self.fallback = fallback
+        self.default_providers = default_providers or {}
+        self.requested_umos = []
         self.requested_provider_ids = []
 
     def get_using_provider(self, **_kwargs):
-        return None
+        raise AssertionError("deprecated get_using_provider() must not be used")
+
+    async def get_using_provider_async(self, umo=None, **_kwargs):
+        self.requested_umos.append(umo)
+        return self.default_providers.get(umo)
 
     def get_provider_by_id(self, provider_id):
         self.requested_provider_ids.append(provider_id)
@@ -203,3 +209,40 @@ async def test_summary_speaker_mapping_renders_conversation_identity():
             "persona=persona-7; session=session-1; sender=Alice/user-42"
         ),
     }
+
+
+@pytest.mark.asyncio
+async def test_summary_resolves_default_provider_for_each_session():
+    first = _Provider({"completion_text": "first summary"})
+    second = _Provider({"completion_text": "second summary"})
+    context = _Context(
+        default_providers={
+            "session-1": first,
+            "session-2": second,
+        }
+    )
+    plugin = SimpleNamespace(
+        provider=None,
+        context=context,
+        config={
+            "use_summary_time_anchor": False,
+            "summary_speaker_mapping_prompt": "",
+        },
+    )
+
+    first_response = await _get_summary_llm_response(
+        plugin,
+        "first conversation",
+        session_id="session-1",
+    )
+    second_response = await _get_summary_llm_response(
+        plugin,
+        "second conversation",
+        session_id="session-2",
+    )
+
+    assert first_response == {"completion_text": "first summary"}
+    assert second_response == {"completion_text": "second summary"}
+    assert context.requested_umos == ["session-1", "session-2"]
+    assert len(first.calls) == 1
+    assert len(second.calls) == 1

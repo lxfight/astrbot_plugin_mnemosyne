@@ -11,7 +11,7 @@
 ---
 
 [![License](https://img.shields.io/badge/license-Custom-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.5.0-green.svg)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
+[![Version](https://img.shields.io/badge/version-v2.6.0-green.svg)](https://github.com/lxfight/astrbot_plugin_mnemosyne)
 [![Docs](https://img.shields.io/badge/docs-online-2f6f68.svg)](https://lxfight.github.io/astrbot_plugin_mnemosyne/)
 [![QQ Group](https://img.shields.io/badge/QQ群-953245617-blue?style=flat-square&logo=tencent-qq)](https://qm.qq.com/cgi-bin/qm/qr?k=WdyqoP-AOEXqGAN08lOFfVSguF2EmBeO&jump_from=webapi&authKey=tPyfv90TVYSGVhbAhsAZCcSBotJuTTLf03wnn7/lQZPUkWfoQ/J8e9nkAipkOzwh)
 
@@ -50,7 +50,7 @@
 <li><strong>记忆检查器</strong><br/>直接查看和编辑记忆，保存时自动重新生成 Embedding</li>
 <li><strong>命令行工具</strong><br/>提供丰富的命令行指令管理记忆</li>
 <li><strong>灵活配置</strong><br/>支持多种记忆注入方式与检索策略</li>
-<li><strong>数据安全</strong><br/>支持 API 密钥认证保护管理端点</li>
+<li><strong>数据安全</strong><br/>管理视图继承 AstrBot Dashboard 管理员鉴权</li>
 </ul>
 
 </td>
@@ -80,11 +80,11 @@
 </tr>
 <tr>
 <td><strong>上下文管理</strong></td>
-<td>维护对话历史与记忆注入，支持多种注入策略（用户提示/系统提示）</td>
+<td>维护对话历史与记忆注入，支持临时用户内容块（默认）、用户提示与系统提示</td>
 </tr>
 <tr>
 <td><strong>Web 管理面板</strong></td>
-<td>基于 FastAPI 的响应式管理界面，提供记忆查询、统计、实时拓扑与内容编辑功能</td>
+<td>作为 AstrBot Dashboard 插件视图运行，提供记忆查询、统计、实时拓扑与内容编辑功能</td>
 </tr>
 </table>
 
@@ -118,6 +118,7 @@
 
 - `/memory init` - 首次安装后必须执行，用于创建正确维度的集合
 - `/memory init --force` - 强制重新初始化，用于维度迁移（会保留数据）
+- AstrBot 的 `/new` 和 `/reset` 只切换或重置短期会话，不会删除 Mnemosyne 长期记忆。清理当前会话的长期记忆请使用 `/memory reset confirm`。
 
 ### 配置选项
 
@@ -139,7 +140,7 @@
 </tr>
 <tr>
 <td><code>collection_name</code></td>
-<td>Milvus 集合名称</td>
+<td>向量集合名称</td>
 <td>default</td>
 </tr>
 <tr>
@@ -149,12 +150,12 @@
 </tr>
 <tr>
 <td><code>memory_injection_method</code></td>
-<td>记忆注入方式；独立系统消息可能降低提示词缓存命中率</td>
-<td>user_prompt</td>
+<td>记忆注入方式；默认的 extra_user_parts 将临时内容追加到当前用户消息，不写入会话历史</td>
+<td>extra_user_parts</td>
 </tr>
 <tr>
 <td><code>memory_injection_position</code></td>
-<td>记忆注入位置（prepend/append）</td>
+<td>记忆注入位置（prepend/append）；仅影响 user_prompt、system_prompt 和 insert_system_prompt</td>
 <td>prepend</td>
 </tr>
 <tr>
@@ -237,8 +238,8 @@
 
 ### 先决条件
 
-- AstrBot v4.0.0+
-- Python 3.8+
+- AstrBot v4.29.0 至 v4.x
+- Python 3.12+
 - 默认 Chroma 本地数据库（无需额外服务）；可选 Milvus / Qdrant / Weaviate
 - **⚠️ 必须先配置 Embedding Provider**
 
@@ -322,7 +323,7 @@ uv pip install -r requirements.txt
 
 这将：
 - 检测 Embedding Provider 的向量维度
-- 创建匹配维度的 Milvus 集合
+- 创建匹配维度的向量集合
 - 建立必要的索引
 
 **首次安装必须执行此命令！**
@@ -355,19 +356,16 @@ uv pip install -r requirements.txt
 
 ## Web 管理面板
 
-插件内置了基于 FastAPI 的管理面板，提供以下功能：
+插件通过 AstrBot Dashboard 的 **Alkaid → 长期记忆** 提供原生管理视图，包含以下功能：
 
 - 记忆数据查询与浏览
 - 会话统计与分析
 - 实时监控与日志查看
 - 记忆数据导出
 
-**访问地址**：`http://127.0.0.1:8000`（默认端口）
+**访问方式**：登录 AstrBot Dashboard，进入插件管理区域的长期记忆视图。视图不单独监听端口，并继承 Dashboard 的管理员鉴权。
 
-**安全配置**：
-- 支持 API 密钥认证
-- 可在配置文件中设置固定密钥
-- 未配置时自动生成临时密钥（每次重启变化）
+**安全建议**：不要向公网匿名开放 Dashboard；导出文件可能包含个人偏好与会话片段，应按敏感数据处理。
 
 ---
 
@@ -441,7 +439,7 @@ uv pip install -r requirements.txt
 
 **项目地址**：[github.com/lxfight/astrbot_plugin_mnemosyne](https://github.com/lxfight/astrbot_plugin_mnemosyne)
 
-**作者**：lxfight | **版本**：v2.5.0
+**作者**：lxfight | **版本**：v2.6.0
 
 ---
 

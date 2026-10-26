@@ -14,6 +14,7 @@ jobs:
       version_changed: ${{ steps.check.outputs.changed }}
       new_version: ${{ steps.check.outputs.version }}
       old_version: ${{ steps.check.outputs.old_version }}
+      tag_name: ${{ steps.check.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,9 +25,11 @@ jobs:
         id: check
         run: |
           set -euo pipefail
-          CURRENT_VERSION=$(sed -n 's/^version:[[:space:]]*//p' metadata.yaml | head -n1 | tr -d '\r')
+          CURRENT_VERSION_RAW=$(sed -n 's/^version:[[:space:]]*//p' metadata.yaml | head -n1 | tr -d '\r')
+          CURRENT_VERSION=${CURRENT_VERSION_RAW#v}
           echo "Current version: $CURRENT_VERSION"
-          PREVIOUS_VERSION=$(git show HEAD~1:metadata.yaml 2>/dev/null | sed -n 's/^version:[[:space:]]*//p' | head -n1 | tr -d '\r' || true)
+          PREVIOUS_VERSION_RAW=$(git show HEAD~1:metadata.yaml 2>/dev/null | sed -n 's/^version:[[:space:]]*//p' | head -n1 | tr -d '\r' || true)
+          PREVIOUS_VERSION=${PREVIOUS_VERSION_RAW#v}
           PREVIOUS_VERSION=${PREVIOUS_VERSION:-none}
           echo "Previous version: $PREVIOUS_VERSION"
 
@@ -34,6 +37,7 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
             echo "old_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=v$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
             echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -55,11 +59,12 @@ jobs:
       - name: Prepare bilingual release notes
         env:
           VERSION: ${{ needs.check-version.outputs.new_version }}
+          TAG: ${{ needs.check-version.outputs.tag_name }}
           OLD_VERSION: ${{ needs.check-version.outputs.old_version }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          NOTES_FILE=".github/release-notes/${VERSION}.md"
+          NOTES_FILE=".github/release-notes/${TAG}.md"
           if [ -f "$NOTES_FILE" ]; then
             cp "$NOTES_FILE" changelog.md
             echo "Using curated release notes: $NOTES_FILE"
@@ -72,8 +77,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.check-version.outputs.new_version }}
-          name: Mnemosyne ${{ needs.check-version.outputs.new_version }}
+          tag_name: ${{ needs.check-version.outputs.tag_name }}
+          name: Mnemosyne ${{ needs.check-version.outputs.tag_name }}
           body_path: changelog.md
           draft: false
           prerelease: ${{ contains(needs.check-version.outputs.new_version, '-') }}
@@ -83,5 +88,5 @@ jobs:
 
       - name: Notify release created
         run: |
-          echo "Release ${{ needs.check-version.outputs.new_version }} created."
-          echo "https://github.com/${{ github.repository }}/releases/tag/${{ needs.check-version.outputs.new_version }}"
+          echo "Release ${{ needs.check-version.outputs.tag_name }} created."
+          echo "https://github.com/${{ github.repository }}/releases/tag/${{ needs.check-version.outputs.tag_name }}"

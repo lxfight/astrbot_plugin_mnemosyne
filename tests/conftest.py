@@ -4,6 +4,8 @@ import sys
 import types
 from pathlib import Path
 
+from quart import Response, jsonify, request as quart_request
+
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 PLUGINS_ROOT = PLUGIN_ROOT.parent
@@ -14,13 +16,60 @@ for path in (PLUGIN_ROOT, PLUGINS_ROOT):
         sys.path.insert(0, path_str)
 
 
+class _PluginRequestProxy:
+    def __getattr__(self, key):
+        return getattr(quart_request, key)
+
+    @property
+    def query(self):
+        return quart_request.args
+
+    async def json(self, default=None):
+        payload = await quart_request.get_json(silent=True)
+        return default if payload is None else payload
+
+
+def _json_response(data=None, *, status_code=200, headers=None):
+    response = jsonify({} if data is None else data)
+    response.status_code = status_code
+    if headers:
+        response.headers.extend(headers)
+    return response
+
+
+def _stream_response(
+    content,
+    *,
+    content_type="text/event-stream",
+    status_code=200,
+    headers=None,
+):
+    return Response(
+        content,
+        status=status_code,
+        content_type=content_type,
+        headers=headers,
+    )
+
+
+def _install_quart_web_api(module) -> None:
+    module.json_response = _json_response
+    module.request = _PluginRequestProxy()
+    module.stream_response = _stream_response
+
+
 def _ensure_astrbot_test_stubs() -> None:
     try:
         import astrbot.api.star  # noqa: F401
         import astrbot.core.log  # noqa: F401
-        return
     except ImportError:
         pass
+    else:
+        # Web API tests use Quart even when a real AstrBot installation is present.
+        import astrbot.api.web
+
+        _install_quart_web_api(astrbot.api.web)
+        return
 
     astrbot = sys.modules.get("astrbot") or types.ModuleType("astrbot")
     astrbot_api = sys.modules.get("astrbot.api") or types.ModuleType("astrbot.api")
@@ -32,6 +81,9 @@ def _ensure_astrbot_test_stubs() -> None:
     )
     astrbot_api_star = sys.modules.get("astrbot.api.star") or types.ModuleType(
         "astrbot.api.star"
+    )
+    astrbot_api_web = sys.modules.get("astrbot.api.web") or types.ModuleType(
+        "astrbot.api.web"
     )
     astrbot_core = sys.modules.get("astrbot.core") or types.ModuleType("astrbot.core")
     astrbot_core_log = sys.modules.get("astrbot.core.log") or types.ModuleType(
@@ -145,6 +197,7 @@ def _ensure_astrbot_test_stubs() -> None:
         astrbot_api_star, "register", _identity_decorator
     )
     astrbot_api_star.StarTools = getattr(astrbot_api_star, "StarTools", _StarTools)
+    _install_quart_web_api(astrbot_api_web)
     astrbot_core_log.LogManager = getattr(astrbot_core_log, "LogManager", _LogManager)
     astrbot_core_provider_provider.EmbeddingProvider = getattr(
         astrbot_core_provider_provider, "EmbeddingProvider", _EmbeddingProvider
@@ -155,6 +208,7 @@ def _ensure_astrbot_test_stubs() -> None:
     astrbot_api.event = astrbot_api_event
     astrbot_api.provider = astrbot_api_provider
     astrbot_api.star = astrbot_api_star
+    astrbot_api.web = astrbot_api_web
     astrbot_core.log = astrbot_core_log
     astrbot_core.provider = astrbot_core_provider
     astrbot_core_provider.provider = astrbot_core_provider_provider
@@ -164,6 +218,7 @@ def _ensure_astrbot_test_stubs() -> None:
     sys.modules["astrbot.api.event"] = astrbot_api_event
     sys.modules["astrbot.api.provider"] = astrbot_api_provider
     sys.modules["astrbot.api.star"] = astrbot_api_star
+    sys.modules["astrbot.api.web"] = astrbot_api_web
     sys.modules["astrbot.core"] = astrbot_core
     sys.modules["astrbot.core.log"] = astrbot_core_log
     sys.modules["astrbot.core.provider"] = astrbot_core_provider

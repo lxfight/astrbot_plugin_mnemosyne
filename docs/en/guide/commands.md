@@ -50,6 +50,8 @@ The plugin exposes the `mnemosyne_remember_memory` tool. When `enable_llm_memory
 
 ## Deleting Data
 
+AstrBot `/new` and `/reset` only affect short-term conversations: `/new` switches conversations and `/reset` clears the current history. Neither deletes Mnemosyne long-term memory. Use `/memory reset confirm` or the admin view to delete long-term memories.
+
 Deletion commands generally require confirmation. Use `list_records` or the admin panel to verify record IDs first.
 
 ```text

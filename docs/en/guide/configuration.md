@@ -40,9 +40,9 @@ See [Database Options](/en/guide/database) for backend guidance.
 | `context_cache_max_messages` | Maximum messages kept per session; older messages are dropped first. | `200` |
 | `top_k` | Number of memories returned by retrieval. | `3` |
 | `contexts_memory_len` | Number of long-term memory tag blocks retained in context. Values below 0 keep all blocks; 0 removes all. | `0` |
-| `memory_injection_method` | Use the user prompt, the LLM system prompt, or a separate system message. | `user_prompt` |
+| `memory_injection_method` | `extra_user_parts` appends memory as a temporary content block on the current user message; `user_prompt` edits the user prompt; `system_prompt` edits the LLM system prompt; `insert_system_prompt` adds a separate system message. | `extra_user_parts` |
 | `memory_injection_interval` | Retrieve and inject memories once every N conversation turns. | `1` |
-| `memory_injection_position` | Inject before or after the active prompt. | `prepend` |
+| `memory_injection_position` | Place `user_prompt`, `system_prompt`, or `insert_system_prompt` content before or after the active prompt. | `prepend` |
 | `max_prompt_chars_for_embedding` | Maximum input characters before embedding; longer text is truncated. | `4000` |
 | `summary_max_concurrency` | Maximum number of summarization tasks running at the same time. | `2` |
 | `summary_fallback_provider_id` | Retry with this provider when the primary summarizer fails or returns empty text. | Empty |
@@ -51,7 +51,9 @@ See [Database Options](/en/guide/database) for backend guidance.
 
 If memories become too noisy, lower `top_k`, increase `memory_injection_interval`, or disable lightweight graph reranking.
 
-`memory_injection_position` controls placement for both `user_prompt` and `system_prompt`. `insert_system_prompt` creates a separate system message and may reduce prompt-cache hits on some models; prefer the first two modes when cache stability matters.
+The default `extra_user_parts` mode appends memory as a temporary `TextPart` on the current user message. It is not written to conversation history and does not trigger history cleanup. `memory_injection_position` does not affect this mode: the block is always appended after the current user message.
+
+`memory_injection_position` only controls `user_prompt`, `system_prompt`, and `insert_system_prompt`. `insert_system_prompt` creates a separate system message and may reduce prompt-cache hits on some models; prefer `extra_user_parts` when cache stability matters.
 
 ## Filters
 

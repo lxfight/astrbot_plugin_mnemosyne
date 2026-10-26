@@ -1,0 +1,242 @@
+{
+  "metadata": {
+    "display_name": "Mnemosyne Long-Term Memory",
+    "short_desc": "Multi-backend RAG long-term memory with an admin view",
+    "desc": "AstrBot long-term memory storage and retrieval plugin for multiple vector databases."
+  },
+  "config": {
+    "LLM_providers": {
+      "description": "Summarization LLM Provider",
+      "hint": "LLM Provider used for memory summaries. Leave empty to resolve the default provider for each session independently."
+    },
+    "summary_fallback_provider_id": {
+      "description": "Fallback summarization LLM Provider",
+      "hint": "Retry once when the primary provider fails or returns empty content. Leave empty to disable the fallback."
+    },
+    "summary_max_concurrency": {
+      "description": "Maximum summarization concurrency",
+      "hint": "Limits concurrent summary jobs so simultaneous sessions do not amplify LLM and Embedding load."
+    },
+    "summary_request_timeout_seconds": {
+      "description": "Summarization request timeout (seconds)",
+      "hint": "Cancels a summary LLM request after this interval and tries the fallback provider."
+    },
+    "embedding_provider_id": {
+      "description": "Embedding Provider",
+      "hint": "Embedding Provider used to generate vectors. Leave empty to use the first configured AstrBot Embedding Provider."
+    },
+    "embedding_request_timeout_seconds": {
+      "description": "Embedding request timeout (seconds)",
+      "hint": "Cancels an Embedding request after this interval so chat and background jobs are not blocked."
+    },
+    "vector_db_type": {
+      "description": "Vector database type",
+      "hint": "Select a vector backend. Chroma runs locally without extra services; Milvus targets large deployments; Qdrant provides high-performance retrieval; Weaviate supports embedded and server modes.",
+      "labels": ["Chroma", "Milvus", "Qdrant", "Weaviate"],
+      "subtitles": ["Local persistence with no extra service", "Built for large deployments", "High-performance retrieval with cursor pagination", "Full-featured with embedded mode"]
+    },
+    "milvus_lite_path": {
+      "description": "Milvus Lite data path",
+      "hint": "Milvus Lite database file path. Set either this option or address; this option takes precedence."
+    },
+    "address": {
+      "description": "Milvus server address",
+      "hint": "Supports http://localhost:19530, https://localhost:19530, or localhost:19530."
+    },
+    "db_name": {
+      "description": "Milvus database name",
+      "hint": "Milvus 2.2 and later supports multiple databases. The default is default; use another name to isolate data."
+    },
+    "authentication": {
+      "description": "Milvus authentication",
+      "hint": "Fill these fields when Milvus server authentication is enabled.",
+      "token": {
+        "description": "Milvus authentication token",
+        "hint": "A token takes precedence over username and password."
+      },
+      "user": {
+        "description": "Milvus username"
+      },
+      "password": {
+        "description": "Milvus password"
+      }
+    },
+    "chroma_config": {
+      "description": "Chroma vector database settings",
+      "hint": "Only used when vector_db_type is chroma.",
+      "persist_directory": {
+        "description": "Chroma persistence directory",
+        "hint": "Leave empty to use chroma_data under the plugin data directory."
+      },
+      "host": {
+        "description": "Chroma server address (client mode)",
+        "hint": "Set this for client mode. Leave empty for local persistence."
+      },
+      "port": {
+        "description": "Chroma server port",
+        "hint": "Default is 8000."
+      }
+    },
+    "qdrant_config": {
+      "description": "Qdrant vector database settings",
+      "hint": "Only used when vector_db_type is qdrant.",
+      "path": {
+        "description": "Qdrant persistence directory",
+        "hint": "Leave empty to use qdrant_data under the plugin data directory."
+      },
+      "url": {
+        "description": "Qdrant server URL (client mode)",
+        "hint": "For example http://localhost:6333. Leave empty for local persistence."
+      },
+      "api_key": {
+        "description": "Qdrant API key",
+        "hint": "Optional API key for client mode."
+      },
+      "distance": {
+        "description": "Distance metric",
+        "hint": "Select the vector distance calculation.",
+        "labels": ["Cosine", "Euclidean", "Dot"],
+        "subtitles": ["Best for normalized text vectors", "Rank by spatial distance", "Rank by vector dot product"]
+      }
+    },
+    "weaviate_config": {
+      "description": "Weaviate vector database settings",
+      "hint": "Only used when vector_db_type is weaviate.",
+      "embedded": {
+        "description": "Use embedded mode",
+        "hint": "Run Weaviate inside the local process without an external service."
+      },
+      "persistence_data_path": {
+        "description": "Embedded mode data directory",
+        "hint": "Leave empty to use weaviate_data under the plugin data directory."
+      },
+      "url": {
+        "description": "Weaviate server URL",
+        "hint": "Used in client mode, for example http://localhost:8080."
+      },
+      "api_key": {
+        "description": "Weaviate API key",
+        "hint": "Optional API key for client mode."
+      }
+    },
+    "summary_check_task": {
+      "description": "Idle summarization timer",
+      "hint": "Experimental: adds a summary after a long period without conversation.",
+      "SUMMARY_CHECK_INTERVAL_SECONDS": {
+        "description": "Timer check interval (seconds)",
+        "hint": "Checks every 60 seconds by default."
+      },
+      "SUMMARY_TIME_THRESHOLD_SECONDS": {
+        "description": "Idle summarization threshold (seconds)",
+        "hint": "Defaults to 3600 seconds. Set to -1 to disable."
+      }
+    },
+    "collection_name": {
+      "description": "Vector collection name",
+      "hint": "Collection that stores long-term memories. Use an English name."
+    },
+    "use_personality_filtering": {
+      "description": "Filter memories by persona",
+      "hint": "Filters retrieval by persona ID so different personas do not share memories."
+    },
+    "use_session_filtering": {
+      "description": "Filter memories by session",
+      "hint": "Keeps memories isolated by session. Disable to share one memory pool across all sessions."
+    },
+    "platform_blacklist": {
+      "description": "Platform blacklist",
+      "hint": "Platform IDs in this list skip long-term memory retrieval and writes."
+    },
+    "use_participant_filtering": {
+      "description": "Filter memories by participant",
+      "hint": "Prefer memories related to the current speaker to reduce cross-talk in group chats."
+    },
+    "personality_fallback": {
+      "description": "Persona fallback",
+      "hint": "Use AstrBot's default persona when the conversation has no persona configured."
+    },
+    "num_pairs": {
+      "description": "Summary conversation rounds",
+      "hint": "One user-assistant exchange counts as one round. Summarization runs when this count is reached."
+    },
+    "context_cache_max_sessions": {
+      "description": "Maximum cached sessions",
+      "hint": "Evicts the least recently active sessions after this limit."
+    },
+    "context_cache_idle_ttl_seconds": {
+      "description": "Context cache idle TTL (seconds)",
+      "hint": "Sessions idle longer than this are released. Set to 0 to disable time-based eviction."
+    },
+    "context_cache_max_messages": {
+      "description": "Maximum messages per session",
+      "hint": "Keeps only recent messages after this limit. It should be at least twice num_pairs."
+    },
+    "top_k": {
+      "description": "Retrieved memory count",
+      "hint": "Number of relevant memories retrieved and injected per conversation."
+    },
+    "contexts_memory_len": {
+      "description": "Long-term memories kept in context",
+      "hint": "Values below 0 keep all blocks; values at or above 0 keep only the latest N blocks."
+    },
+    "memory_injection_method": {
+      "description": "Memory injection method",
+      "hint": "extra_user_parts appends memory as a temporary content block on the current user message without writing history; user_prompt edits the user prompt; system_prompt edits the system prompt; insert_system_prompt adds a separate system message and may reduce prompt-cache hits.",
+      "labels": ["Extra user content block (recommended)", "User prompt", "System prompt", "Separate system message"],
+      "subtitles": ["Append a temporary TextPart to the current message", "Modify the current user prompt", "Modify the LLM system prompt", "Add a separate system message"]
+    },
+    "memory_injection_interval": {
+      "description": "Memory injection interval",
+      "hint": "Retrieve and inject memory once every N conversation rounds. 1 means every round."
+    },
+    "memory_injection_position": {
+      "description": "Memory injection position",
+      "hint": "Controls placement for user_prompt, system_prompt, and insert_system_prompt. extra_user_parts is always appended after the current user message.",
+      "labels": ["Prepend", "Append"]
+    },
+    "max_prompt_chars_for_embedding": {
+      "description": "Maximum characters before embedding",
+      "hint": "Long input is truncated before embedding to avoid oversized requests or context limits."
+    },
+    "enable_explicit_memory_capture": {
+      "description": "Enable explicit remember writes",
+      "hint": "Writes long-term memory when a user message starts with remember or an equivalent explicit request."
+    },
+    "enable_llm_memory_tool": {
+      "description": "Enable model memory tool",
+      "hint": "Allows tool-capable models to write current-session memories when the user asks or when stable preferences, personal facts, or important plans appear."
+    },
+    "use_lightweight_memory_graph": {
+      "description": "Enable lightweight graph reranking",
+      "hint": "Expands one-hop entity relationships into keywords to improve multi-hop memory retrieval."
+    },
+    "use_summary_time_anchor": {
+      "description": "Add absolute time anchors to summaries",
+      "hint": "Reduces fabricated years and dates in summary text."
+    },
+    "include_tool_context_in_summary": {
+      "description": "Include tool context in summaries",
+      "hint": "Includes tool names, arguments, and results in summaries. When disabled, only user and assistant conversation text is summarized."
+    },
+    "summary_speaker_mapping_prompt": {
+      "description": "Summary speaker mapping prompt",
+      "hint": "Constrains ownership of user, assistant, and first-person references. Supports {persona_id}, {session_id}, {sender_id}, and {sender_name}. Leave empty to disable."
+    },
+    "long_memory_prompt": {
+      "description": "Conversation summary prompt",
+      "hint": "Defines the long-term memory format, key facts, and speaker constraints."
+    }
+  },
+  "views": {
+    "panel": {
+      "title": "Long-Term Memory",
+      "description": "Search, edit, import, export, and monitor Mnemosyne long-term memories."
+    }
+  },
+  "pages": {
+    "panel": {
+      "title": "Long-Term Memory",
+      "description": "Search, edit, import, export, and monitor Mnemosyne long-term memories."
+    }
+  }
+}
