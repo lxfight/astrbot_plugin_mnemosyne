@@ -1,0 +1,242 @@
+{
+  "metadata": {
+    "display_name": "Mnemosyne 长期记忆",
+    "short_desc": "多向量库 RAG 长期记忆与记忆管理面板",
+    "desc": "支持多种向量数据库的 AstrBot 长期记忆存储与查询插件。"
+  },
+  "config": {
+    "LLM_providers": {
+      "description": "记忆总结 LLM 服务商",
+      "hint": "选择用于记忆总结的 LLM Provider。留空时按当前会话解析默认 Provider，不同会话可使用各自的模型。"
+    },
+    "summary_fallback_provider_id": {
+      "description": "记忆总结备用 LLM 服务商",
+      "hint": "主总结模型调用失败或返回空内容时重试一次。留空表示不启用备用模型。"
+    },
+    "summary_max_concurrency": {
+      "description": "记忆总结最大并发数",
+      "hint": "限制同时运行的总结任务数量，避免多个会话同时总结时放大 LLM 与 Embedding 压力。"
+    },
+    "summary_request_timeout_seconds": {
+      "description": "记忆总结请求超时（秒）",
+      "hint": "单次总结 LLM 请求超过该时间会取消，并尝试备用 Provider。"
+    },
+    "embedding_provider_id": {
+      "description": "Embedding 服务提供商",
+      "hint": "选择用于向量嵌入的 Embedding Provider。留空时使用 AstrBot 中配置的第一个 Embedding Provider。"
+    },
+    "embedding_request_timeout_seconds": {
+      "description": "Embedding 请求超时（秒）",
+      "hint": "单次 Embedding 请求超过该时间会取消，避免聊天或后台任务被阻塞。"
+    },
+    "vector_db_type": {
+      "description": "向量数据库类型",
+      "hint": "选择向量数据库后端。Chroma 本地模式无需额外服务，适合快速开始；Milvus 适合大规模部署；Qdrant 提供高性能检索；Weaviate 支持嵌入式与服务端模式。",
+      "labels": ["Chroma", "Milvus", "Qdrant", "Weaviate"],
+      "subtitles": ["本地持久化，开箱即用", "面向大规模部署", "高性能检索与游标分页", "功能完整，支持嵌入式模式"]
+    },
+    "milvus_lite_path": {
+      "description": "Milvus Lite 数据路径",
+      "hint": "Milvus Lite 数据文件路径。与 address 二选一；设置后优先使用 Lite 模式。"
+    },
+    "address": {
+      "description": "Milvus 服务地址",
+      "hint": "支持 http://localhost:19530、https://localhost:19530 或 localhost:19530。"
+    },
+    "db_name": {
+      "description": "Milvus 数据库名称",
+      "hint": "Milvus 2.2 及以上版本支持多数据库。默认使用 default，也可指定其他数据库隔离数据。"
+    },
+    "authentication": {
+      "description": "Milvus 认证信息",
+      "hint": "Milvus 开启服务端认证时填写。",
+      "token": {
+        "description": "Milvus 认证 Token",
+        "hint": "Token 优先于用户名和密码。"
+      },
+      "user": {
+        "description": "Milvus 用户名"
+      },
+      "password": {
+        "description": "Milvus 密码"
+      }
+    },
+    "chroma_config": {
+      "description": "Chroma 向量数据库配置",
+      "hint": "仅在 vector_db_type 为 chroma 时生效。",
+      "persist_directory": {
+        "description": "Chroma 数据持久化目录",
+        "hint": "留空时使用插件数据目录下的 chroma_data。"
+      },
+      "host": {
+        "description": "Chroma 服务地址（客户端模式）",
+        "hint": "使用客户端模式时填写。留空则使用本地持久化模式。"
+      },
+      "port": {
+        "description": "Chroma 服务端口",
+        "hint": "默认 8000。"
+      }
+    },
+    "qdrant_config": {
+      "description": "Qdrant 向量数据库配置",
+      "hint": "仅在 vector_db_type 为 qdrant 时生效。",
+      "path": {
+        "description": "Qdrant 数据持久化目录",
+        "hint": "留空时使用插件数据目录下的 qdrant_data。"
+      },
+      "url": {
+        "description": "Qdrant 服务地址（客户端模式）",
+        "hint": "例如 http://localhost:6333。留空则使用本地持久化模式。"
+      },
+      "api_key": {
+        "description": "Qdrant API 密钥",
+        "hint": "客户端模式使用的 API 密钥，可选。"
+      },
+      "distance": {
+        "description": "距离度量类型",
+        "hint": "选择向量距离计算方式。",
+        "labels": ["余弦相似度", "欧氏距离", "点积"],
+        "subtitles": ["适合归一化文本向量", "按空间距离排序", "按向量内积排序"]
+      }
+    },
+    "weaviate_config": {
+      "description": "Weaviate 向量数据库配置",
+      "hint": "仅在 vector_db_type 为 weaviate 时生效。",
+      "embedded": {
+        "description": "使用嵌入式模式",
+        "hint": "在本地进程内运行，无需外部 Weaviate 服务。"
+      },
+      "persistence_data_path": {
+        "description": "嵌入式模式数据目录",
+        "hint": "留空时使用插件数据目录下的 weaviate_data。"
+      },
+      "url": {
+        "description": "Weaviate 服务地址",
+        "hint": "客户端模式使用，例如 http://localhost:8080。"
+      },
+      "api_key": {
+        "description": "Weaviate API 密钥",
+        "hint": "客户端模式使用的 API 密钥，可选。"
+      }
+    },
+    "summary_check_task": {
+      "description": "空闲总结计时器",
+      "hint": "实验性功能：长时间没有对话时，自动补充一次总结。",
+      "SUMMARY_CHECK_INTERVAL_SECONDS": {
+        "description": "计时器检查间隔（秒）",
+        "hint": "默认每 60 秒检查一次。"
+      },
+      "SUMMARY_TIME_THRESHOLD_SECONDS": {
+        "description": "空闲总结阈值（秒）",
+        "hint": "默认 3600 秒。设置为 -1 可关闭该功能。"
+      }
+    },
+    "collection_name": {
+      "description": "向量集合名称",
+      "hint": "长期记忆存储在哪个向量集合中，请使用英文命名。"
+    },
+    "use_personality_filtering": {
+      "description": "启用记忆人格过滤",
+      "hint": "按人格 ID 过滤检索结果，避免不同人格共享记忆。"
+    },
+    "use_session_filtering": {
+      "description": "启用记忆会话过滤",
+      "hint": "按会话隔离记忆。关闭后所有会话共享同一记忆池。"
+    },
+    "platform_blacklist": {
+      "description": "平台黑名单",
+      "hint": "列表中的平台 ID 将跳过长期记忆查询与写入。"
+    },
+    "use_participant_filtering": {
+      "description": "按参与者过滤记忆",
+      "hint": "开启后优先返回与当前发言用户相关的记忆，降低群聊串线。"
+    },
+    "personality_fallback": {
+      "description": "人格回退",
+      "hint": "对话未配置人格时，回退到 AstrBot 的默认人格。"
+    },
+    "num_pairs": {
+      "description": "记忆总结对话轮数",
+      "hint": "一问一答计为 1 轮。达到该轮数后自动总结。"
+    },
+    "context_cache_max_sessions": {
+      "description": "上下文缓存最大会话数",
+      "hint": "超出后按最近活跃时间淘汰最久未使用的会话。"
+    },
+    "context_cache_idle_ttl_seconds": {
+      "description": "上下文缓存空闲过期时间（秒）",
+      "hint": "超过该时间未活动的会话会被释放；0 表示不按时间淘汰。"
+    },
+    "context_cache_max_messages": {
+      "description": "单会话最大消息数",
+      "hint": "超出后仅保留最新消息。应大于等于 num_pairs 的 2 倍。"
+    },
+    "top_k": {
+      "description": "检索返回的记忆数量",
+      "hint": "每次对话检索并注入的最相关记忆条数。"
+    },
+    "contexts_memory_len": {
+      "description": "历史上下文保留记忆数",
+      "hint": "小于 0 表示全部保留，大于等于 0 表示保留最新的对应条数。"
+    },
+    "memory_injection_method": {
+      "description": "记忆插入方式",
+      "hint": "extra_user_parts 将临时记忆追加为当前用户消息的额外内容块，不写入会话历史，推荐使用；user_prompt 注入用户提示词；system_prompt 注入系统提示词；insert_system_prompt 新增独立系统消息，可能降低提示词缓存命中率。",
+      "labels": ["额外用户内容块（推荐）", "用户提示词", "系统提示词", "独立系统消息"],
+      "subtitles": ["作为临时 TextPart 追加到当前消息", "修改当前用户提示词", "修改 LLM 系统提示词", "新增一条独立系统消息"]
+    },
+    "memory_injection_interval": {
+      "description": "记忆插入间隔轮数",
+      "hint": "每隔 N 轮对话触发一次记忆检索与注入。1 表示每轮都注入。"
+    },
+    "memory_injection_position": {
+      "description": "记忆插入位置",
+      "hint": "控制 user_prompt、system_prompt 和 insert_system_prompt 的前后位置；extra_user_parts 始终追加在当前用户消息后。",
+      "labels": ["前置", "后置"]
+    },
+    "max_prompt_chars_for_embedding": {
+      "description": "向量化前最大输入字符数",
+      "hint": "超长输入会先截断再生成 Embedding，避免请求体过大或上下文超限。"
+    },
+    "enable_explicit_memory_capture": {
+      "description": "启用显式记住自动写入",
+      "hint": "用户消息以“记住”“请记住”或 remember 开头时，自动写入长期记忆。"
+    },
+    "enable_llm_memory_tool": {
+      "description": "启用模型工具写入记忆",
+      "hint": "允许支持工具调用的模型在用户明确要求或出现稳定偏好、个人事实、重要安排时写入当前会话记忆。"
+    },
+    "use_lightweight_memory_graph": {
+      "description": "启用轻量图谱重排",
+      "hint": "基于实体共现关系做 one-hop 关键词扩展，提升多跳相关记忆召回。"
+    },
+    "use_summary_time_anchor": {
+      "description": "总结时注入绝对时间锚点",
+      "hint": "减少模型在总结文本中臆造年份或日期。"
+    },
+    "include_tool_context_in_summary": {
+      "description": "记忆总结包含工具上下文",
+      "hint": "开启后，总结会纳入工具调用名称、参数和返回结果；关闭时只总结用户与助手的普通对话。"
+    },
+    "summary_speaker_mapping_prompt": {
+      "description": "记忆总结说话人映射提示词",
+      "hint": "约束 user、assistant 与第一人称的归属。支持 {persona_id}、{session_id}、{sender_id}、{sender_name} 变量；留空可禁用。"
+    },
+    "long_memory_prompt": {
+      "description": "对话总结提示词",
+      "hint": "定义长期记忆摘要的格式、重点信息和说话人约束。"
+    }
+  },
+  "views": {
+    "panel": {
+      "title": "长期记忆",
+      "description": "检索、编辑、导入导出并监控 Mnemosyne 长期记忆。"
+    }
+  },
+  "pages": {
+    "panel": {
+      "title": "长期记忆",
+      "description": "检索、编辑、导入导出并监控 Mnemosyne 长期记忆。"
+    }
+  }
+}
