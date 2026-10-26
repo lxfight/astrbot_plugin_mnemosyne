@@ -320,9 +320,9 @@
     "memory_injection_method":{
         "description":"记忆插入方式",
         "type":"string",
-        "hint":"user_prompt 注入到 LLM 用户提示词，位置由 memory_injection_position 控制；system_prompt 注入到 LLM 系统提示词；insert_system_prompt 会新增一条独立系统消息，可能降低部分模型的提示词缓存命中率；extra_user_parts 会将临时记忆作为额外用户内容块追加到当前消息",
+        "hint":"extra_user_parts 将临时记忆作为额外用户内容块追加到当前消息，不会写入会话历史，推荐使用；user_prompt 注入到 LLM 用户提示词；system_prompt 注入到 LLM 系统提示词；insert_system_prompt 会新增一条独立系统消息，可能降低部分模型的提示词缓存命中率",
         "options": ["user_prompt", "system_prompt", "insert_system_prompt", "extra_user_parts"],
-        "default": "user_prompt"
+        "default": "extra_user_parts"
     },
     "memory_injection_interval":{
         "description":"记忆插入间隔轮数",
@@ -336,7 +336,7 @@
     "memory_injection_position":{
         "description":"记忆插入位置",
         "type":"string",
-        "hint":"prepend 表示前置注入，append 表示后置注入",
+        "hint":"控制 user_prompt、system_prompt 和 insert_system_prompt 的前后位置；extra_user_parts 始终追加在当前用户消息后",
         "options":["prepend", "append"],
         "default":"prepend"
     },

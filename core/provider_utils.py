@@ -3,12 +3,10 @@
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from astrbot.core.log import LogManager
+from astrbot.api import logger
 
 if TYPE_CHECKING:
     from ..main import Mnemosyne
-
-logger = LogManager.GetLogger(__name__)
 
 DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 15
 DEFAULT_SUMMARY_TIMEOUT_SECONDS = 60
@@ -42,6 +40,22 @@ async def request_embeddings(
     timeout = plugin.config.get(
         "embedding_request_timeout_seconds", DEFAULT_EMBEDDING_TIMEOUT_SECONDS
     )
+    native_batch = getattr(provider, "get_embeddings_batch", None)
+    if callable(native_batch):
+        batch_count = (len(texts) + EMBEDDING_BATCH_SIZE - 1) // EMBEDDING_BATCH_SIZE
+        try:
+            embeddings = await asyncio.wait_for(
+                native_batch(texts, batch_size=EMBEDDING_BATCH_SIZE),
+                timeout=timeout * batch_count,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Embedding 批量请求超时（{timeout} 秒/批），已取消。")
+            raise
+
+        if len(embeddings) != len(texts) or any(not item for item in embeddings):
+            raise RuntimeError("Embedding Provider 返回的向量数量或内容无效")
+        return embeddings
+
     batch_embed = getattr(provider, "get_embeddings", None)
     if not callable(batch_embed):
         batch_embed = getattr(provider, "embed_texts", None)

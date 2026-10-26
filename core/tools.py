@@ -7,9 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from astrbot.api.event import AstrMessageEvent
-from astrbot.core.log import LogManager
-
-logger = LogManager.GetLogger(__name__)
+from astrbot.api import logger
 
 MNEMO_META_PREFIX = "<MNEMO_META>"
 MNEMO_META_SUFFIX = "</MNEMO_META>"

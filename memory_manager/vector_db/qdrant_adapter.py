@@ -10,11 +10,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from astrbot.core.log import LogManager
+from astrbot.api import logger
 
 from ..vector_db_base import VectorDatabase, VectorDeleteResult, VectorInsertResult
-
-logger = LogManager.GetLogger(log_name="Mnemosyne QdrantAdapter")
 
 QDRANT_PAYLOAD_INDEX_SCHEMAS = {
     "session_id": "keyword",

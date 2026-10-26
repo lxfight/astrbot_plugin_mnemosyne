@@ -1,7 +1,7 @@
-// Mnemosyne 管理面板 — AstrBot Plugin Pages
+// Mnemosyne 管理面板 — AstrBot Plugin Views
 // 通过 Bridge SDK 与仪表盘通信
 
-const bridge = window.AstrBotPluginPage;
+const bridge = window.AstrBotPluginView;
 
 function createIconElement(name, className = '') {
     const safeName = String(name).replace(/[^a-z0-9-]/gi, '');

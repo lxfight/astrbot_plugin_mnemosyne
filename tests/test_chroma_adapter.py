@@ -13,7 +13,15 @@ class TestChromaVectorDB:
     @pytest.fixture
     def mock_chromadb(self):
         """Mock chromadb 模块"""
-        with patch("memory_manager.vector_db.chroma_adapter.chromadb") as mock:
+        settings = MagicMock()
+        settings.anonymized_telemetry = False
+        with (
+            patch("memory_manager.vector_db.chroma_adapter.chromadb") as mock,
+            patch(
+                "memory_manager.vector_db.chroma_adapter._chroma_settings",
+                return_value=settings,
+            ),
+        ):
             yield mock
 
     @pytest.fixture

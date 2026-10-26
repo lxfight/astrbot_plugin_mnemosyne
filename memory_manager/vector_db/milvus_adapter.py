@@ -9,13 +9,11 @@ from typing import Any
 
 from pymilvus import Collection
 
-from astrbot.core.log import LogManager
+from astrbot.api import logger
 
 from ..vector_db_base import VectorDatabase, VectorDeleteResult, VectorInsertResult
 from .milvus_manager import MilvusManager
 from .schema_utils import collection_schema_to_dict, dict_to_collection_schema
-
-logger = LogManager.GetLogger(log_name="Mnemosyne MilvusAdapter")
 
 
 class MilvusVectorDB(VectorDatabase):

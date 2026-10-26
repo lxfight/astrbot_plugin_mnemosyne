@@ -20,8 +20,8 @@ except ImportError:
 
 
 from astrbot.api.event import AstrMessageEvent
+from astrbot.api import logger
 from astrbot.api.provider import LLMResponse, ProviderRequest
-from astrbot.core.log import LogManager
 
 from .chatroom_parser import ChatroomContextParser
 from .constants import (
@@ -59,8 +59,6 @@ from .tools import (
 # 类型提示，避免循环导入
 if TYPE_CHECKING:
     from ..main import Mnemosyne
-
-logger = LogManager.GetLogger(__name__)
 
 USER_RECORDED_EXTRA_KEY = "_mnemosyne_user_recorded"
 ASSISTANT_RECORDED_EXTRA_KEY = "_mnemosyne_assistant_recorded"
@@ -1776,7 +1774,9 @@ def _format_and_inject_memory(
     logger.debug(f"补充了 {len(detailed_results)} 条长期记忆到提示中。")
     logger.debug(f"补充内容:\n{long_memory}")
 
-    injection_method = plugin.config.get("memory_injection_method", "user_prompt")
+    injection_method = plugin.config.get(
+        "memory_injection_method", "extra_user_parts"
+    )
     injection_position = plugin.config.get("memory_injection_position", "prepend")
     if injection_position not in {"prepend", "append"}:
         injection_position = "prepend"
@@ -1873,7 +1873,9 @@ def clean_contexts(plugin: "Mnemosyne", req: ProviderRequest):
     """
     删除长期记忆中的标签
     """
-    injection_method = plugin.config.get("memory_injection_method", "user_prompt")
+    injection_method = plugin.config.get(
+        "memory_injection_method", "extra_user_parts"
+    )
     contexts_memory_len = plugin.config.get("contexts_memory_len", 0)
     if injection_method == "user_prompt":
         req.contexts = remove_mnemosyne_tags(req.contexts, contexts_memory_len)
@@ -1968,13 +1970,10 @@ def _build_summary_speaker_mapping_prompt(
     return rendered.strip()
 
 
-def _get_current_summary_provider(plugin: "Mnemosyne", session_id: str):
+async def _get_current_summary_provider(plugin: "Mnemosyne", session_id: str):
     if plugin.provider:
         return plugin.provider
-    try:
-        return plugin.context.get_using_provider(umo=session_id)
-    except TypeError:
-        return plugin.context.get_using_provider()
+    return await plugin.context.get_using_provider_async(umo=session_id)
 
 
 async def _get_summary_llm_response(
@@ -1998,7 +1997,7 @@ async def _get_summary_llm_response(
     # logger = plugin.logger
     providers: list[tuple[str, Any]] = []
     try:
-        primary_provider = _get_current_summary_provider(plugin, session_id)
+        primary_provider = await _get_current_summary_provider(plugin, session_id)
         if primary_provider:
             providers.append(("主", primary_provider))
     except Exception as e:

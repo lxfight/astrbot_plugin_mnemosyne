@@ -4,14 +4,12 @@ import asyncio
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
-from astrbot.core.log import LogManager
+from astrbot.api import logger
 
 from .security_utils import safe_build_milvus_expression
 
 if TYPE_CHECKING:
     from ..main import Mnemosyne
-
-logger = LogManager.GetLogger(__name__)
 
 MIGRATION_CHECKED_LIMIT = 4096
 MIGRATION_QUERY_LIMIT = 16384
