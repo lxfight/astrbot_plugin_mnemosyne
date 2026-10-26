@@ -4,8 +4,8 @@ This guide is for first-time Mnemosyne installations. The default backend is now
 
 ## Prerequisites
 
-- AstrBot v4.0.0 or later
-- Python 3.8 or later
+- AstrBot v4.29.0 through v4.x
+- Python 3.12 or later
 - At least one LLM Provider configured in AstrBot
 - At least one Embedding Provider configured in AstrBot
 
@@ -29,7 +29,7 @@ Open the plugin settings in AstrBot WebUI:
 3. Keep **Vector database type** as `chroma`.
 4. Select the LLM Provider used for memory summaries.
 5. Select the Embedding Provider used for vectorization.
-6. Adjust summary rounds, result count, and score threshold as needed.
+6. Adjust summary rounds, result count, and memory injection mode as needed.
 
 You can leave Chroma `persist_directory` empty. Mnemosyne will create a default persistent directory under the plugin data path.
 
@@ -58,6 +58,14 @@ You can also write a memory manually:
 ```
 
 Then ask a related question and check whether the bot retrieves and injects the memory.
+
+## Conversation Reset and Long-Term Memory
+
+AstrBot `/new` and `/reset` only switch or clear the short-term conversation history. They do not delete long-term memories stored by Mnemosyne. To clear long-term memory for the current session, run:
+
+```text
+/memory reset confirm
+```
 
 ## Admin Panel
 

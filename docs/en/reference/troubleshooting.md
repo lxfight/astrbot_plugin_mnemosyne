@@ -20,7 +20,7 @@ Temporarily lower `num_pairs` and inspect AstrBot logs for Mnemosyne messages.
 Check these settings:
 
 - `top_k` may be too low.
-- `score_threshold` may be too high.
+- `use_lightweight_memory_graph` may not suit the entity distribution in the current data.
 - `use_session_filtering` may limit retrieval to the current session.
 - `use_personality_filtering` may exclude memories from a different persona.
 - The Embedding model may have changed without reinitializing the collection.

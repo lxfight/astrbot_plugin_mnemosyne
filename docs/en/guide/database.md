@@ -49,6 +49,8 @@ Milvus Lite example:
 }
 ```
 
+Milvus Lite is not supported on Windows. Windows users who need Milvus should deploy Milvus Standalone and connect through `address`.
+
 Standard Milvus example:
 
 ```json

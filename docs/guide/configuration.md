@@ -40,9 +40,9 @@ Embedding Provider 的向量维度决定集合结构。更换 Embedding 模型�
 | `context_cache_max_messages` | 单个会话最多保留的消息条数，超出后保留最新消息。 | `200` |
 | `top_k` | 检索时返回的记忆数量。 | `3` |
 | `contexts_memory_len` | 历史上下文保留的长期记忆标签数量；小于 0 表示全部保留，0 表示清理全部。 | `0` |
-| `memory_injection_method` | `user_prompt` 注入用户提示；`system_prompt` 注入 LLM 系统提示；`insert_system_prompt` 新增独立系统消息。 | `user_prompt` |
+| `memory_injection_method` | `extra_user_parts` 将临时记忆追加为当前用户消息的额外内容块；`user_prompt` 注入用户提示；`system_prompt` 注入 LLM 系统提示；`insert_system_prompt` 新增独立系统消息。 | `extra_user_parts` |
 | `memory_injection_interval` | 每隔 N 轮对话触发一次记忆检索与注入。 | `1` |
-| `memory_injection_position` | 注入位置，可选前置或后置。 | `prepend` |
+| `memory_injection_position` | `user_prompt`、`system_prompt` 和 `insert_system_prompt` 的前置或后置位置。 | `prepend` |
 | `max_prompt_chars_for_embedding` | 向量化前允许的最大输入字符数，超出部分会截断。 | `4000` |
 | `summary_max_concurrency` | 同时运行的记忆总结任务上限。 | `2` |
 | `summary_fallback_provider_id` | 主总结模型失败或返回空内容时重试的备用模型。 | 空 |
@@ -51,7 +51,9 @@ Embedding Provider 的向量维度决定集合结构。更换 Embedding 模型�
 
 如果记忆过多干扰回复，可以降低 `top_k`、提高 `memory_injection_interval`，或关闭轻量图谱重排。
 
-`memory_injection_position` 同时控制 `user_prompt` 和 `system_prompt` 的前后位置。`insert_system_prompt` 会创建独立系统消息；部分模型会因此重新计算提示词缓存，缓存成本敏感时优先使用前两种方式。
+默认的 `extra_user_parts` 将记忆作为带临时标记的 `TextPart` 追加到当前用户消息，不写入会话历史，也不会触发历史清理。`memory_injection_position` 不影响该模式：它始终追加在当前用户消息后。
+
+`memory_injection_position` 只控制 `user_prompt`、`system_prompt` 和 `insert_system_prompt` 的前后位置。`insert_system_prompt` 会创建独立系统消息；部分模型会因此重新计算提示词缓存，缓存成本敏感时优先使用 `extra_user_parts`。
 
 ## 过滤能力
 

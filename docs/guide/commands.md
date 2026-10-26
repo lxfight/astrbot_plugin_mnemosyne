@@ -50,6 +50,8 @@ Mnemosyne 提供 `/memory` 命令用于初始化、查询、写入和清理长�
 
 ## 删除数据
 
+AstrBot 的 `/new` 和 `/reset` 只处理短期会话：`/new` 切换会话，`/reset` 清空当前会话历史，二者都不会删除 Mnemosyne 长期记忆。长期记忆只能通过 `/memory reset confirm` 或管理视图中的删除操作清理。
+
 删除命令通常需要确认参数。执行前先使用 `list_records` 或管理面板确认记录 ID。
 
 ```text
